@@ -344,3 +344,63 @@ s3 =
         mismatch
     );
 }
+
+#[test]
+fn disable_multiregion_access_points() {
+    let env = Env::new();
+    let presign = |config: &str, envs: &[(&str, &str)]| {
+        let config = env.config(config);
+        let mut command = env.command(&[
+            "presign",
+            "s3://arn:aws:s3::123456789012:accesspoint/mfzwi23gnjvgw.mrap/key",
+        ]);
+        command
+            .env("AWS_CONFIG_FILE", &config)
+            .env_remove("AWS_ENDPOINT_URL")
+            .envs(envs.iter().copied());
+        let output = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        (output.status.code().unwrap(), stdout, stderr)
+    };
+    // The multi-region access points are signed with SigV4a.
+    let (code, url, _) = presign("[default]\n", &[]);
+    assert_eq!(code, 0);
+    assert!(
+        url.starts_with("https://mfzwi23gnjvgw.mrap.accesspoint.s3-global.amazonaws.com/key?"),
+        "{url}"
+    );
+    assert!(
+        url.contains("X-Amz-Algorithm=AWS4-ECDSA-P256-SHA256"),
+        "{url}"
+    );
+
+    let disabled = r"[default]
+s3 =
+  s3_disable_multiregion_access_points = true
+";
+    let error = "aws3: [ERROR]: Unsupported configuration when using S3 access-points: \
+                 Invalid configuration: Multi-Region Access Point ARNs are disabled.";
+    assert_eq!(
+        presign(disabled, &[]),
+        (255, String::new(), error.to_owned())
+    );
+    let envs = [("AWS_S3_DISABLE_MULTIREGION_ACCESS_POINTS", "TRUE")];
+    assert_eq!(
+        presign("[default]\n", &envs),
+        (255, String::new(), error.to_owned())
+    );
+    // The environment variable overrides the config file.
+    let envs = [("AWS_S3_DISABLE_MULTIREGION_ACCESS_POINTS", "false")];
+    assert_eq!(presign(disabled, &envs).0, 0);
+
+    let dualstack = r"[default]
+s3 =
+  use_dualstack_endpoint = true
+";
+    assert_eq!(
+        presign(dualstack, &[]).2,
+        "aws3: [ERROR]: Unsupported configuration when using S3 access-points: \
+         S3 MRAP does not support dual-stack"
+    );
+}

@@ -94,7 +94,8 @@ fn s3_endpoint_url(sdk: &SdkConfig) -> Option<String> {
 pub fn new_client(config: &Config, region: Option<&str>) -> Client {
     let mut builder = aws_sdk_s3::config::Builder::from(&config.sdk)
         .force_path_style(force_path_style(config))
-        .accelerate(config.s3.use_accelerate_endpoint);
+        .accelerate(config.s3.use_accelerate_endpoint)
+        .disable_multi_region_access_points(config.s3.disable_multiregion_access_points);
     builder.set_use_arn_region(config.s3.use_arn_region);
     // Custom endpoints disable the dual-stack and FIPS endpoints like the AWS
     // CLI. The settings of the profile and the environment variables are

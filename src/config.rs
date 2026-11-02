@@ -34,6 +34,9 @@ impl ProfileConfig {
         if let Ok(value) = std::env::var("AWS_S3_USE_ARN_REGION") {
             config.s3.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
         }
+        if let Ok(value) = std::env::var("AWS_S3_DISABLE_MULTIREGION_ACCESS_POINTS") {
+            config.s3.disable_multiregion_access_points = value.eq_ignore_ascii_case("true");
+        }
         config
     }
 
@@ -80,6 +83,8 @@ pub struct S3Config {
     /// Whether the region in the ARN of an access point is used instead of
     /// the region of the client, which defaults to true.
     pub use_arn_region: Option<bool>,
+    /// Whether the ARNs of multi-region access points are rejected.
+    pub disable_multiregion_access_points: bool,
 }
 
 /// The style of the URLs of buckets.
@@ -105,6 +110,7 @@ impl Default for S3Config {
             use_accelerate_endpoint: false,
             use_dualstack_endpoint: false,
             use_arn_region: None,
+            disable_multiregion_access_points: false,
         }
     }
 }
@@ -150,6 +156,9 @@ impl S3Config {
                 }
                 "use_arn_region" => {
                     config.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
+                }
+                "s3_disable_multiregion_access_points" => {
+                    config.disable_multiregion_access_points = value.eq_ignore_ascii_case("true");
                 }
                 _ => {}
             }
