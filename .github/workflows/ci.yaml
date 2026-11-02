@@ -117,10 +117,21 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
       - name: Download artifacts
         uses: actions/download-artifact@v8
-      - name: Create release
-        uses: ncipollo/release-action@v1
         with:
-          name: Release ${{ github.ref_name }}
-          artifacts: '*/*.zip'
+          path: artifacts
+          merge-multiple: true
+      - name: Create checksums
+        run: |
+          cd artifacts
+          sha256sum -- *.zip > "${GITHUB_REPOSITORY#*/}-$GITHUB_REF_NAME-checksums.txt"
+      - name: Create release
+        run: |
+          sed -n '/\['"${GITHUB_REF_NAME//./[.]}"']/,/^$/{//!p;}' CHANGELOG.md |
+            gh release create "$GITHUB_REF_NAME" --verify-tag \
+              --title "Release $GITHUB_REF_NAME" --notes-file - artifacts/*
+        env:
+          GH_TOKEN: ${{ github.token }}
