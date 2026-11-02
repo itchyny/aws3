@@ -95,6 +95,14 @@ pub fn new_client(config: &Config, region: Option<&str>) -> Client {
     let mut builder = aws_sdk_s3::config::Builder::from(&config.sdk)
         .force_path_style(force_path_style(config))
         .accelerate(config.s3.use_accelerate_endpoint);
+    // Custom endpoints disable the dual-stack and FIPS endpoints like the AWS
+    // CLI. The settings of the profile and the environment variables are
+    // loaded by the SDK, which are overridden if enabled in the `s3` section.
+    if config.endpoint_url.is_some() {
+        builder = builder.use_dual_stack(false).use_fips(false);
+    } else if config.s3.use_dualstack_endpoint {
+        builder = builder.use_dual_stack(true);
+    }
     if let Some(region) = region {
         builder = builder.region(Region::new(region.to_owned()));
     } else if config.sdk.region().is_none() {

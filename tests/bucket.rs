@@ -218,3 +218,65 @@ s3 =
             .contains("aws3: [ERROR]: Path-style addressing cannot be used with S3 Accelerate")
     );
 }
+
+#[test]
+fn use_dualstack_endpoint() {
+    let env = Env::new();
+    let presign = |config: &str, envs: &[(&str, &str)]| {
+        let config = env.config(config);
+        let mut command = env.command(&["presign", "s3://bucket/key"]);
+        command
+            .env("AWS_CONFIG_FILE", &config)
+            .env("AWS_REGION", "us-west-2")
+            .env_remove("AWS_ENDPOINT_URL")
+            .envs(envs.iter().copied());
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let url = String::from_utf8_lossy(&output.stdout).into_owned();
+        url.split('?').next().unwrap().to_owned()
+    };
+    let dualstack = "https://bucket.s3.dualstack.us-west-2.amazonaws.com/key";
+    let nested = |value: &str| {
+        format!(
+            r"[default]
+s3 =
+  use_dualstack_endpoint = {value}
+"
+        )
+    };
+    assert_eq!(presign(&nested("true"), &[]), dualstack);
+    assert_eq!(presign(&nested("TRUE"), &[]), dualstack);
+    assert_eq!(
+        presign(&nested("false"), &[]),
+        "https://bucket.s3.us-west-2.amazonaws.com/key"
+    );
+    // The nested setting does not disable the top-level setting.
+    let config = r"[default]
+use_dualstack_endpoint = true
+s3 =
+  use_dualstack_endpoint = false
+";
+    assert_eq!(presign(config, &[]), dualstack);
+    assert_eq!(
+        presign("[default]\n", &[("AWS_USE_DUALSTACK_ENDPOINT", "true")]),
+        dualstack
+    );
+
+    // Custom endpoints disable the dual-stack and FIPS endpoints.
+    let endpoint = [("AWS_ENDPOINT_URL", "http://localhost:9000")];
+    assert_eq!(
+        presign(&nested("true"), &endpoint),
+        "http://localhost:9000/bucket/key"
+    );
+    let config = r"[default]
+use_fips_endpoint = true
+";
+    assert_eq!(
+        presign(config, &endpoint),
+        "http://localhost:9000/bucket/key"
+    );
+}

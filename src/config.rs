@@ -9,6 +9,7 @@
 //!   multipart_threshold = 64MB
 //!   addressing_style = path
 //!   use_accelerate_endpoint = true
+//!   use_dualstack_endpoint = true
 //! ```
 
 use std::path::PathBuf;
@@ -58,6 +59,9 @@ pub struct S3Config {
     pub max_queue_size: usize,
     pub addressing_style: AddressingStyle,
     pub use_accelerate_endpoint: bool,
+    /// Whether the dual-stack endpoints are used, which falls back to the
+    /// setting of the profile and the environment variable unless enabled.
+    pub use_dualstack_endpoint: bool,
 }
 
 /// The style of the URLs of buckets.
@@ -81,6 +85,7 @@ impl Default for S3Config {
             max_queue_size: 1000,
             addressing_style: AddressingStyle::Auto,
             use_accelerate_endpoint: false,
+            use_dualstack_endpoint: false,
         }
     }
 }
@@ -120,6 +125,9 @@ impl S3Config {
                 },
                 "use_accelerate_endpoint" => {
                     config.use_accelerate_endpoint = value.eq_ignore_ascii_case("true");
+                }
+                "use_dualstack_endpoint" => {
+                    config.use_dualstack_endpoint = value.eq_ignore_ascii_case("true");
                 }
                 _ => {}
             }
