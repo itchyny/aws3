@@ -158,6 +158,8 @@ mod tests {
         assert!(!fnmatch("ABC", "abc"));
     }
 
+    // The roots of the local paths assume Unix.
+    #[cfg(unix)]
     #[test]
     fn filters_later_wins() {
         let filters = Filters::new(
