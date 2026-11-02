@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{Env, content};
+use common::{Env, content, wait_child, wait_until};
 
 #[test]
 fn cp_upload() {
@@ -630,4 +630,44 @@ fn cp_invalid_paths_type() {
             .stderr
             .contains("If --sse-c-key is specified, --sse-c must be specified as well.")
     );
+}
+
+#[test]
+fn cp_ctrl_c() {
+    use std::io::Write;
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let mut child = env
+        .command(&["cp", "-", "s3://bucket/stdin.bin"])
+        .envs(envs.iter().copied())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The multipart upload is in progress while the standard input is open,
+    // and Ctrl-C is handled since it is created.
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(&content(6 * 1024 * 1024)).unwrap();
+    wait_until("the multipart upload", || env.multipart_uploads() == 1);
+    let status = std::process::Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let output = wait_child(child);
+    drop(stdin);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).trim_end(),
+        "cancelled: ctrl-c received"
+    );
+    assert_eq!(env.object_content("bucket", "stdin.bin"), None);
+    // The cancelled multipart upload is aborted.
+    assert_eq!(env.multipart_uploads(), 0);
 }

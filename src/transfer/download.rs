@@ -27,14 +27,12 @@ pub async fn download_file(
             .map_err(|err| err.to_string())?;
     }
     let temp_path = format!("{path}.{}", random_extension());
-    let result = if size < ctx.config.multipart_threshold {
-        download_whole(ctx, id, bucket, key, &temp_path).await
+    // The temporary file is removed on failures and cancellation.
+    let temp_file = TempFile(Some(temp_path.clone()));
+    if size < ctx.config.multipart_threshold {
+        download_whole(ctx, id, bucket, key, &temp_path).await?;
     } else {
-        download_ranges(ctx, id, bucket, key, &temp_path, size).await
-    };
-    if let Err(err) = result {
-        let _ = tokio::fs::remove_file(&temp_path).await;
-        return Err(err);
+        download_ranges(ctx, id, bucket, key, &temp_path, size).await?;
     }
     if let Some(time) = last_modified
         && let Err(err) = set_file_times(&temp_path, time)
@@ -46,7 +44,25 @@ pub async fn download_file(
     tokio::fs::rename(&temp_path, path)
         .await
         .map_err(|err| err.to_string())?;
+    temp_file.keep();
     Ok(Outcome::Done)
+}
+
+/// Removes the temporary file when dropped, unless it is kept.
+struct TempFile(Option<String>);
+
+impl TempFile {
+    fn keep(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// Downloads the object to the standard output.

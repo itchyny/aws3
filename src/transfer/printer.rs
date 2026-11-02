@@ -151,6 +151,14 @@ impl Printer {
         }
     }
 
+    /// Records the command is cancelled by Ctrl-C.
+    pub fn ctrl_c(&mut self) {
+        self.errors += 1;
+        if self.mode != PrintMode::Quiet {
+            self.print_err(&self.pad("cancelled: ctrl-c received", '\n'));
+        }
+    }
+
     /// Records the number of transfers is final.
     pub fn final_total(&mut self, total: u64) {
         self.final_expected_files_transferred = Some(total);

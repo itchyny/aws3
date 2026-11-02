@@ -145,6 +145,16 @@ impl Env {
         &self.endpoint
     }
 
+    /// Returns the number of the ongoing multipart uploads in the storage of
+    /// the server, which stores the information in the root directory.
+    pub fn multipart_uploads(&self) -> usize {
+        std::fs::read_dir(self.storage.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+            .filter(|name| name.starts_with(".upload-") && name.ends_with(".json"))
+            .count()
+    }
+
     /// Returns the content of the object in the storage of the server.
     pub fn object_content(&self, bucket: &str, key: &str) -> Option<Vec<u8>> {
         std::fs::read(self.storage.path().join(bucket).join(key)).ok()
@@ -289,6 +299,35 @@ impl Result {
         );
         self
     }
+}
+
+/// Waits until the condition holds, which panics after a long time to avoid
+/// hanging the tests.
+#[track_caller]
+pub fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !condition() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// Waits for the exit of the child, which is killed after a long time to avoid
+/// hanging the tests.
+#[track_caller]
+pub fn wait_child(mut child: std::process::Child) -> Output {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("timed out waiting for the exit of aws3");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    child.wait_with_output().unwrap()
 }
 
 /// Returns the content of the size, which is not repetitive in short ranges.

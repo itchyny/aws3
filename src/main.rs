@@ -16,9 +16,20 @@ use std::process::ExitCode;
 
 use cli::{Cli, Command};
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     let cli = Cli::parse_args();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build the runtime");
+    let code = runtime.block_on(run(&cli));
+    // The blocking reads of the standard input are not waited for, which
+    // remain when the transfers are cancelled by Ctrl-C.
+    runtime.shutdown_background();
+    code
+}
+
+async fn run(cli: &Cli) -> ExitCode {
     let result = match &cli.command {
         Command::Ls(args) => ls::run(args, &cli.global).await,
         Command::Cp(args) => transfer::cp(args, &cli.global).await,

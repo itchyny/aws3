@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
@@ -45,6 +46,7 @@ pub async fn upload_file(
     }
     let chunk_size = adjust_chunk_size(ctx.config.multipart_chunksize, Some(size));
     let upload = MultipartUpload::create(ctx, bucket, key, content_type).await?;
+    let _guard = upload.abort_guard(ctx);
     let mut parts = JoinSet::new();
     let mut offset = 0;
     let mut number = 1;
@@ -88,6 +90,7 @@ pub async fn upload_stdin(
     }
     let chunk_size = adjust_chunk_size(ctx.config.multipart_chunksize, ctx.options.expected_size);
     let upload = MultipartUpload::create(ctx, bucket, key, None).await?;
+    let _guard = upload.abort_guard(ctx);
     let mut completed = Vec::new();
     let mut parts = JoinSet::new();
     let mut number = 1;
@@ -226,6 +229,25 @@ pub struct MultipartUpload {
     pub key: String,
     pub upload_id: String,
     pub checksum_algorithm: Option<ChecksumAlgorithm>,
+    /// Whether the upload is completed or aborted.
+    pub done: Arc<AtomicBool>,
+}
+
+/// Aborts the multipart upload when dropped before it is done, e.g. when the
+/// transfer is cancelled by Ctrl-C.
+pub struct AbortGuard {
+    ctx: Arc<Context>,
+    upload: MultipartUpload,
+}
+
+impl Drop for AbortGuard {
+    fn drop(&mut self) {
+        if !self.upload.done.load(Ordering::Relaxed) {
+            let (ctx, upload) = (self.ctx.clone(), self.upload.clone());
+            self.ctx
+                .spawn_cleanup(async move { upload.abort(&ctx).await });
+        }
+    }
 }
 
 pub type PartResult = Result<CompletedPart, String>;
@@ -265,6 +287,7 @@ impl MultipartUpload {
             key: key.to_owned(),
             upload_id: output.upload_id().unwrap_or_default().to_owned(),
             checksum_algorithm: Some(checksum_algorithm),
+            done: Arc::default(),
         })
     }
 
@@ -344,7 +367,10 @@ impl MultipartUpload {
             .await
             .map_err(|err| err.to_string())?;
         match request.send().await {
-            Ok(_) => Ok(Outcome::Done),
+            Ok(_) => {
+                self.done.store(true, Ordering::Relaxed);
+                Ok(Outcome::Done)
+            }
             Err(err) => {
                 drop(_permit);
                 self.abort(ctx).await;
@@ -357,7 +383,18 @@ impl MultipartUpload {
         }
     }
 
+    /// Returns the guard which aborts the upload when dropped before done.
+    pub fn abort_guard(&self, ctx: &Arc<Context>) -> AbortGuard {
+        AbortGuard {
+            ctx: ctx.clone(),
+            upload: self.clone(),
+        }
+    }
+
     async fn abort(&self, ctx: &Context) {
+        if self.done.swap(true, Ordering::Relaxed) {
+            return;
+        }
         let _ = ctx
             .client
             .abort_multipart_upload()

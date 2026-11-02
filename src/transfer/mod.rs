@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use aws_sdk_s3::Client;
-use tokio::sync::{Semaphore, mpsc};
-use tokio::task::JoinSet;
+use tokio::sync::{Semaphore, mpsc, watch};
+use tokio::task::{JoinHandle, JoinSet};
 
 use crate::cli::{
     CaseConflict, CopyProps, CpArgs, Filter, GlobalArgs, MvArgs, RmArgs, SyncArgs, TransferArgs,
@@ -428,9 +428,44 @@ pub struct Context {
     requests: Semaphore,
     printer: Mutex<Printer>,
     next_id: AtomicU64,
+    /// Whether the command is cancelled by Ctrl-C.
+    cancel: watch::Sender<bool>,
+    /// The tasks to clean up the cancelled transfers, e.g. to abort the
+    /// multipart uploads.
+    cleanup: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Context {
+    fn is_cancelled(&self) -> bool {
+        *self.cancel.borrow()
+    }
+
+    /// Waits until the command is cancelled.
+    async fn cancelled(&self) {
+        let _ = self
+            .cancel
+            .subscribe()
+            .wait_for(|&cancelled| cancelled)
+            .await;
+    }
+
+    /// Cancels the command, which stops submitting and aborts the transfers.
+    fn cancel(&self) {
+        if !self.cancel.send_replace(true) {
+            self.printer().ctrl_c();
+        }
+    }
+
+    /// Spawns the task to clean up a cancelled transfer, which the command
+    /// waits for before exiting.
+    fn spawn_cleanup(&self, future: impl Future<Output = ()> + Send + 'static) {
+        let handle = tokio::spawn(future);
+        self.cleanup
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .push(handle);
+    }
+
     fn printer(&self) -> std::sync::MutexGuard<'_, Printer> {
         self.printer.lock().unwrap_or_else(|err| err.into_inner())
     }
@@ -495,6 +530,20 @@ async fn run(
         plan,
         printer: Mutex::new(printer),
         next_id: AtomicU64::new(0),
+        cancel: watch::Sender::new(false),
+        cleanup: Mutex::new(Vec::new()),
+    });
+    // The first Ctrl-C cancels the transfers, and the second one exits.
+    let listener = tokio::spawn({
+        let ctx = ctx.clone();
+        async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                ctx.cancel();
+            }
+            if tokio::signal::ctrl_c().await.is_ok() {
+                std::process::exit(130);
+            }
+        }
     });
     let mut submitter = Submitter::new(ctx.clone());
     if ctx.plan.is_stream {
@@ -505,6 +554,11 @@ async fn run(
         run_files(&ctx, &mut submitter).await;
     }
     submitter.finish().await;
+    let cleanup = std::mem::take(&mut *ctx.cleanup.lock().unwrap_or_else(|err| err.into_inner()));
+    for handle in cleanup {
+        let _ = handle.await;
+    }
+    listener.abort();
     Ok(ctx.printer().exit_code())
 }
 
@@ -522,7 +576,14 @@ async fn run_files(ctx: &Arc<Context>, submitter: &mut Submitter) {
         PathsType::S3 => Operation::Delete,
     };
     let mut rx = spawn_generator(ctx, &src, operation == Operation::Delete);
-    while let Some(item) = rx.recv().await {
+    loop {
+        let item = tokio::select! {
+            item = rx.recv() => item,
+            () = ctx.cancelled() => return submitter.abort(),
+        };
+        let Some(item) = item else {
+            break;
+        };
         match item {
             Item::File(stat) => {
                 if !filters.is_included(&stat.path, !src.is_s3) {
@@ -668,7 +729,7 @@ impl Submitter {
 
     async fn submit(&mut self, task: Task) {
         let ctx = &self.ctx;
-        if self.warn_and_skip(&task) {
+        if ctx.is_cancelled() || self.warn_and_skip(&task) {
             return;
         }
         let transfer_type = if ctx.is_move() {
@@ -682,7 +743,10 @@ impl Submitter {
             return;
         }
         while self.tasks.len() >= ctx.config.max_queue_size {
-            self.tasks.join_next().await;
+            tokio::select! {
+                _ = self.tasks.join_next() => {}
+                () = ctx.cancelled() => return,
+            }
         }
         let id = ctx.next_id.fetch_add(1, Ordering::Relaxed);
         // Deletions transfer no bytes.
@@ -777,9 +841,21 @@ impl Submitter {
 
     /// Waits for the submitted transfers.
     async fn finish(mut self) {
-        if !self.fatal {
+        if !self.fatal && !self.ctx.is_cancelled() {
             self.ctx.printer().final_total(self.submitted);
         }
+        loop {
+            tokio::select! {
+                result = self.tasks.join_next() => {
+                    if result.is_none() {
+                        return;
+                    }
+                }
+                () = self.ctx.cancelled() => break,
+            }
+        }
+        // The cancelled transfers are dropped, which spawns the cleanups.
+        self.tasks.abort_all();
         while self.tasks.join_next().await.is_some() {}
     }
 }

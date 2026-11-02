@@ -159,7 +159,14 @@ impl<'a> Stream<'a> {
 
     /// Returns the next file, or an error on a fatal error.
     async fn next(&mut self, ctx: &Context) -> Result<Option<FileStat>, ()> {
-        while let Some(item) = self.rx.recv().await {
+        loop {
+            let item = tokio::select! {
+                item = self.rx.recv() => item,
+                () = ctx.cancelled() => return Err(()),
+            };
+            let Some(item) = item else {
+                break;
+            };
             match item {
                 Item::File(stat) if self.filters.is_included(&stat.path, self.is_local) => {
                     return Ok(Some(stat));

@@ -218,7 +218,9 @@ async fn copy_multipart(
         key: key.to_owned(),
         upload_id: output.upload_id().unwrap_or_default().to_owned(),
         checksum_algorithm: params.checksum_algorithm.clone(),
+        done: Arc::default(),
     };
+    let _guard = upload.abort_guard(ctx);
     let chunk_size = adjust_chunk_size(ctx.config.multipart_chunksize, Some(size));
     let source = copy_source(src_bucket, src_key);
     let mut parts = JoinSet::new();
