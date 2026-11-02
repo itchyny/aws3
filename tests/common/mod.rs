@@ -108,6 +108,7 @@ impl Env {
                 ACCESS_KEY, SECRET_KEY, None, None, "test",
             ))
             .force_path_style(true)
+            .http_client(aws_smithy_http_client::Builder::new().build_http())
             .build();
         let client = aws_sdk_s3::Client::from_conf(config);
         self._runtime
