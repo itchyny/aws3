@@ -9,6 +9,31 @@ A fast command compatible with `aws s3`, written in Rust.
 The goal is a drop-in replacement for `aws s3`: replace `aws s3` with `aws3`
 and your scripts keep working, with faster startup and a single binary.
 
+## Usage
+
+All the subcommands of `aws s3` are supported: `ls`, `cp`, `mv`, `rm`,
+`sync`, `mb`, `rb`, `presign` and `website`, with the same options, outputs
+and exit codes.
+
+```sh
+aws3 ls s3://bucket/prefix/
+aws3 cp ./dir s3://bucket/prefix/ --recursive --exclude '*.tmp'
+aws3 sync s3://bucket/prefix/ ./dir --delete
+```
+
+The credentials, the region and the transfer settings in the `s3` section are
+loaded from the same environment variables and configuration files as the AWS
+CLI.
+
+### Differences from the AWS CLI
+
+- The error messages are prefixed with `aws3:` instead of `aws:`.
+- The root certificates of Mozilla are used for TLS, unless a CA bundle is
+  specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
+- `--no-verify-ssl`, `--debug`, `--query`, `--output` and `--color` are
+  accepted but ignored.
+- `presign` rejects `--expires-in` longer than one week.
+
 ## Installation
 
 ### Prebuilt binaries
