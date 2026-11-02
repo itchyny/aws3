@@ -280,3 +280,349 @@ fn cp_no_overwrite_download() {
     assert_eq!(result.stdout, "");
     assert_eq!(env.read("a.txt"), b"local");
 }
+
+#[test]
+fn cp_content_type_and_metadata() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.json", "{}");
+    env.write("a.unknownext", "x");
+    env.run(&["cp", "a.json", "s3://bucket/a.json", "--no-progress"])
+        .success();
+    assert_eq!(
+        env.head("bucket", "a.json").content_type(),
+        Some("application/json")
+    );
+
+    env.run(&[
+        "cp",
+        "a.json",
+        "s3://bucket/b.json",
+        "--no-guess-mime-type",
+        "--no-progress",
+    ])
+    .success();
+    // No content type is sent, which S3 defaults to binary/octet-stream.
+    assert_eq!(env.head("bucket", "b.json").content_type(), None);
+
+    env.run(&[
+        "cp",
+        "a.unknownext",
+        "s3://bucket/m.txt",
+        "--no-progress",
+        "--content-type",
+        "text/x-custom",
+        "--metadata",
+        "k1=v1,k2='a,b'",
+    ])
+    .success();
+    let head = env.head("bucket", "m.txt");
+    assert_eq!(head.content_type(), Some("text/x-custom"));
+    let metadata = head.metadata().unwrap();
+    assert_eq!(metadata["k1"], "v1");
+    assert_eq!(metadata["k2"], "a,b");
+
+    env.run(&[
+        "cp",
+        "a.json",
+        "s3://bucket/j.txt",
+        "--metadata",
+        r#"{"json":"yes"}"#,
+        "--no-progress",
+    ])
+    .success();
+    assert_eq!(
+        env.head("bucket", "j.txt").metadata().unwrap()["json"],
+        "yes"
+    );
+}
+
+#[test]
+fn cp_copy_props() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "hello");
+    env.run(&[
+        "cp",
+        "a.txt",
+        "s3://bucket/src.txt",
+        "--no-progress",
+        "--content-type",
+        "text/x-src",
+        "--metadata",
+        "k=v",
+    ])
+    .success();
+
+    // The metadata is copied by the default.
+    env.run(&[
+        "cp",
+        "s3://bucket/src.txt",
+        "s3://bucket/default.txt",
+        "--no-progress",
+    ])
+    .success();
+    let head = env.head("bucket", "default.txt");
+    assert_eq!(head.content_type(), Some("text/x-src"));
+    assert_eq!(head.metadata().unwrap()["k"], "v");
+
+    // The metadata replaces the source, keeping the other properties.
+    env.run(&[
+        "cp",
+        "s3://bucket/src.txt",
+        "s3://bucket/replaced.txt",
+        "--no-progress",
+        "--metadata",
+        "x=y",
+    ])
+    .success();
+    let head = env.head("bucket", "replaced.txt");
+    assert_eq!(head.content_type(), Some("text/x-src"));
+    assert_eq!(head.metadata().unwrap().get("k"), None);
+    assert_eq!(head.metadata().unwrap()["x"], "y");
+
+    // Nothing is copied with --copy-props none.
+    env.run(&[
+        "cp",
+        "s3://bucket/src.txt",
+        "s3://bucket/none.txt",
+        "--no-progress",
+        "--copy-props",
+        "none",
+    ])
+    .success();
+    let head = env.head("bucket", "none.txt");
+    assert_ne!(head.content_type(), Some("text/x-src"));
+    assert!(head.metadata().is_none_or(|metadata| metadata.is_empty()));
+
+    let result = env.run(&[
+        "cp",
+        "s3://bucket/src.txt",
+        "s3://bucket/directive.txt",
+        "--no-progress",
+        "--metadata-directive",
+        "COPY",
+    ]);
+    assert_eq!(result.code, 0, "{}", result.stderr);
+    assert_eq!(
+        env.head("bucket", "directive.txt").content_type(),
+        Some("text/x-src")
+    );
+}
+
+#[test]
+fn cp_multipart_copy_and_stream() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let data = content(11 * 1024 * 1024);
+    env.write("big.bin", &data);
+    env.run_with_env(
+        &[
+            "cp",
+            "big.bin",
+            "s3://bucket/big.bin",
+            "--no-progress",
+            "--content-type",
+            "application/x-big",
+            "--metadata",
+            "k=v",
+        ],
+        &envs,
+    )
+    .success();
+
+    // The multipart copy takes the properties from the source object, and
+    // the tags are not copied since the fake server does not support them.
+    env.run_with_env(
+        &[
+            "cp",
+            "s3://bucket/big.bin",
+            "s3://bucket/copy.bin",
+            "--no-progress",
+            "--copy-props",
+            "metadata-directive",
+        ],
+        &envs,
+    )
+    .success();
+    assert_eq!(env.object_content("bucket", "copy.bin").unwrap(), data);
+    let head = env.head("bucket", "copy.bin");
+    assert_eq!(head.content_type(), Some("application/x-big"));
+    assert_eq!(head.metadata().unwrap()["k"], "v");
+
+    env.run_with_env(
+        &[
+            "cp",
+            "s3://bucket/big.bin",
+            "s3://bucket/none.bin",
+            "--no-progress",
+            "--copy-props",
+            "none",
+        ],
+        &envs,
+    )
+    .success();
+    assert_eq!(env.object_content("bucket", "none.bin").unwrap(), data);
+
+    let mut command = env.command(&[
+        "cp",
+        "-",
+        "s3://bucket/stdin.bin",
+        "--expected-size",
+        "11534336",
+    ]);
+    command.envs(envs.iter().copied());
+    let mut child = command.stdin(std::process::Stdio::piped()).spawn().unwrap();
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), &data).unwrap();
+    assert!(child.wait().unwrap().success());
+    assert_eq!(env.object_content("bucket", "stdin.bin").unwrap(), data);
+
+    let result = env
+        .run_with_env(&["cp", "s3://bucket/stdin.bin", "-"], &envs)
+        .success();
+    assert_eq!(result.stdout_bytes, data);
+}
+
+#[test]
+fn cp_no_overwrite_upload() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "remote");
+    env.write("a.txt", "local");
+    let result = env
+        .run(&[
+            "cp",
+            "a.txt",
+            "s3://bucket/a.txt",
+            "--no-overwrite",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(result.stdout, "");
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"remote");
+}
+
+#[test]
+fn cp_output_modes() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("src/a.txt", "a");
+    env.write("src/b.txt", "b");
+    for flag in ["--quiet", "--only-show-errors"] {
+        let result = env
+            .run(&["cp", "src", "s3://bucket/", "--recursive", flag])
+            .success();
+        assert_eq!((result.stdout.as_str(), result.stderr.as_str()), ("", ""));
+    }
+    let result = env
+        .run(&[
+            "cp",
+            "src",
+            "s3://bucket/",
+            "--recursive",
+            "--progress-multiline",
+        ])
+        .success();
+    assert!(result.stdout.contains("Completed "), "{}", result.stdout);
+    assert!(!result.stdout.contains('\r'), "{}", result.stdout);
+    let result = env
+        .run(&[
+            "cp",
+            "src",
+            "s3://bucket/",
+            "--recursive",
+            "--progress-frequency",
+            "60",
+        ])
+        .success();
+    assert_eq!(
+        result.stdout.matches("Completed ").count(),
+        1,
+        "{}",
+        result.stdout
+    );
+
+    // Errors are printed with --only-show-errors, but not with --quiet.
+    let result = env.run(&["cp", "s3://bucket/missing", "out/", "--only-show-errors"]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result.stderr.starts_with("fatal error: "),
+        "{}",
+        result.stderr
+    );
+    let result = env.run(&["cp", "s3://bucket/missing", "out/", "--quiet"]);
+    assert_eq!((result.code, result.stderr.as_str()), (1, ""));
+}
+
+#[test]
+fn cp_warnings() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("src/a.txt", "a");
+    std::os::unix::fs::symlink("missing.txt", env.path("src/broken.txt")).unwrap();
+    let result = env.run(&["cp", "src", "s3://bucket/", "--recursive", "--no-progress"]);
+    assert_eq!(result.code, 2);
+    assert_eq!(result.lines(), ["upload: src/a.txt to s3://bucket/a.txt"]);
+    let warning = format!(
+        "warning: Skipping file {}. File does not exist.\n",
+        std::fs::canonicalize(env.work())
+            .unwrap()
+            .join("src/broken.txt")
+            .display()
+    );
+    assert_eq!(
+        result.stderr.replace("/private/var/", "/var/"),
+        warning.replace("/private/var/", "/var/")
+    );
+
+    // Symbolic links are not followed with --no-follow-symlinks.
+    let result = env
+        .run(&[
+            "cp",
+            "src",
+            "s3://bucket/x/",
+            "--recursive",
+            "--no-progress",
+            "--no-follow-symlinks",
+        ])
+        .success();
+    assert_eq!(result.lines(), ["upload: src/a.txt to s3://bucket/x/a.txt"]);
+}
+
+#[test]
+fn cp_invalid_paths_type() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "a");
+    let result = env.run(&["cp", "a.txt", "s3://bucket/", "--checksum-mode", "ENABLED"]);
+    assert_eq!(result.code, 252);
+    assert!(result.stderr.contains(
+        "Expected checksum-mode parameter to be used with one of following path formats: <S3Uri> <LocalPath>. Instead, received <LocalPath> <S3Uri>."
+    ));
+    let result = env.run(&[
+        "cp",
+        "a.txt",
+        "s3://bucket/",
+        "--sse-c-copy-source",
+        "--sse-c-copy-source-key",
+        "a2V5",
+    ]);
+    assert_eq!(result.code, 252);
+    assert!(
+        result
+            .stderr
+            .contains("--sse-c-copy-source is only supported for copy operations.")
+    );
+    let result = env.run(&["cp", "a.txt", "s3://bucket/", "--sse-c-key", "a2V5"]);
+    assert_eq!(result.code, 252);
+    assert!(
+        result
+            .stderr
+            .contains("If --sse-c-key is specified, --sse-c must be specified as well.")
+    );
+}

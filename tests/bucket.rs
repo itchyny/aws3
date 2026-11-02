@@ -68,3 +68,60 @@ fn presign() {
     assert!(url.contains("X-Amz-Expires=60"), "{url}");
     assert!(url.contains("X-Amz-Signature="), "{url}");
 }
+
+#[test]
+fn mb_options_and_failures() {
+    let env = Env::new();
+    let result = env
+        .run(&[
+            "mb",
+            "s3://regional",
+            "--region",
+            "ap-northeast-1",
+            "--tags",
+            "k",
+            "v",
+        ])
+        .success();
+    assert_eq!(result.stdout, "make_bucket: regional\n");
+    let result = env.run(&["mb", "s3://regional"]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result
+            .stderr
+            .starts_with("make_bucket failed: s3://regional An error occurred ("),
+        "{}",
+        result.stderr
+    );
+}
+
+#[test]
+fn website_unsupported() {
+    let env = Env::new();
+    env.bucket("bucket");
+    // The fake server does not support the website configuration, which
+    // checks the errors are reported.
+    let result = env.run(&[
+        "website",
+        "bucket/",
+        "--index-document",
+        "index.html",
+        "--error-document",
+        "error.html",
+    ]);
+    assert_eq!(result.code, 254);
+    assert!(
+        result
+            .stderr
+            .contains("when calling the PutBucketWebsite operation"),
+        "{}",
+        result.stderr
+    );
+}
+
+#[test]
+fn presign_expires_in_limit() {
+    let env = Env::new();
+    let result = env.run(&["presign", "s3://bucket/key", "--expires-in", "604801"]);
+    assert_eq!(result.code, 252);
+}

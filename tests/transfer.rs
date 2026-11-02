@@ -178,3 +178,168 @@ fn sync_size_only_and_no_overwrite() {
     assert_eq!(result.stdout, "");
     assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"aaa");
 }
+
+#[test]
+fn sync_s3_to_s3() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "src/a.txt", "a");
+    env.object("bucket", "src/sub/b.txt", "b");
+    env.object("bucket", "dest/stale.txt", "x");
+    let result = env
+        .run(&[
+            "sync",
+            "s3://bucket/src",
+            "s3://bucket/dest",
+            "--delete",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(
+        result.sorted_lines(),
+        [
+            "copy: s3://bucket/src/a.txt to s3://bucket/dest/a.txt",
+            "copy: s3://bucket/src/sub/b.txt to s3://bucket/dest/sub/b.txt",
+            "delete: s3://bucket/dest/stale.txt",
+        ]
+    );
+    assert_eq!(
+        env.object_content("bucket", "dest/sub/b.txt").unwrap(),
+        b"b"
+    );
+    assert_eq!(env.object_content("bucket", "dest/stale.txt"), None);
+
+    let result = env
+        .run(&[
+            "sync",
+            "s3://bucket/src",
+            "s3://bucket/dry",
+            "--dryrun",
+            "--exclude",
+            "sub/*",
+        ])
+        .success();
+    assert_eq!(
+        result.lines(),
+        ["(dryrun) copy: s3://bucket/src/a.txt to s3://bucket/dry/a.txt"]
+    );
+}
+
+#[test]
+fn sync_exact_timestamps() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "dir/a.txt", "a");
+    env.run(&["sync", "s3://bucket/dir", "out", "--no-progress"])
+        .success();
+    // The local file of the same size but an older time is not synced by the
+    // default, but synced with --exact-timestamps.
+    let file = std::fs::File::options()
+        .write(true)
+        .open(env.path("out/a.txt"))
+        .unwrap();
+    let older = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    file.set_modified(older).unwrap();
+    let result = env
+        .run(&["sync", "s3://bucket/dir", "out", "--no-progress"])
+        .success();
+    assert_eq!(result.stdout, "");
+    let result = env
+        .run(&[
+            "sync",
+            "s3://bucket/dir",
+            "out",
+            "--exact-timestamps",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(
+        result.lines(),
+        ["download: s3://bucket/dir/a.txt to out/a.txt"]
+    );
+}
+
+#[test]
+fn sync_case_conflict() {
+    let env = Env::new();
+    // Case conflicts are detected only on case-insensitive file systems.
+    env.write("probe", "");
+    if !env.path("PROBE").exists() {
+        return;
+    }
+    env.bucket("bucket");
+    env.object("bucket", "dir/A.txt", "upper");
+    env.write("out/a.txt", "lower");
+    let result = env
+        .run(&[
+            "sync",
+            "s3://bucket/dir",
+            "out",
+            "--case-conflict",
+            "skip",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(result.stdout, "");
+    assert!(
+        result
+            .stderr
+            .starts_with("warning: Skipping bucket/dir/A.txt -> "),
+        "{}",
+        result.stderr
+    );
+    let result = env.run(&[
+        "cp",
+        "s3://bucket/dir",
+        "out",
+        "--recursive",
+        "--case-conflict",
+        "error",
+    ]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result
+            .stderr
+            .starts_with("fatal error: Failed to download bucket/dir/A.txt -> "),
+        "{}",
+        result.stderr
+    );
+    let result = env
+        .run(&[
+            "cp",
+            "s3://bucket/dir",
+            "out",
+            "--recursive",
+            "--case-conflict",
+            "warn",
+            "--no-progress",
+        ])
+        .success();
+    assert!(
+        result
+            .stderr
+            .starts_with("warning: Downloading bucket/dir/A.txt -> "),
+        "{}",
+        result.stderr
+    );
+}
+
+#[test]
+fn rm_output_modes() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    env.object("bucket", "b.txt", "b");
+    let result = env.run(&["rm", "s3://bucket/a.txt", "--quiet"]).success();
+    assert_eq!(result.stdout, "");
+    let result = env
+        .run(&["rm", "s3://bucket/", "--recursive", "--only-show-errors"])
+        .success();
+    assert_eq!(result.stdout, "");
+    assert_eq!(env.object_content("bucket", "b.txt"), None);
+    let result = env.run(&["rm", "s3://no-such-bucket/", "--recursive"]);
+    assert_eq!(result.code, 1);
+    assert!(result.stderr.starts_with(
+        "fatal error: An error occurred (NoSuchBucket) when calling the ListObjectsV2 operation"
+    ));
+}

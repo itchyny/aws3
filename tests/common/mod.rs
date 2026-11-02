@@ -94,6 +94,32 @@ impl Env {
         std::fs::write(path, content).unwrap();
     }
 
+    /// Returns the HeadObject response of the object, to check the metadata.
+    pub fn head(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> aws_sdk_s3::operation::head_object::HeadObjectOutput {
+        let config = aws_sdk_s3::Config::builder()
+            .behavior_version(aws_sdk_s3::config::BehaviorVersion::latest())
+            .region(aws_sdk_s3::config::Region::new("us-east-1"))
+            .endpoint_url(&self.endpoint)
+            .credentials_provider(aws_sdk_s3::config::Credentials::new(
+                ACCESS_KEY, SECRET_KEY, None, None, "test",
+            ))
+            .force_path_style(true)
+            .build();
+        let client = aws_sdk_s3::Client::from_conf(config);
+        self._runtime
+            .block_on(client.head_object().bucket(bucket).key(key).send())
+            .unwrap()
+    }
+
+    /// Returns the endpoint of the server.
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
     /// Returns the content of the object in the storage of the server.
     pub fn object_content(&self, bucket: &str, key: &str) -> Option<Vec<u8>> {
         std::fs::read(self.storage.path().join(bucket).join(key)).ok()
@@ -116,12 +142,32 @@ impl Env {
             .env("AWS_SHARED_CREDENTIALS_FILE", &missing)
             .env("AWS_EC2_METADATA_DISABLED", "true")
             .stdin(Stdio::null());
+        // Keep the profile path of the coverage measurement.
+        if let Some(path) = std::env::var_os("LLVM_PROFILE_FILE") {
+            command.env("LLVM_PROFILE_FILE", path);
+        }
         command
     }
 
     /// Runs aws3 with the arguments.
     pub fn run(&self, args: &[&str]) -> Result {
         Result::new(self.command(args).output().unwrap())
+    }
+
+    /// Runs aws3 with the arguments and the additional environment variables.
+    pub fn run_with_env(&self, args: &[&str], envs: &[(&str, &str)]) -> Result {
+        let mut command = self.command(args);
+        command.envs(envs.iter().copied());
+        Result::new(command.output().unwrap())
+    }
+
+    /// Writes the config file with small multipart thresholds, and returns
+    /// the environment variables to use it.
+    pub fn multipart_config(&self) -> [(&'static str, String); 1] {
+        let path = self.config(
+            "[default]\ns3 =\n  multipart_threshold = 5MB\n  multipart_chunksize = 5MB\n  max_concurrent_requests = 4\n",
+        );
+        [("AWS_CONFIG_FILE", path.to_string_lossy().into_owned())]
     }
 
     /// Runs aws3 with the arguments and the standard input.

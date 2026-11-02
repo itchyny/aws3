@@ -86,3 +86,25 @@ fn ls_no_such_bucket() {
         result.stderr
     );
 }
+
+#[test]
+fn ls_options() {
+    let env = Env::new();
+    env.bucket("bucket-a");
+    for i in 0..5 {
+        env.object("bucket-a", &format!("dir/{i}.txt"), "x");
+    }
+    let result = env
+        .run(&[
+            "ls",
+            "s3://bucket-a/dir/",
+            "--page-size",
+            "2",
+            "--request-payer",
+        ])
+        .success();
+    assert_eq!(result.lines().len(), 5);
+    // The bucket name prefix is not tested, since the fake server ignores it.
+    env.run(&["ls", "--bucket-name-prefix", "bucket-"])
+        .success();
+}

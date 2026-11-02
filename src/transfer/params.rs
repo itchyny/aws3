@@ -326,7 +326,131 @@ fn unquote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use clap::Parser;
+
     use super::*;
+    use crate::cli::{Cli, Command};
+
+    fn parse(args: &[&str]) -> Result<RequestParams, String> {
+        let args = ["aws3", "cp", "a", "s3://bucket/a"].iter().chain(args);
+        let cli = Cli::try_parse_from(args).unwrap();
+        let Command::Cp(cp) = &cli.command else {
+            unreachable!()
+        };
+        RequestParams::new(&cp.transfer, &cli.global)
+    }
+
+    #[test]
+    fn grants() {
+        let params = parse(&[
+            "--grants",
+            "read=uri=http://acs.amazonaws.com/groups/global/AllUsers",
+            "full=id=abc",
+            "readacl=id=x",
+            "writeacl=emailaddress=a@example.com",
+        ])
+        .unwrap();
+        assert_eq!(
+            params.grant_read.as_deref(),
+            Some("uri=http://acs.amazonaws.com/groups/global/AllUsers")
+        );
+        assert_eq!(params.grant_full_control.as_deref(), Some("id=abc"));
+        assert_eq!(params.grant_read_acp.as_deref(), Some("id=x"));
+        assert_eq!(
+            params.grant_write_acp.as_deref(),
+            Some("emailaddress=a@example.com")
+        );
+        assert_eq!(
+            parse(&["--grants", "foo"]).unwrap_err(),
+            "grants should be of the form permission=principal"
+        );
+        assert_eq!(
+            parse(&["--grants", "write=id=x"]).unwrap_err(),
+            "permission must be one of: read|readacl|writeacl|full"
+        );
+    }
+
+    #[test]
+    fn sse_customer_key() {
+        // The key is base64 encoded by the default.
+        let params = parse(&[
+            "--sse-c",
+            "--sse-c-key",
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+        ])
+        .unwrap();
+        let key = params.sse_c.unwrap();
+        assert_eq!(key.algorithm, "AES256");
+        assert_eq!(key.key, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
+        assert_eq!(
+            key.key_md5,
+            base64::encode(Md5::digest(b"0123456789abcdef0123456789abcdef"))
+        );
+
+        let params = parse(&[
+            "--sse-c",
+            "AES256",
+            "--sse-c-key",
+            "0123456789abcdef0123456789abcdef",
+            "--cli-binary-format",
+            "raw-in-base64-out",
+        ])
+        .unwrap();
+        assert_eq!(
+            params.sse_c.unwrap().key,
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+        );
+
+        let path = std::env::temp_dir().join(format!("aws3-test-key-{}", std::process::id()));
+        std::fs::write(&path, b"0123456789abcdef0123456789abcdef").unwrap();
+        let fileb = format!("fileb://{}", path.display());
+        let result = parse(&["--sse-c-copy-source", "--sse-c-copy-source-key", &fileb]);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            result.unwrap().sse_c_copy_source.unwrap().key,
+            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+        );
+
+        assert!(parse(&["--sse-c", "--sse-c-key", "not base64!"]).is_err());
+        assert!(parse(&["--sse-c", "--sse-c-key", "fileb:///nonexistent"]).is_err());
+    }
+
+    #[test]
+    fn object_params() {
+        let params = parse(&[
+            "--acl",
+            "bucket-owner-full-control",
+            "--storage-class",
+            "GLACIER_IR",
+            "--sse",
+            "aws:kms",
+            "--sse-kms-key-id",
+            "key",
+            "--checksum-algorithm",
+            "CRC64NVME",
+            "--request-payer",
+            "--expires",
+            "2030-01-01T00:00:00Z",
+            "--metadata-directive",
+            "REPLACE",
+            "--no-overwrite",
+        ])
+        .unwrap();
+        assert_eq!(params.acl, Some(ObjectCannedAcl::BucketOwnerFullControl));
+        assert_eq!(params.storage_class, Some(StorageClass::GlacierIr));
+        assert_eq!(params.sse, Some(ServerSideEncryption::AwsKms));
+        assert_eq!(
+            params.checksum_algorithm,
+            Some(ChecksumAlgorithm::Crc64Nvme)
+        );
+        assert_eq!(params.request_payer, Some(RequestPayer::Requester));
+        assert_eq!(params.expires, Some(DateTime::from_secs(1893456000)));
+        assert_eq!(params.metadata_directive, Some(MetadataDirective::Replace));
+        assert!(params.no_overwrite);
+        assert!(params.has_metadata_props());
+        assert!(parse(&["--expires", "invalid"]).is_err());
+        assert!(parse(&["--metadata", "{invalid"]).is_err());
+    }
 
     #[test]
     fn map() {
