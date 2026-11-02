@@ -21,7 +21,9 @@ use aws_sdk_s3::Client;
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 
-use crate::cli::{CaseConflict, CopyProps, CpArgs, Filter, GlobalArgs, TransferArgs};
+use crate::cli::{
+    CaseConflict, CopyProps, CpArgs, Filter, GlobalArgs, MvArgs, RmArgs, SyncArgs, TransferArgs,
+};
 use crate::client;
 use crate::error::Error;
 use crate::filter::Filters;
@@ -164,6 +166,41 @@ pub async fn cp(args: &CpArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
         Options::new(CommandName::Cp, paths, args.recursive).with_transfer_args(&args.transfer);
     options.expected_size = args.expected_size;
     run(options, RequestParams::new(&args.transfer, global), global).await
+}
+
+pub async fn mv(args: &MvArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
+    let paths = vec![args.source.clone(), args.destination.clone()];
+    let options =
+        Options::new(CommandName::Mv, paths, args.recursive).with_transfer_args(&args.transfer);
+    run(options, RequestParams::new(&args.transfer, global), global).await
+}
+
+pub async fn rm(args: &RmArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
+    let mut options = Options::new(CommandName::Rm, vec![args.path.clone()], args.recursive);
+    options.dryrun = args.dryrun;
+    options.quiet = args.quiet;
+    options.only_show_errors = args.only_show_errors;
+    // The rm command has no progress option, which disables the progress.
+    options.progress = false;
+    options.page_size = args.page_size;
+    options.filters = args.filter.filters.clone();
+    let params = RequestParams::with_request_payer(args.request_payer.request_payer);
+    run(options, Ok(params), global).await
+}
+
+pub async fn sync(args: &SyncArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
+    let paths = vec![args.source.clone(), args.destination.clone()];
+    let mut options =
+        Options::new(CommandName::Sync, paths, true).with_transfer_args(&args.transfer);
+    options.size_only = args.size_only;
+    options.exact_timestamps = args.exact_timestamps;
+    options.delete = args.delete;
+    // The no-overwrite option is handled by comparing the files.
+    let params = RequestParams::new(&args.transfer, global).map(|params| RequestParams {
+        no_overwrite: false,
+        ..params
+    });
+    run(options, params, global).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -642,7 +679,12 @@ impl Submitter {
             self.tasks.join_next().await;
         }
         let id = ctx.next_id.fetch_add(1, Ordering::Relaxed);
-        ctx.printer().queued(id, task.size.unwrap_or(0));
+        // Deletions transfer no bytes.
+        let size = match task.operation {
+            Operation::Delete | Operation::LocalDelete => 0,
+            _ => task.size.unwrap_or(0),
+        };
+        ctx.printer().queued(id, size);
         self.submitted += 1;
         let ctx = ctx.clone();
         self.tasks.spawn(async move {

@@ -104,6 +104,15 @@ impl RequestParams {
         Ok(params)
     }
 
+    /// Creates the request parameters of commands which only take the
+    /// request payer, e.g. rm.
+    pub fn with_request_payer(payer: Option<cli::RequestPayer>) -> Self {
+        Self {
+            request_payer: request_payer(payer),
+            ..Self::default()
+        }
+    }
+
     /// Returns whether any of the properties that CopyObject replaces with
     /// the REPLACE metadata directive is specified.
     pub fn has_metadata_props(&self) -> bool {

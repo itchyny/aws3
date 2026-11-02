@@ -18,6 +18,9 @@ async fn main() -> ExitCode {
     let result = match &cli.command {
         Command::Ls(args) => ls::run(args, &cli.global).await,
         Command::Cp(args) => transfer::cp(args, &cli.global).await,
+        Command::Mv(args) => transfer::mv(args, &cli.global).await,
+        Command::Rm(args) => transfer::rm(args, &cli.global).await,
+        Command::Sync(args) => transfer::sync(args, &cli.global).await,
         command => {
             eprintln!("aws3: {} is not implemented yet", command_name(command));
             return ExitCode::FAILURE;
