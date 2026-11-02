@@ -350,7 +350,11 @@ mod tests {
     fn mime_types_file() {
         let mut map = HashMap::new();
         read_mime_types(
-            "# comment\ntext/plain txt log # trailing\n\nimage/png\n",
+            r"# comment
+text/plain txt log # trailing
+
+image/png
+",
             &mut map,
         );
         assert_eq!(map.get(".log").map(String::as_str), Some("text/plain"));

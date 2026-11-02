@@ -134,7 +134,12 @@ fn addressing_style() {
     // virtual-hosted style puts the bucket name in the host name.
     let endpoint = env.endpoint().replace("127.0.0.1", "localhost");
     let presign = |style: &str| {
-        let path = env.config(&format!("[default]\ns3 =\n  addressing_style = {style}\n"));
+        let path = env.config(&format!(
+            r"[default]
+s3 =
+  addressing_style = {style}
+"
+        ));
         let path = path.to_string_lossy().into_owned();
         let envs = [
             ("AWS_CONFIG_FILE", path.as_str()),
@@ -149,7 +154,12 @@ fn addressing_style() {
     assert!(presign("virtual").starts_with(&format!("http://bucket.{host}/key?")));
     assert!(presign("auto").starts_with(&format!("http://bucket.{host}/key?")));
 
-    let path = env.config("[default]\ns3 =\n  addressing_style = path\n");
+    let path = env.config(
+        r"[default]
+s3 =
+  addressing_style = path
+",
+    );
     let path = path.to_string_lossy().into_owned();
     let envs = [
         ("AWS_CONFIG_FILE", path.as_str()),

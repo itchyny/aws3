@@ -168,7 +168,16 @@ mod tests {
 
     #[test]
     fn settings() {
-        let content = "[default]\nregion = us-east-1\ns3 =\n  max_concurrent_requests = 20\n  multipart_threshold = 64MB\n\n[profile other]\ns3 =\n  multipart_chunksize = 16MiB\n";
+        let content = r"[default]
+region = us-east-1
+s3 =
+  max_concurrent_requests = 20
+  multipart_threshold = 64MB
+
+[profile other]
+s3 =
+  multipart_chunksize = 16MiB
+";
         assert_eq!(
             s3_settings(content, "default"),
             [
@@ -188,7 +197,10 @@ mod tests {
 
     #[test]
     fn addressing_style() {
-        let content = "[default]\ns3 =\n  addressing_style = path\n";
+        let content = r"[default]
+s3 =
+  addressing_style = path
+";
         let settings = s3_settings(content, "default");
         assert_eq!(
             settings,

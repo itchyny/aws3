@@ -142,8 +142,13 @@ fn cp_multipart() {
     env.bucket("bucket");
     let data = content(12 * 1024 * 1024 + 123);
     env.write("big.bin", &data);
-    let config =
-        env.config("[default]\ns3 =\n  multipart_threshold = 5MB\n  multipart_chunksize = 5MB\n");
+    let config = env.config(
+        r"[default]
+s3 =
+  multipart_threshold = 5MB
+  multipart_chunksize = 5MB
+",
+    );
     let run = |args: &[&str]| {
         let mut command = env.command(args);
         command.env("AWS_CONFIG_FILE", &config);

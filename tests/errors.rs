@@ -108,7 +108,11 @@ fn timeouts_and_profile() {
         "5",
     ])
     .success();
-    let path = env.config("[profile other]\nregion = us-west-2\n");
+    let path = env.config(
+        r"[profile other]
+region = us-west-2
+",
+    );
     let path = path.to_string_lossy().into_owned();
     env.run_with_env(&["ls", "--profile", "other"], &[("AWS_CONFIG_FILE", &path)])
         .success();

@@ -166,7 +166,12 @@ impl Env {
     /// the environment variables to use it.
     pub fn multipart_config(&self) -> [(&'static str, String); 1] {
         let path = self.config(
-            "[default]\ns3 =\n  multipart_threshold = 5MB\n  multipart_chunksize = 5MB\n  max_concurrent_requests = 4\n",
+            r"[default]
+s3 =
+  multipart_threshold = 5MB
+  multipart_chunksize = 5MB
+  max_concurrent_requests = 4
+",
         );
         [("AWS_CONFIG_FILE", path.to_string_lossy().into_owned())]
     }
