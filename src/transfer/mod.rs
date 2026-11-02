@@ -188,6 +188,13 @@ pub async fn rm(args: &RmArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     run(options, Ok(params), global).await
 }
 
+/// Deletes the objects under the path, for rb with `--force`.
+pub async fn rm_recursive(path: &str, global: &GlobalArgs) -> Result<ExitCode, Error> {
+    let mut options = Options::new(CommandName::Rm, vec![path.to_owned()], true);
+    options.progress = false;
+    run(options, Ok(RequestParams::default()), global).await
+}
+
 pub async fn sync(args: &SyncArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let paths = vec![args.source.clone(), args.destination.clone()];
     let mut options =

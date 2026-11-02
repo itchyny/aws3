@@ -1,3 +1,4 @@
+mod bucket;
 mod cli;
 mod client;
 mod error;
@@ -21,6 +22,9 @@ async fn main() -> ExitCode {
         Command::Mv(args) => transfer::mv(args, &cli.global).await,
         Command::Rm(args) => transfer::rm(args, &cli.global).await,
         Command::Sync(args) => transfer::sync(args, &cli.global).await,
+        Command::Mb(args) => bucket::mb(args, &cli.global).await,
+        Command::Rb(args) => bucket::rb(args, &cli.global).await,
+        Command::Website(args) => bucket::website(args, &cli.global).await,
         command => {
             eprintln!("aws3: {} is not implemented yet", command_name(command));
             return ExitCode::FAILURE;
