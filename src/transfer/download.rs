@@ -1,0 +1,229 @@
+use std::fs::{File, FileTimes};
+use std::hash::{BuildHasher, RandomState};
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use tokio::io::AsyncWriteExt;
+use tokio::task::JoinSet;
+
+use super::params::set_sse_c;
+use super::{Context, Outcome, TransferId};
+use crate::error::Error;
+
+/// Downloads the object to the local file, which is written to a temporary
+/// file in the same directory and renamed on completion.
+pub async fn download_file(
+    ctx: &Arc<Context>,
+    id: TransferId,
+    bucket: &str,
+    key: &str,
+    path: &str,
+    size: u64,
+    last_modified: Option<SystemTime>,
+) -> Result<Outcome, String> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| err.to_string())?;
+    }
+    let temp_path = format!("{path}.{}", random_extension());
+    let result = if size < ctx.config.multipart_threshold {
+        download_whole(ctx, id, bucket, key, &temp_path).await
+    } else {
+        download_ranges(ctx, id, bucket, key, &temp_path, size).await
+    };
+    if let Err(err) = result {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        return Err(err);
+    }
+    if let Some(time) = last_modified
+        && let Err(err) = set_file_times(&temp_path, time)
+    {
+        ctx.warning(&format!(
+            "warning: Successfully Downloaded {path} but was unable to update the last modified time. {err}"
+        ));
+    }
+    tokio::fs::rename(&temp_path, path)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(Outcome::Done)
+}
+
+/// Downloads the object to the standard output.
+pub async fn download_stdout(
+    ctx: &Arc<Context>,
+    id: TransferId,
+    bucket: &str,
+    key: &str,
+) -> Result<Outcome, String> {
+    // The size of the object is unknown, which is retrieved first like the
+    // AWS CLI, and the errors of missing objects are reported by HeadObject.
+    head_object(ctx, bucket, key).await?;
+    let mut output = get_object(ctx, bucket, key, None).await?;
+    let mut stdout = tokio::io::stdout();
+    while let Some(bytes) = output
+        .body
+        .try_next()
+        .await
+        .map_err(|err| err.to_string())?
+    {
+        stdout
+            .write_all(&bytes)
+            .await
+            .map_err(|err| err.to_string())?;
+        ctx.progress(id, bytes.len() as u64);
+    }
+    stdout.flush().await.map_err(|err| err.to_string())?;
+    Ok(Outcome::Done)
+}
+
+async fn download_whole(
+    ctx: &Arc<Context>,
+    id: TransferId,
+    bucket: &str,
+    key: &str,
+    path: &str,
+) -> Result<(), String> {
+    let mut output = get_object(ctx, bucket, key, None).await?;
+    let mut file = tokio::fs::File::create(path)
+        .await
+        .map_err(|err| err.to_string())?;
+    while let Some(bytes) = output
+        .body
+        .try_next()
+        .await
+        .map_err(|err| err.to_string())?
+    {
+        file.write_all(&bytes)
+            .await
+            .map_err(|err| err.to_string())?;
+        ctx.progress(id, bytes.len() as u64);
+    }
+    file.flush().await.map_err(|err| err.to_string())
+}
+
+/// Downloads the ranges of the object concurrently, and writes them at the
+/// offsets of the file.
+async fn download_ranges(
+    ctx: &Arc<Context>,
+    id: TransferId,
+    bucket: &str,
+    key: &str,
+    path: &str,
+    size: u64,
+) -> Result<(), String> {
+    let file = File::create(path).map_err(|err| err.to_string())?;
+    file.set_len(size).map_err(|err| err.to_string())?;
+    let file = Arc::new(file);
+    let chunk_size = ctx.config.multipart_chunksize;
+    let mut ranges = JoinSet::new();
+    let mut offset = 0;
+    while offset < size {
+        let end = (offset + chunk_size).min(size) - 1;
+        let (ctx, file) = (ctx.clone(), file.clone());
+        let (bucket, key) = (bucket.to_owned(), key.to_owned());
+        ranges.spawn(async move {
+            let range = format!("bytes={offset}-{end}");
+            let output = get_object(&ctx, &bucket, &key, Some(range)).await?;
+            let bytes = output
+                .body
+                .collect()
+                .await
+                .map_err(|err| err.to_string())?
+                .into_bytes();
+            let length = bytes.len() as u64;
+            tokio::task::spawn_blocking(move || write_at(&file, &bytes, offset))
+                .await
+                .map_err(|err| err.to_string())?
+                .map_err(|err| err.to_string())?;
+            ctx.progress(id, length);
+            Ok::<_, String>(())
+        });
+        offset = end + 1;
+    }
+    while let Some(result) = ranges.join_next().await {
+        if let Err(err) = result
+            .map_err(|err| err.to_string())
+            .and_then(|result| result)
+        {
+            ranges.abort_all();
+            return Err(err);
+        }
+    }
+    file.sync_all().map_err(|err| err.to_string())
+}
+
+async fn get_object(
+    ctx: &Context,
+    bucket: &str,
+    key: &str,
+    range: Option<String>,
+) -> Result<aws_sdk_s3::operation::get_object::GetObjectOutput, String> {
+    let params = &ctx.params;
+    let request = ctx
+        .source_client
+        .get_object()
+        .bucket(bucket)
+        .key(key)
+        .set_range(range)
+        .set_request_payer(params.request_payer.clone())
+        .set_checksum_mode(params.checksum_mode.clone());
+    let request = set_sse_c!(request, &params.sse_c);
+    let _permit = ctx
+        .requests
+        .acquire()
+        .await
+        .map_err(|err| err.to_string())?;
+    request
+        .send()
+        .await
+        .map_err(|err| Error::sdk("GetObject", err).to_string())
+}
+
+async fn head_object(ctx: &Context, bucket: &str, key: &str) -> Result<(), String> {
+    let params = &ctx.params;
+    let request = ctx
+        .source_client
+        .head_object()
+        .bucket(bucket)
+        .key(key)
+        .set_request_payer(params.request_payer.clone());
+    let request = set_sse_c!(request, &params.sse_c);
+    let _permit = ctx
+        .requests
+        .acquire()
+        .await
+        .map_err(|err| err.to_string())?;
+    request
+        .send()
+        .await
+        .map_err(|err| Error::sdk("HeadObject", err).to_string())?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn write_at(file: &File, bytes: &[u8], offset: u64) -> std::io::Result<()> {
+    std::os::unix::fs::FileExt::write_all_at(file, bytes, offset)
+}
+
+#[cfg(windows)]
+fn write_at(file: &File, mut bytes: &[u8], mut offset: u64) -> std::io::Result<()> {
+    while !bytes.is_empty() {
+        let written = std::os::windows::fs::FileExt::seek_write(file, bytes, offset)?;
+        bytes = &bytes[written..];
+        offset += written as u64;
+    }
+    Ok(())
+}
+
+fn set_file_times(path: &str, time: SystemTime) -> std::io::Result<()> {
+    let file = File::options().write(true).open(path)?;
+    file.set_times(FileTimes::new().set_accessed(time).set_modified(time))
+}
+
+/// Returns a random extension of hex digits for temporary files, like
+/// `random_file_extension` of s3transfer.
+fn random_extension() -> String {
+    let random = RandomState::new().hash_one(SystemTime::now());
+    format!("{:08x}", random as u32)
+}

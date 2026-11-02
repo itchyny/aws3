@@ -1,9 +1,12 @@
 mod cli;
 mod client;
 mod error;
+mod filter;
 mod ls;
+mod mime;
 mod path;
 mod tls;
+mod transfer;
 
 use std::process::ExitCode;
 
@@ -14,6 +17,7 @@ async fn main() -> ExitCode {
     let cli = Cli::parse_args();
     let result = match &cli.command {
         Command::Ls(args) => ls::run(args, &cli.global).await,
+        Command::Cp(args) => transfer::cp(args, &cli.global).await,
         command => {
             eprintln!("aws3: {} is not implemented yet", command_name(command));
             return ExitCode::FAILURE;

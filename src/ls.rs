@@ -189,7 +189,7 @@ fn format_date_time(date_time: Option<&DateTime>) -> String {
 }
 
 /// Formats the size in base-2 units, in the same way as the AWS CLI.
-fn human_readable_size(size: i64) -> String {
+pub fn human_readable_size(size: i64) -> String {
     const BASE: f64 = 1024.0;
     const SUFFIXES: [&str; 6] = ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
     let bytes = size as f64;

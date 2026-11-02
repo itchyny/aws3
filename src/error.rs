@@ -4,6 +4,8 @@ use std::process::ExitCode;
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 
+/// Exit code of the AWS CLI on parameter validation errors.
+const EXIT_PARAM_VALIDATION: u8 = 252;
 /// Exit code of the AWS CLI when credentials are not found.
 const EXIT_NO_CREDENTIALS: u8 = 253;
 /// Exit code of the AWS CLI on service errors.
@@ -25,6 +27,15 @@ impl Error {
         }
     }
 
+    /// Creates a parameter validation error, which the AWS CLI reports before
+    /// sending any requests.
+    pub fn param_validation(message: impl fmt::Display) -> Self {
+        Self {
+            code: EXIT_PARAM_VALIDATION,
+            message: format!("An error occurred (ParamValidation): {message}"),
+        }
+    }
+
     /// Creates an error from an SDK error of the operation, using the same
     /// messages and exit codes as the AWS CLI.
     pub fn sdk<E>(operation: &str, err: SdkError<E, HttpResponse>) -> Self
@@ -33,14 +44,24 @@ impl Error {
     {
         match &err {
             SdkError::ServiceError(service_err) => {
-                let status = service_err.raw().status().as_u16().to_string();
+                let status = service_err.raw().status().as_u16();
                 let inner = service_err.err();
+                // Responses of HEAD requests have no body, so the AWS CLI
+                // reports the status code and the reason phrase.
+                let (code, message) = if operation.starts_with("Head") {
+                    (status.to_string(), reason_phrase(status).to_owned())
+                } else {
+                    (
+                        inner
+                            .code()
+                            .map_or_else(|| status.to_string(), str::to_owned),
+                        inner.message().unwrap_or("Unknown").to_owned(),
+                    )
+                };
                 Self {
                     code: EXIT_SERVICE,
                     message: format!(
-                        "An error occurred ({}) when calling the {operation} operation: {}",
-                        inner.code().unwrap_or(&status),
-                        inner.message().unwrap_or("Unknown"),
+                        "An error occurred ({code}) when calling the {operation} operation: {message}"
                     ),
                 }
             }
@@ -78,6 +99,38 @@ impl From<std::io::Error> for Error {
             code: EXIT_GENERAL,
             message: err.to_string(),
         }
+    }
+}
+
+/// Returns whether the SDK error is a service error with the error code.
+pub fn has_error_code<E, R>(err: &SdkError<E, R>, code: &str) -> bool
+where
+    E: ProvideErrorMetadata,
+{
+    matches!(err, SdkError::ServiceError(err) if err.err().code() == Some(code))
+}
+
+/// Returns whether the SDK error is a service error with the status code.
+pub fn has_status_code<E>(err: &SdkError<E, HttpResponse>, status: u16) -> bool {
+    matches!(err, SdkError::ServiceError(err) if err.raw().status().as_u16() == status)
+}
+
+fn reason_phrase(status: u16) -> &'static str {
+    match status {
+        301 => "Moved Permanently",
+        304 => "Not Modified",
+        307 => "Temporary Redirect",
+        400 => "Bad Request",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        412 => "Precondition Failed",
+        416 => "Requested Range Not Satisfiable",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        503 => "Service Unavailable",
+        _ => "Unknown",
     }
 }
 
