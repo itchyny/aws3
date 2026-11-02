@@ -280,3 +280,67 @@ use_fips_endpoint = true
         "http://localhost:9000/bucket/key"
     );
 }
+
+#[test]
+fn use_arn_region() {
+    let env = Env::new();
+    let presign = |config: &str, envs: &[(&str, &str)]| {
+        let config = env.config(config);
+        let mut command = env.command(&[
+            "presign",
+            "s3://arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/key",
+        ]);
+        command
+            .env("AWS_CONFIG_FILE", &config)
+            .env("AWS_REGION", "us-west-2")
+            .env_remove("AWS_ENDPOINT_URL")
+            .envs(envs.iter().copied());
+        let output = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        (
+            output.status.code().unwrap(),
+            stdout.split('?').next().unwrap().to_owned(),
+            stderr.trim().to_owned(),
+        )
+    };
+    let arn_region = (
+        0,
+        "https://my-ap-123456789012.s3-accesspoint.us-east-1.amazonaws.com/key".to_owned(),
+        String::new(),
+    );
+    let mismatch = (
+        255,
+        String::new(),
+        "aws3: [ERROR]: Unsupported configuration when using S3 access-points: \
+         Invalid configuration: region from ARN `us-east-1` does not match client region \
+         `us-west-2` and UseArnRegion is `false`"
+            .to_owned(),
+    );
+    // The region in the ARN is used by the default.
+    assert_eq!(presign("[default]\n", &[]), arn_region);
+    let nested_false = r"[default]
+s3 =
+  use_arn_region = false
+";
+    assert_eq!(presign(nested_false, &[]), mismatch);
+    // The setting of the profile and the environment variable take precedence.
+    let top_true = r"[default]
+s3_use_arn_region = true
+s3 =
+  use_arn_region = false
+";
+    assert_eq!(presign(top_true, &[]), arn_region);
+    assert_eq!(
+        presign("[default]\ns3_use_arn_region = false\n", &[]),
+        mismatch
+    );
+    assert_eq!(
+        presign(nested_false, &[("AWS_S3_USE_ARN_REGION", "TRUE")]),
+        arn_region
+    );
+    assert_eq!(
+        presign("[default]\n", &[("AWS_S3_USE_ARN_REGION", "false")]),
+        mismatch
+    );
+}

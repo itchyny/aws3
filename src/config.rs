@@ -28,6 +28,16 @@ impl ProfileConfig {
     /// Loads the configuration of the profile from the config file, falling
     /// back to the defaults for missing or invalid values.
     pub fn load(profile: Option<&str>) -> Self {
+        let mut config = Self::load_file(profile);
+        // The environment variable and the setting of the profile override
+        // the setting in the `s3` section.
+        if let Ok(value) = std::env::var("AWS_S3_USE_ARN_REGION") {
+            config.s3.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
+        }
+        config
+    }
+
+    fn load_file(profile: Option<&str>) -> Self {
         let Some(content) = config_file().and_then(|path| std::fs::read_to_string(path).ok())
         else {
             return Self::default();
@@ -44,10 +54,15 @@ impl ProfileConfig {
             .find(|(key, _)| key == "ca_bundle")
             .map(|(_, value)| PathBuf::from(value))
             .filter(|path| !path.as_os_str().is_empty());
-        Self {
-            ca_bundle,
-            s3: S3Config::from_settings(&settings.s3),
+        let mut s3 = S3Config::from_settings(&settings.s3);
+        if let Some((_, value)) = settings
+            .profile
+            .iter()
+            .find(|(key, _)| key == "s3_use_arn_region")
+        {
+            s3.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
         }
+        Self { ca_bundle, s3 }
     }
 }
 
@@ -62,6 +77,9 @@ pub struct S3Config {
     /// Whether the dual-stack endpoints are used, which falls back to the
     /// setting of the profile and the environment variable unless enabled.
     pub use_dualstack_endpoint: bool,
+    /// Whether the region in the ARN of an access point is used instead of
+    /// the region of the client, which defaults to true.
+    pub use_arn_region: Option<bool>,
 }
 
 /// The style of the URLs of buckets.
@@ -86,6 +104,7 @@ impl Default for S3Config {
             addressing_style: AddressingStyle::Auto,
             use_accelerate_endpoint: false,
             use_dualstack_endpoint: false,
+            use_arn_region: None,
         }
     }
 }
@@ -128,6 +147,9 @@ impl S3Config {
                 }
                 "use_dualstack_endpoint" => {
                     config.use_dualstack_endpoint = value.eq_ignore_ascii_case("true");
+                }
+                "use_arn_region" => {
+                    config.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
                 }
                 _ => {}
             }

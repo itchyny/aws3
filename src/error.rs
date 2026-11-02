@@ -77,10 +77,7 @@ impl Error {
             },
             // The innermost error describes the cause, e.g. an invalid
             // combination of the configurations to resolve the endpoint.
-            _ => Self {
-                code: EXIT_GENERAL,
-                message: root_cause(&err).to_string(),
-            },
+            _ => endpoint_error(&root_cause(&err).to_string()),
         }
     }
 
@@ -151,6 +148,43 @@ fn is_no_credentials(err: &(dyn std::error::Error + 'static)) -> bool {
         source = err.source();
     }
     false
+}
+
+/// Translates the error of resolving the endpoint in the same way as
+/// `ruleset_error_to_botocore_exception` of the AWS CLI.
+fn endpoint_error(message: &str) -> Error {
+    if let Some(rest) = message.strip_prefix("Invalid region in ARN: ") {
+        let label = rest.split('`').nth(1).unwrap_or(message);
+        return Error::new(format!(
+            "Invalid host label to be bound to the hostname of the endpoint: \"{label}\"."
+        ));
+    }
+    if message == "S3 Object Lambda does not support S3 Accelerate"
+        || message == "Accelerate cannot be used with FIPS"
+    {
+        return Error::new(format!(
+            "Unsupported configuration when using S3: {message}"
+        ));
+    }
+    if [
+        "S3 Outposts does not support",
+        "S3 MRAP does not support",
+        "S3 Object Lambda does not support",
+        "Access Points do not support",
+        "Invalid configuration:",
+        "Client was configured for partition",
+    ]
+    .iter()
+    .any(|prefix| message.starts_with(prefix))
+    {
+        return Error::new(format!(
+            "Unsupported configuration when using S3 access-points: {message}"
+        ));
+    }
+    if message.to_lowercase().starts_with("invalid arn:") {
+        return Error::param_validation(format!("Parameter validation failed:\n{message}"));
+    }
+    Error::new(message)
 }
 
 fn root_cause<'a>(
