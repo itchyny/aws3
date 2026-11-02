@@ -3,6 +3,7 @@ mod client;
 mod error;
 mod ls;
 mod path;
+mod tls;
 
 use std::process::ExitCode;
 

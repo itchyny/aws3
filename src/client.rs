@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use aws_config::{BehaviorVersion, SdkConfig};
@@ -6,6 +7,8 @@ use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::timeout::TimeoutConfig;
 
 use crate::cli::GlobalArgs;
+use crate::error::Error;
+use crate::tls;
 
 /// The region the AWS CLI uses for S3 when no region is configured.
 const DEFAULT_REGION: &str = "us-east-1";
@@ -15,9 +18,15 @@ const DEFAULT_TIMEOUT: u64 = 60;
 
 /// Loads the shared configuration from the environment, the config files and
 /// the global options.
-pub async fn load_config(global: &GlobalArgs) -> SdkConfig {
-    let mut loader =
-        aws_config::defaults(BehaviorVersion::latest()).timeout_config(timeout_config(global));
+pub async fn load_config(global: &GlobalArgs) -> Result<SdkConfig, Error> {
+    let ca_bundle = global.ca_bundle.clone().or_else(|| {
+        std::env::var_os("AWS_CA_BUNDLE")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+    });
+    let mut loader = aws_config::defaults(BehaviorVersion::latest())
+        .http_client(tls::http_client(ca_bundle.as_deref())?)
+        .timeout_config(timeout_config(global));
     if let Some(profile) = &global.profile {
         loader = loader.profile_name(profile);
     }
@@ -30,7 +39,7 @@ pub async fn load_config(global: &GlobalArgs) -> SdkConfig {
     if global.no_sign_request {
         loader = loader.no_credentials();
     }
-    loader.load().await
+    Ok(loader.load().await)
 }
 
 /// Creates a client, optionally overriding the region, e.g. for a bucket in

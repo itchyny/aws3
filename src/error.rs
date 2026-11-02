@@ -18,6 +18,13 @@ pub struct Error {
 }
 
 impl Error {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            code: EXIT_GENERAL,
+            message: message.into(),
+        }
+    }
+
     /// Creates an error from an SDK error of the operation, using the same
     /// messages and exit codes as the AWS CLI.
     pub fn sdk<E>(operation: &str, err: SdkError<E, HttpResponse>) -> Self

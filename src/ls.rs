@@ -16,7 +16,7 @@ use crate::error::Error;
 use crate::path::split_bucket_key;
 
 pub async fn run(args: &LsArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
-    let config = client::load_config(global).await;
+    let config = client::load_config(global).await?;
     let (bucket, key) = split_bucket_key(&args.path);
     let mut lister = Lister::new(args.human_readable);
     if bucket.is_empty() {

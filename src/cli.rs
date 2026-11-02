@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 
@@ -123,7 +124,7 @@ pub struct GlobalArgs {
 
     /// The CA certificate bundle to use when verifying SSL certificates
     #[arg(long, global = true, value_name = "PATH")]
-    pub ca_bundle: Option<String>,
+    pub ca_bundle: Option<PathBuf>,
 
     /// The maximum socket read time in seconds
     #[arg(long, global = true, value_name = "SECONDS")]
