@@ -7,6 +7,7 @@ use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::timeout::TimeoutConfig;
 
 use crate::cli::GlobalArgs;
+use crate::config::{AddressingStyle, S3Config};
 use crate::error::Error;
 use crate::tls;
 
@@ -16,9 +17,15 @@ const DEFAULT_REGION: &str = "us-east-1";
 /// The socket timeout of the AWS CLI, in seconds.
 const DEFAULT_TIMEOUT: u64 = 60;
 
-/// Loads the shared configuration from the environment, the config files and
-/// the global options.
-pub async fn load_config(global: &GlobalArgs) -> Result<SdkConfig, Error> {
+/// The configuration of the clients.
+pub struct Config {
+    pub sdk: SdkConfig,
+    pub s3: S3Config,
+}
+
+/// Loads the configuration from the environment, the config files and the
+/// global options.
+pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
     let ca_bundle = global.ca_bundle.clone().or_else(|| {
         std::env::var_os("AWS_CA_BUNDLE")
             .filter(|path| !path.is_empty())
@@ -39,16 +46,20 @@ pub async fn load_config(global: &GlobalArgs) -> Result<SdkConfig, Error> {
     if global.no_sign_request {
         loader = loader.no_credentials();
     }
-    Ok(loader.load().await)
+    Ok(Config {
+        sdk: loader.load().await,
+        s3: S3Config::load(global.profile.as_deref()),
+    })
 }
 
 /// Creates a client, optionally overriding the region, e.g. for a bucket in
 /// another region.
-pub fn new_client(config: &SdkConfig, region: Option<&str>) -> Client {
-    let mut builder = aws_sdk_s3::config::Builder::from(config);
+pub fn new_client(config: &Config, region: Option<&str>) -> Client {
+    let mut builder = aws_sdk_s3::config::Builder::from(&config.sdk)
+        .force_path_style(config.s3.addressing_style == AddressingStyle::Path);
     if let Some(region) = region {
         builder = builder.region(Region::new(region.to_owned()));
-    } else if config.region().is_none() {
+    } else if config.sdk.region().is_none() {
         builder = builder.region(Region::from_static(DEFAULT_REGION));
     }
     Client::from_conf(builder.build())

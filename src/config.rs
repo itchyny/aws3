@@ -1,10 +1,11 @@
-//! The transfer configuration in the `s3` section of the profile, e.g.
+//! The configuration in the `s3` section of the profile, e.g.
 //!
 //! ```ini
 //! [default]
 //! s3 =
 //!   max_concurrent_requests = 20
 //!   multipart_threshold = 64MB
+//!   addressing_style = path
 //! ```
 
 use std::path::PathBuf;
@@ -12,25 +13,39 @@ use std::path::PathBuf;
 const MIB: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone)]
-pub struct TransferConfig {
+pub struct S3Config {
     pub multipart_threshold: u64,
     pub multipart_chunksize: u64,
     pub max_concurrent_requests: usize,
     pub max_queue_size: usize,
+    pub addressing_style: AddressingStyle,
 }
 
-impl Default for TransferConfig {
+/// The style of the URLs of buckets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressingStyle {
+    /// The virtual-hosted style if the bucket name is DNS compatible, e.g.
+    /// `https://bucket.s3.amazonaws.com/key`.
+    Auto,
+    /// The virtual-hosted style.
+    Virtual,
+    /// The path style, e.g. `https://s3.amazonaws.com/bucket/key`.
+    Path,
+}
+
+impl Default for S3Config {
     fn default() -> Self {
         Self {
             multipart_threshold: 8 * MIB,
             multipart_chunksize: 8 * MIB,
             max_concurrent_requests: 10,
             max_queue_size: 1000,
+            addressing_style: AddressingStyle::Auto,
         }
     }
 }
 
-impl TransferConfig {
+impl S3Config {
     /// Loads the configuration of the profile from the config file, falling
     /// back to the defaults for missing or invalid values.
     pub fn load(profile: Option<&str>) -> Self {
@@ -42,6 +57,7 @@ impl TransferConfig {
         let profile = profile
             .map(str::to_owned)
             .or_else(|| std::env::var("AWS_PROFILE").ok())
+            .or_else(|| std::env::var("AWS_DEFAULT_PROFILE").ok())
             .unwrap_or_else(|| "default".to_owned());
         for (key, value) in s3_settings(&content, &profile) {
             match key.as_str() {
@@ -65,6 +81,12 @@ impl TransferConfig {
                         config.max_queue_size = value;
                     }
                 }
+                "addressing_style" => match value.as_str() {
+                    "auto" => config.addressing_style = AddressingStyle::Auto,
+                    "virtual" => config.addressing_style = AddressingStyle::Virtual,
+                    "path" => config.addressing_style = AddressingStyle::Path,
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -162,5 +184,15 @@ mod tests {
         assert_eq!(parse_size("1GiB"), Some(1024 * MIB));
         assert_eq!(parse_size("1048576"), Some(MIB));
         assert_eq!(parse_size("x"), None);
+    }
+
+    #[test]
+    fn addressing_style() {
+        let content = "[default]\ns3 =\n  addressing_style = path\n";
+        let settings = s3_settings(content, "default");
+        assert_eq!(
+            settings,
+            [("addressing_style".to_owned(), "path".to_owned())]
+        );
     }
 }

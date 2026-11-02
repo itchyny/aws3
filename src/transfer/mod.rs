@@ -1,7 +1,6 @@
 //! The transfer commands, i.e. cp, mv, rm and sync, in the same way as the
 //! `CommandArchitecture` of the AWS CLI.
 
-mod config;
 mod copy;
 mod download;
 mod generator;
@@ -25,9 +24,9 @@ use crate::cli::{
     CaseConflict, CopyProps, CpArgs, Filter, GlobalArgs, MvArgs, RmArgs, SyncArgs, TransferArgs,
 };
 use crate::client;
+use crate::config::S3Config;
 use crate::error::Error;
 use crate::filter::Filters;
-use config::TransferConfig;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
 use params::RequestParams;
 use paths::{Endpoint, relative_path, split_bucket_key};
@@ -424,7 +423,7 @@ pub struct Context {
     params: RequestParams,
     options: Options,
     plan: Plan,
-    config: TransferConfig,
+    config: S3Config,
     /// Limits the number of concurrent requests.
     requests: Semaphore,
     printer: Mutex<Printer>,
@@ -485,7 +484,7 @@ async fn run(
             return Ok(printer.exit_code());
         }
     };
-    let config = TransferConfig::load(global.profile.as_deref());
+    let config = sdk_config.s3.clone();
     let ctx = Arc::new(Context {
         client,
         source_client,

@@ -1,7 +1,6 @@
 use std::io::{self, BufWriter, Stdout, Write};
 use std::process::ExitCode;
 
-use aws_config::SdkConfig;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::SdkError;
@@ -55,7 +54,7 @@ impl Lister {
         }
     }
 
-    async fn list_buckets(&mut self, config: &SdkConfig, args: &LsArgs) -> Result<(), Error> {
+    async fn list_buckets(&mut self, config: &client::Config, args: &LsArgs) -> Result<(), Error> {
         let client = client::new_client(config, None);
         let mut paginator = client
             .list_buckets()
@@ -83,7 +82,7 @@ impl Lister {
 
     async fn list_objects(
         &mut self,
-        config: &SdkConfig,
+        config: &client::Config,
         bucket: &str,
         key: &str,
         args: &LsArgs,
@@ -110,7 +109,7 @@ impl Lister {
         // Retry in the region of the bucket if it differs from the configured one.
         if let Some(Err(err)) = &page
             && let Some(region) = bucket_region(err)
-            && Some(region) != config.region().map(|region| region.as_ref())
+            && Some(region) != config.sdk.region().map(|region| region.as_ref())
         {
             pages = send(&client::new_client(config, Some(region)));
             page = pages.next().await;

@@ -125,3 +125,43 @@ fn presign_expires_in_limit() {
     let result = env.run(&["presign", "s3://bucket/key", "--expires-in", "604801"]);
     assert_eq!(result.code, 252);
 }
+
+#[test]
+fn addressing_style() {
+    let env = Env::new();
+    env.bucket("bucket");
+    // The path style is required for the endpoint of a host name, since the
+    // virtual-hosted style puts the bucket name in the host name.
+    let endpoint = env.endpoint().replace("127.0.0.1", "localhost");
+    let presign = |style: &str| {
+        let path = env.config(&format!("[default]\ns3 =\n  addressing_style = {style}\n"));
+        let path = path.to_string_lossy().into_owned();
+        let envs = [
+            ("AWS_CONFIG_FILE", path.as_str()),
+            ("AWS_ENDPOINT_URL", endpoint.as_str()),
+        ];
+        env.run_with_env(&["presign", "s3://bucket/key"], &envs)
+            .success()
+            .stdout
+    };
+    let host = endpoint.trim_start_matches("http://");
+    assert!(presign("path").starts_with(&format!("http://{host}/bucket/key?")));
+    assert!(presign("virtual").starts_with(&format!("http://bucket.{host}/key?")));
+    assert!(presign("auto").starts_with(&format!("http://bucket.{host}/key?")));
+
+    let path = env.config("[default]\ns3 =\n  addressing_style = path\n");
+    let path = path.to_string_lossy().into_owned();
+    let envs = [
+        ("AWS_CONFIG_FILE", path.as_str()),
+        ("AWS_ENDPOINT_URL", endpoint.as_str()),
+    ];
+    env.write("a.txt", "hello");
+    env.run_with_env(
+        &["cp", "a.txt", "s3://bucket/a.txt", "--no-progress"],
+        &envs,
+    )
+    .success();
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"hello");
+    let result = env.run_with_env(&["ls", "s3://bucket/"], &envs).success();
+    assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+}

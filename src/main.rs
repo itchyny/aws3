@@ -1,6 +1,7 @@
 mod bucket;
 mod cli;
 mod client;
+mod config;
 mod error;
 mod filter;
 mod ls;
