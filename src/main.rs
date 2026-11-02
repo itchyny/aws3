@@ -6,6 +6,7 @@ mod filter;
 mod ls;
 mod mime;
 mod path;
+mod presign;
 mod tls;
 mod transfer;
 
@@ -25,27 +26,10 @@ async fn main() -> ExitCode {
         Command::Mb(args) => bucket::mb(args, &cli.global).await,
         Command::Rb(args) => bucket::rb(args, &cli.global).await,
         Command::Website(args) => bucket::website(args, &cli.global).await,
-        command => {
-            eprintln!("aws3: {} is not implemented yet", command_name(command));
-            return ExitCode::FAILURE;
-        }
+        Command::Presign(args) => presign::run(args, &cli.global).await,
     };
     result.unwrap_or_else(|err| {
         eprintln!("\naws3: [ERROR]: {err}");
         err.exit_code()
     })
-}
-
-fn command_name(command: &Command) -> &'static str {
-    match command {
-        Command::Ls(_) => "ls",
-        Command::Cp(_) => "cp",
-        Command::Mv(_) => "mv",
-        Command::Rm(_) => "rm",
-        Command::Sync(_) => "sync",
-        Command::Mb(_) => "mb",
-        Command::Rb(_) => "rb",
-        Command::Presign(_) => "presign",
-        Command::Website(_) => "website",
-    }
 }
