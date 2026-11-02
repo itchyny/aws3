@@ -8,6 +8,7 @@
 //!   max_concurrent_requests = 20
 //!   multipart_threshold = 64MB
 //!   addressing_style = path
+//!   use_accelerate_endpoint = true
 //! ```
 
 use std::path::PathBuf;
@@ -56,6 +57,7 @@ pub struct S3Config {
     pub max_concurrent_requests: usize,
     pub max_queue_size: usize,
     pub addressing_style: AddressingStyle,
+    pub use_accelerate_endpoint: bool,
 }
 
 /// The style of the URLs of buckets.
@@ -78,6 +80,7 @@ impl Default for S3Config {
             max_concurrent_requests: 10,
             max_queue_size: 1000,
             addressing_style: AddressingStyle::Auto,
+            use_accelerate_endpoint: false,
         }
     }
 }
@@ -115,6 +118,9 @@ impl S3Config {
                     "path" => config.addressing_style = AddressingStyle::Path,
                     _ => {}
                 },
+                "use_accelerate_endpoint" => {
+                    config.use_accelerate_endpoint = value.eq_ignore_ascii_case("true");
+                }
                 _ => {}
             }
         }

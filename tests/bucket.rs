@@ -152,7 +152,8 @@ s3 =
     let host = endpoint.trim_start_matches("http://");
     assert!(presign("path").starts_with(&format!("http://{host}/bucket/key?")));
     assert!(presign("virtual").starts_with(&format!("http://bucket.{host}/key?")));
-    assert!(presign("auto").starts_with(&format!("http://bucket.{host}/key?")));
+    // The path style is the default for custom endpoints like the AWS CLI.
+    assert!(presign("auto").starts_with(&format!("http://{host}/bucket/key?")));
 
     let path = env.config(
         r"[default]
@@ -174,4 +175,46 @@ s3 =
     assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"hello");
     let result = env.run_with_env(&["ls", "s3://bucket/"], &envs).success();
     assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+}
+
+#[test]
+fn use_accelerate_endpoint() {
+    let env = Env::new();
+    let config = env.config(
+        r"[default]
+s3 =
+  use_accelerate_endpoint = True
+",
+    );
+    let presign = |args: &[&str], endpoint: Option<&str>| {
+        let mut command = env.command(args);
+        command
+            .env("AWS_CONFIG_FILE", &config)
+            .env_remove("AWS_ENDPOINT_URL");
+        if let Some(endpoint) = endpoint {
+            command.env("AWS_ENDPOINT_URL", endpoint);
+        }
+        command.output().unwrap()
+    };
+    let output = presign(&["presign", "s3://bucket/key"], None);
+    let url = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        url.starts_with("https://bucket.s3-accelerate.amazonaws.com/key?"),
+        "{url}"
+    );
+
+    // S3 Accelerate cannot be used with custom endpoints and bucket names
+    // with dots, which require the path style.
+    let output = presign(&["presign", "s3://bucket/key"], Some(env.endpoint()));
+    assert_eq!(output.status.code(), Some(255));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("aws3: [ERROR]: A custom endpoint cannot be combined with S3 Accelerate")
+    );
+    let output = presign(&["presign", "s3://my.bucket/key"], None);
+    assert_eq!(output.status.code(), Some(255));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("aws3: [ERROR]: Path-style addressing cannot be used with S3 Accelerate")
+    );
 }

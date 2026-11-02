@@ -621,6 +621,7 @@ dependencies = [
  "aws-smithy-http-client",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
+ "aws-types",
  "chrono",
  "clap",
  "http",

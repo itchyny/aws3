@@ -75,9 +75,11 @@ impl Error {
                 code: EXIT_GENERAL,
                 message: format!("Could not connect to the endpoint URL: {}", Chain(&err)),
             },
+            // The innermost error describes the cause, e.g. an invalid
+            // combination of the configurations to resolve the endpoint.
             _ => Self {
                 code: EXIT_GENERAL,
-                message: Chain(&err).to_string(),
+                message: root_cause(&err).to_string(),
             },
         }
     }
@@ -149,6 +151,16 @@ fn is_no_credentials(err: &(dyn std::error::Error + 'static)) -> bool {
         source = err.source();
     }
     false
+}
+
+fn root_cause<'a>(
+    err: &'a (dyn std::error::Error + 'static),
+) -> &'a (dyn std::error::Error + 'static) {
+    let mut err = err;
+    while let Some(source) = err.source() {
+        err = source;
+    }
+    err
 }
 
 /// Displays an error with its sources, since SDK errors are terse at the top level.
