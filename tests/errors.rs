@@ -117,3 +117,44 @@ region = us-west-2
     env.run_with_env(&["ls", "--profile", "other"], &[("AWS_CONFIG_FILE", &path)])
         .success();
 }
+
+#[test]
+fn tls_verification() {
+    let env = Env::new_tls();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+
+    // The certificate signed by an unknown CA is rejected by the default.
+    let result = env.run(&["ls", "s3://bucket/", "--cli-connect-timeout", "5"]);
+    assert_eq!(result.code, 255);
+    assert!(
+        result
+            .stderr
+            .contains("Could not connect to the endpoint URL"),
+        "{}",
+        result.stderr
+    );
+
+    // The CA bundle trusts the certificate.
+    let result = env
+        .run(&["ls", "s3://bucket/", "--ca-bundle", "ca.pem"])
+        .success();
+    assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+
+    // The certificate is not verified with --no-verify-ssl.
+    let result = env
+        .run(&["ls", "s3://bucket/", "--no-verify-ssl"])
+        .success();
+    assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+    let result = env
+        .run(&[
+            "cp",
+            "s3://bucket/a.txt",
+            "out.txt",
+            "--no-verify-ssl",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(result.lines(), ["download: s3://bucket/a.txt to ./out.txt"]);
+    assert_eq!(env.read("out.txt"), b"hello");
+}

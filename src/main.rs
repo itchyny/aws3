@@ -4,6 +4,7 @@ mod client;
 mod config;
 mod error;
 mod filter;
+mod insecure;
 mod ls;
 mod mime;
 mod path;

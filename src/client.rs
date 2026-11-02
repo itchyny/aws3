@@ -9,7 +9,7 @@ use aws_sdk_s3::config::timeout::TimeoutConfig;
 use crate::cli::GlobalArgs;
 use crate::config::{AddressingStyle, S3Config};
 use crate::error::Error;
-use crate::tls;
+use crate::{insecure, tls};
 
 /// The region the AWS CLI uses for S3 when no region is configured.
 const DEFAULT_REGION: &str = "us-east-1";
@@ -31,9 +31,18 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
             .filter(|path| !path.is_empty())
             .map(PathBuf::from)
     });
+    let timeout_config = timeout_config(global);
+    let http_client = if global.no_verify_ssl {
+        insecure::http_client(
+            timeout_config.connect_timeout(),
+            timeout_config.read_timeout(),
+        )?
+    } else {
+        tls::http_client(ca_bundle.as_deref())?
+    };
     let mut loader = aws_config::defaults(BehaviorVersion::latest())
-        .http_client(tls::http_client(ca_bundle.as_deref())?)
-        .timeout_config(timeout_config(global));
+        .http_client(http_client)
+        .timeout_config(timeout_config);
     if let Some(profile) = &global.profile {
         loader = loader.profile_name(profile);
     }

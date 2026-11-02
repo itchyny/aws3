@@ -30,8 +30,7 @@ CLI.
 - The error messages are prefixed with `aws3:` instead of `aws:`.
 - The root certificates of Mozilla are used for TLS, unless a CA bundle is
   specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
-- `--no-verify-ssl`, `--debug`, `--query`, `--output` and `--color` are
-  accepted but ignored.
+- `--debug`, `--query`, `--output` and `--color` are accepted but ignored.
 - `presign` rejects `--expires-in` longer than one week.
 
 ## Installation

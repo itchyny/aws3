@@ -26,6 +26,16 @@ pub struct Env {
 
 impl Env {
     pub fn new() -> Self {
+        Self::start(false)
+    }
+
+    /// Starts the server with TLS, whose certificate is signed by a CA in
+    /// `ca.pem` of the working directory.
+    pub fn new_tls() -> Self {
+        Self::start(true)
+    }
+
+    fn start(tls: bool) -> Self {
         let storage = TempDir::new().unwrap();
         let work = TempDir::new().unwrap();
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -35,7 +45,9 @@ impl Env {
         let listener = runtime
             .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
             .unwrap();
-        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let scheme = if tls { "https" } else { "http" };
+        let endpoint = format!("{scheme}://{}", listener.local_addr().unwrap());
+        let acceptor = tls.then(|| tls_acceptor(&work.path().join("ca.pem")));
         let service = {
             let mut builder = S3ServiceBuilder::new(FileSystem::new(storage.path()).unwrap());
             builder.set_auth(SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
@@ -47,10 +59,22 @@ impl Env {
                 let Ok((socket, _)) = listener.accept().await else {
                     continue;
                 };
-                let conn = server
-                    .serve_connection(TokioIo::new(socket), service.clone())
-                    .into_owned();
-                tokio::spawn(conn);
+                let (server, service, acceptor) =
+                    (server.clone(), service.clone(), acceptor.clone());
+                tokio::spawn(async move {
+                    match acceptor {
+                        Some(acceptor) => {
+                            // The handshake fails when the client rejects the certificate.
+                            if let Ok(socket) = acceptor.accept(socket).await {
+                                let _ =
+                                    server.serve_connection(TokioIo::new(socket), service).await;
+                            }
+                        }
+                        None => {
+                            let _ = server.serve_connection(TokioIo::new(socket), service).await;
+                        }
+                    }
+                });
             }
         });
         Self {
@@ -196,6 +220,32 @@ s3 =
         std::fs::write(&path, content).unwrap();
         path
     }
+}
+
+/// Creates the acceptor of TLS connections with a certificate signed by a new
+/// CA, which is written to the path.
+fn tls_acceptor(ca_path: &Path) -> tokio_rustls::TlsAcceptor {
+    use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair};
+    let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    let ca = CertifiedIssuer::self_signed(ca_params, KeyPair::generate().unwrap()).unwrap();
+    std::fs::write(ca_path, ca.pem()).unwrap();
+    let key = KeyPair::generate().unwrap();
+    let params =
+        CertificateParams::new(vec!["127.0.0.1".to_owned(), "localhost".to_owned()]).unwrap();
+    let cert = params.signed_by(&key, &ca).unwrap();
+    let provider = std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let mut config = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![cert.der().clone()],
+            rustls::pki_types::PrivateKeyDer::Pkcs8(key.serialize_der().into()),
+        )
+        .unwrap();
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config))
 }
 
 /// The result of running aws3.
