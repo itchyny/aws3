@@ -7,7 +7,7 @@ use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::timeout::TimeoutConfig;
 
 use crate::cli::GlobalArgs;
-use crate::config::{AddressingStyle, S3Config};
+use crate::config::{AddressingStyle, ProfileConfig, S3Config};
 use crate::error::Error;
 use crate::{insecure, tls};
 
@@ -26,11 +26,16 @@ pub struct Config {
 /// Loads the configuration from the environment, the config files and the
 /// global options.
 pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
-    let ca_bundle = global.ca_bundle.clone().or_else(|| {
-        std::env::var_os("AWS_CA_BUNDLE")
-            .filter(|path| !path.is_empty())
-            .map(PathBuf::from)
-    });
+    let profile = ProfileConfig::load(global.profile.as_deref());
+    let ca_bundle = global
+        .ca_bundle
+        .clone()
+        .or_else(|| {
+            std::env::var_os("AWS_CA_BUNDLE")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+        })
+        .or(profile.ca_bundle);
     let timeout_config = timeout_config(global);
     let http_client = if global.no_verify_ssl {
         insecure::http_client(
@@ -57,7 +62,7 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
     }
     Ok(Config {
         sdk: loader.load().await,
-        s3: S3Config::load(global.profile.as_deref()),
+        s3: profile.s3,
     })
 }
 

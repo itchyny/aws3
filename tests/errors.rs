@@ -141,6 +141,31 @@ fn tls_verification() {
         .success();
     assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
 
+    // The CA bundle in the profile trusts the certificate, which is overridden
+    // by the environment variable and the option.
+    let config = env.config(&format!(
+        "[default]\nca_bundle = {}\n",
+        env.path("ca.pem").display()
+    ));
+    let config = config.to_string_lossy().into_owned();
+    let envs = [("AWS_CONFIG_FILE", config.as_str())];
+    env.run_with_env(&["ls", "s3://bucket/"], &envs).success();
+    let envs = [
+        ("AWS_CONFIG_FILE", config.as_str()),
+        ("AWS_CA_BUNDLE", "missing.pem"),
+    ];
+    let result = env.run_with_env(&["ls", "s3://bucket/"], &envs);
+    assert_eq!(result.code, 255);
+    assert!(
+        result
+            .stderr
+            .contains("Unable to load CA bundle missing.pem"),
+        "{}",
+        result.stderr
+    );
+    env.run_with_env(&["ls", "s3://bucket/", "--ca-bundle", "ca.pem"], &envs)
+        .success();
+
     // The certificate is not verified with --no-verify-ssl.
     let result = env
         .run(&["ls", "s3://bucket/", "--no-verify-ssl"])
