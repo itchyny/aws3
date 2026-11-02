@@ -1,3 +1,6 @@
+mod cli;
+
 fn main() {
-    println!("aws3");
+    let cli = cli::Cli::parse_args();
+    println!("{cli:#?}");
 }

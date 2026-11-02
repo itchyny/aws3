@@ -1,0 +1,788 @@
+use std::ffi::OsString;
+
+use clap::{ArgMatches, Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+
+/// Exit code of the AWS CLI on parameter validation errors.
+const EXIT_PARAM_VALIDATION: i32 = 252;
+
+#[derive(Debug, Parser)]
+#[command(version, about, propagate_version = true)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Command,
+
+    #[command(flatten)]
+    pub global: GlobalArgs,
+}
+
+impl Cli {
+    /// Parses the command line arguments, exiting with the same status code
+    /// as the AWS CLI on errors.
+    pub fn parse_args() -> Self {
+        Self::try_parse_args_from(std::env::args_os()).unwrap_or_else(|err| {
+            let _ = err.print();
+            std::process::exit(if err.use_stderr() {
+                EXIT_PARAM_VALIDATION
+            } else {
+                0
+            })
+        })
+    }
+
+    fn try_parse_args_from<I, T>(args: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        let matches = Self::command().try_get_matches_from(args)?;
+        let mut cli = Self::from_arg_matches(&matches)?;
+        if let (Some(filter), Some((_, matches))) = (cli.command.filter_mut(), matches.subcommand())
+        {
+            filter.resolve(matches);
+        }
+        Ok(cli)
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// List S3 objects and common prefixes under a prefix or all S3 buckets
+    Ls(LsArgs),
+    /// Copy a local file or S3 object to another location locally or in S3
+    Cp(CpArgs),
+    /// Move a local file or S3 object to another location locally or in S3
+    Mv(MvArgs),
+    /// Delete an S3 object
+    Rm(RmArgs),
+    /// Sync directories and S3 prefixes
+    Sync(SyncArgs),
+    /// Create an S3 bucket
+    Mb(MbArgs),
+    /// Delete an empty S3 bucket
+    Rb(RbArgs),
+    /// Generate a pre-signed URL for an Amazon S3 object
+    Presign(PresignArgs),
+    /// Set the website configuration for a bucket
+    Website(WebsiteArgs),
+}
+
+impl Command {
+    fn filter_mut(&mut self) -> Option<&mut FilterArgs> {
+        match self {
+            Self::Cp(args) => Some(&mut args.transfer.filter),
+            Self::Mv(args) => Some(&mut args.transfer.filter),
+            Self::Rm(args) => Some(&mut args.filter),
+            Self::Sync(args) => Some(&mut args.transfer.filter),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Global Options")]
+pub struct GlobalArgs {
+    /// Turn on debug logging
+    #[arg(long, global = true)]
+    pub debug: bool,
+
+    /// Override command's default URL with the given URL
+    #[arg(long, global = true, value_name = "URL")]
+    pub endpoint_url: Option<String>,
+
+    /// Do not verify SSL certificates
+    #[arg(long, global = true)]
+    pub no_verify_ssl: bool,
+
+    /// Disable automatic pagination
+    #[arg(long, global = true)]
+    pub no_paginate: bool,
+
+    /// The formatting style for command output
+    #[arg(long, global = true)]
+    pub output: Option<Output>,
+
+    /// A JMESPath query to use in filtering the response data
+    #[arg(long, global = true)]
+    pub query: Option<String>,
+
+    /// Use a specific profile from your credential file
+    #[arg(long, global = true)]
+    pub profile: Option<String>,
+
+    /// The region to use
+    #[arg(long, global = true)]
+    pub region: Option<String>,
+
+    /// Turn on/off color output
+    #[arg(long, global = true)]
+    pub color: Option<Color>,
+
+    /// Do not sign requests
+    #[arg(long, global = true)]
+    pub no_sign_request: bool,
+
+    /// The CA certificate bundle to use when verifying SSL certificates
+    #[arg(long, global = true, value_name = "PATH")]
+    pub ca_bundle: Option<String>,
+
+    /// The maximum socket read time in seconds
+    #[arg(long, global = true, value_name = "SECONDS")]
+    pub cli_read_timeout: Option<u64>,
+
+    /// The maximum socket connect time in seconds
+    #[arg(long, global = true, value_name = "SECONDS")]
+    pub cli_connect_timeout: Option<u64>,
+
+    /// The formatting style to be used for binary blobs
+    #[arg(long, global = true)]
+    pub cli_binary_format: Option<BinaryFormat>,
+
+    /// Disable cli pager for output
+    #[arg(long, global = true)]
+    pub no_cli_pager: bool,
+
+    /// Automatically prompt for CLI input parameters
+    #[arg(long, global = true, overrides_with = "no_cli_auto_prompt")]
+    pub cli_auto_prompt: bool,
+
+    /// Disable automatically prompt for CLI input parameters
+    #[arg(long, global = true, overrides_with = "cli_auto_prompt")]
+    pub no_cli_auto_prompt: bool,
+
+    /// The formatting style for error output
+    #[arg(long, global = true)]
+    pub cli_error_format: Option<ErrorFormat>,
+}
+
+#[derive(Debug, Args)]
+pub struct LsArgs {
+    #[arg(value_name = "S3Uri", default_value = "s3://")]
+    pub path: String,
+
+    /// Command is performed on all files or objects under the specified prefix
+    #[arg(long)]
+    pub recursive: bool,
+
+    /// The number of results to return in each response to a list operation
+    #[arg(long, value_name = "SIZE")]
+    pub page_size: Option<i32>,
+
+    /// Displays file sizes in human readable format
+    #[arg(long)]
+    pub human_readable: bool,
+
+    /// Displays summary information (number of objects, total size)
+    #[arg(long)]
+    pub summarize: bool,
+
+    #[command(flatten)]
+    pub request_payer: RequestPayerArgs,
+
+    /// Limits the response to bucket names that begin with the specified prefix
+    #[arg(long, value_name = "PREFIX")]
+    pub bucket_name_prefix: Option<String>,
+
+    /// Limits the response to buckets that are located in the specified region
+    #[arg(long, value_name = "REGION")]
+    pub bucket_region: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CpArgs {
+    #[arg(value_name = "SOURCE")]
+    pub source: String,
+
+    #[arg(value_name = "DESTINATION")]
+    pub destination: String,
+
+    #[command(flatten)]
+    pub transfer: TransferArgs,
+
+    /// The expected size of a stream in bytes
+    #[arg(long, value_name = "SIZE")]
+    pub expected_size: Option<u64>,
+
+    /// Command is performed on all files or objects under the specified directory or prefix
+    #[arg(long)]
+    pub recursive: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct MvArgs {
+    #[arg(value_name = "SOURCE")]
+    pub source: String,
+
+    #[arg(value_name = "DESTINATION")]
+    pub destination: String,
+
+    #[command(flatten)]
+    pub transfer: TransferArgs,
+
+    /// Command is performed on all files or objects under the specified directory or prefix
+    #[arg(long)]
+    pub recursive: bool,
+
+    /// Resolves the underlying bucket name of any S3 access points or S3 on Outposts
+    /// access points to validate the source and destination are not the same
+    #[arg(long)]
+    pub validate_same_s3_paths: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RmArgs {
+    #[arg(value_name = "S3Uri")]
+    pub path: String,
+
+    /// Displays the operations that would be performed without actually running them
+    #[arg(long)]
+    pub dryrun: bool,
+
+    /// Does not display the operations performed from the specified command
+    #[arg(long)]
+    pub quiet: bool,
+
+    /// Command is performed on all files or objects under the specified prefix
+    #[arg(long)]
+    pub recursive: bool,
+
+    #[command(flatten)]
+    pub request_payer: RequestPayerArgs,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    /// Only errors and warnings are displayed
+    #[arg(long)]
+    pub only_show_errors: bool,
+
+    /// The number of results to return in each response to a list operation
+    #[arg(long, value_name = "SIZE")]
+    pub page_size: Option<i32>,
+}
+
+#[derive(Debug, Args)]
+pub struct SyncArgs {
+    #[arg(value_name = "SOURCE")]
+    pub source: String,
+
+    #[arg(value_name = "DESTINATION")]
+    pub destination: String,
+
+    #[command(flatten)]
+    pub transfer: TransferArgs,
+
+    /// Makes the size of each key the only criteria used to decide whether to sync
+    #[arg(long)]
+    pub size_only: bool,
+
+    /// When syncing from S3 to local, same-sized items will be ignored only when
+    /// the timestamps match exactly
+    #[arg(long)]
+    pub exact_timestamps: bool,
+
+    /// Files that exist in the destination but not in the source are deleted
+    #[arg(long)]
+    pub delete: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct MbArgs {
+    #[arg(value_name = "S3Uri")]
+    pub path: String,
+
+    /// Tags to be added to the bucket, can be specified multiple times
+    #[arg(long, num_args = 2, value_names = ["KEY", "VALUE"], action = clap::ArgAction::Append)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RbArgs {
+    #[arg(value_name = "S3Uri")]
+    pub path: String,
+
+    /// Deletes all objects in the bucket including the bucket itself
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct PresignArgs {
+    #[arg(value_name = "S3Uri")]
+    pub path: String,
+
+    /// Number of seconds until the pre-signed URL expires
+    #[arg(long, value_name = "SECONDS", default_value_t = 3600)]
+    pub expires_in: u64,
+}
+
+#[derive(Debug, Args)]
+pub struct WebsiteArgs {
+    #[arg(value_name = "S3Uri")]
+    pub path: String,
+
+    /// A suffix that is appended to a request that is for a directory on the website endpoint
+    #[arg(long, value_name = "DOCUMENT")]
+    pub index_document: Option<String>,
+
+    /// The object key name to use when a 4XX class error occurs
+    #[arg(long, value_name = "DOCUMENT")]
+    pub error_document: Option<String>,
+}
+
+/// Arguments shared by cp, mv and sync.
+#[derive(Debug, Args)]
+pub struct TransferArgs {
+    /// Displays the operations that would be performed without actually running them
+    #[arg(long)]
+    pub dryrun: bool,
+
+    /// Does not display the operations performed from the specified command
+    #[arg(long)]
+    pub quiet: bool,
+
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    /// Sets the ACL for the object when the command is performed
+    #[arg(long)]
+    pub acl: Option<Acl>,
+
+    /// Follow symbolic links (default)
+    #[arg(long, overrides_with = "no_follow_symlinks")]
+    pub follow_symlinks: bool,
+
+    /// Do not follow symbolic links
+    #[arg(long, overrides_with = "follow_symlinks")]
+    pub no_follow_symlinks: bool,
+
+    /// Do not try to guess the mime type for uploaded files
+    #[arg(long)]
+    pub no_guess_mime_type: bool,
+
+    /// Specifies server-side encryption of the object in S3
+    #[arg(long, num_args = 0..=1, default_missing_value = "AES256")]
+    pub sse: Option<Sse>,
+
+    /// Specifies server-side encryption using customer provided keys
+    #[arg(long, num_args = 0..=1, default_missing_value = "AES256")]
+    pub sse_c: Option<SseC>,
+
+    /// The customer-provided encryption key to use to server-side encrypt the object
+    #[arg(long, value_name = "KEY")]
+    pub sse_c_key: Option<String>,
+
+    /// The customer-managed AWS KMS key ID that should be used to server-side encrypt the object
+    #[arg(long, value_name = "KEY_ID")]
+    pub sse_kms_key_id: Option<String>,
+
+    /// Decrypts the source object using customer provided keys
+    #[arg(long, num_args = 0..=1, default_missing_value = "AES256")]
+    pub sse_c_copy_source: Option<SseC>,
+
+    /// The customer-provided encryption key to use to decrypt the source object
+    #[arg(long, value_name = "KEY")]
+    pub sse_c_copy_source_key: Option<String>,
+
+    /// The type of storage to use for the object
+    #[arg(long)]
+    pub storage_class: Option<StorageClass>,
+
+    /// Grant specific permissions to individual users or groups
+    #[arg(long, num_args = 1.., value_name = "Permission=Grantee_Type=Grantee_ID")]
+    pub grants: Vec<String>,
+
+    /// Redirect requests for this object to another object or an external URL
+    #[arg(long, value_name = "LOCATION")]
+    pub website_redirect: Option<String>,
+
+    /// Specify an explicit content type for this operation
+    #[arg(long)]
+    pub content_type: Option<String>,
+
+    /// Specifies caching behavior along the request/reply chain
+    #[arg(long)]
+    pub cache_control: Option<String>,
+
+    /// Specifies presentational information for the object
+    #[arg(long)]
+    pub content_disposition: Option<String>,
+
+    /// Specifies what content encodings have been applied to the object
+    #[arg(long)]
+    pub content_encoding: Option<String>,
+
+    /// The language the content is in
+    #[arg(long)]
+    pub content_language: Option<String>,
+
+    /// The date and time at which the object is no longer cacheable
+    #[arg(long)]
+    pub expires: Option<String>,
+
+    /// The region of the source bucket for S3 to S3 transfers
+    #[arg(long, value_name = "REGION")]
+    pub source_region: Option<String>,
+
+    /// Only errors and warnings are displayed
+    #[arg(long)]
+    pub only_show_errors: bool,
+
+    /// File transfer progress is not displayed
+    #[arg(long)]
+    pub no_progress: bool,
+
+    /// Number of seconds to wait before updating file transfer progress
+    #[arg(long, value_name = "SECONDS")]
+    pub progress_frequency: Option<u64>,
+
+    /// Show progress on multiple lines
+    #[arg(long)]
+    pub progress_multiline: bool,
+
+    /// The number of results to return in each response to a list operation
+    #[arg(long, value_name = "SIZE")]
+    pub page_size: Option<i32>,
+
+    /// Turns off glacier warnings
+    #[arg(long)]
+    pub ignore_glacier_warnings: bool,
+
+    /// Forces a transfer request on all Glacier objects in a sync or recursive copy
+    #[arg(long)]
+    pub force_glacier_transfer: bool,
+
+    #[command(flatten)]
+    pub request_payer: RequestPayerArgs,
+
+    /// Enable checksum validation of the retrieved object
+    #[arg(long)]
+    pub checksum_mode: Option<ChecksumMode>,
+
+    /// The algorithm used to create the checksum for the object
+    #[arg(long)]
+    pub checksum_algorithm: Option<ChecksumAlgorithm>,
+
+    /// A map of metadata to store with the objects in S3
+    #[arg(long, value_name = "KeyName1=string,KeyName2=string")]
+    pub metadata: Option<String>,
+
+    /// Determines which properties are copied from the source S3 object
+    #[arg(long, default_value = "default")]
+    pub copy_props: CopyProps,
+
+    /// Sets the x-amz-metadata-directive header for CopyObject operations
+    #[arg(long)]
+    pub metadata_directive: Option<MetadataDirective>,
+
+    /// Behavior when downloading multiple objects whose keys differ only by case
+    #[arg(long, default_value = "ignore")]
+    pub case_conflict: CaseConflict,
+
+    /// Prevents overwriting of files at the destination
+    #[arg(long)]
+    pub no_overwrite: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RequestPayerArgs {
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, num_args = 0..=1, default_missing_value = "requester")]
+    pub request_payer: Option<RequestPayer>,
+}
+
+#[derive(Debug, Args)]
+pub struct FilterArgs {
+    /// Don't exclude files or objects that match the specified pattern
+    #[arg(long, value_name = "PATTERN")]
+    include: Vec<String>,
+
+    /// Exclude all files or objects that match the specified pattern
+    #[arg(long, value_name = "PATTERN")]
+    exclude: Vec<String>,
+
+    /// The filters in the order of the command line, since later filters
+    /// take precedence over earlier ones.
+    #[arg(skip)]
+    pub filters: Vec<Filter>,
+}
+
+impl FilterArgs {
+    fn resolve(&mut self, matches: &ArgMatches) {
+        let indices = |id| matches.indices_of(id).into_iter().flatten();
+        let mut filters: Vec<_> = indices("include")
+            .zip(self.include.drain(..).map(Filter::Include))
+            .chain(indices("exclude").zip(self.exclude.drain(..).map(Filter::Exclude)))
+            .collect();
+        filters.sort_by_key(|(index, _)| *index);
+        self.filters = filters.into_iter().map(|(_, filter)| filter).collect();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Filter {
+    Include(String),
+    Exclude(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Output {
+    Json,
+    Text,
+    Table,
+    Yaml,
+    YamlStream,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Color {
+    On,
+    Off,
+    Auto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BinaryFormat {
+    Base64,
+    RawInBase64Out,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ErrorFormat {
+    Legacy,
+    Json,
+    Yaml,
+    Text,
+    Table,
+    Enhanced,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Acl {
+    Private,
+    PublicRead,
+    PublicReadWrite,
+    AuthenticatedRead,
+    AwsExecRead,
+    BucketOwnerRead,
+    BucketOwnerFullControl,
+    LogDeliveryWrite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Sse {
+    #[value(name = "AES256")]
+    Aes256,
+    #[value(name = "aws:kms")]
+    AwsKms,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SseC {
+    #[value(name = "AES256")]
+    Aes256,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StorageClass {
+    Standard,
+    ReducedRedundancy,
+    StandardIa,
+    OnezoneIa,
+    IntelligentTiering,
+    Glacier,
+    DeepArchive,
+    GlacierIr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RequestPayer {
+    Requester,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ChecksumMode {
+    #[value(name = "ENABLED")]
+    Enabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "UPPER")]
+pub enum ChecksumAlgorithm {
+    Crc64nvme,
+    Crc32,
+    Sha256,
+    Sha1,
+    Crc32c,
+    Sha512,
+    Xxhash64,
+    Xxhash3,
+    Xxhash128,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CopyProps {
+    None,
+    MetadataDirective,
+    Default,
+    All,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "UPPER")]
+pub enum MetadataDirective {
+    Copy,
+    Replace,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CaseConflict {
+    Ignore,
+    Skip,
+    Warn,
+    Error,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_args_from(std::iter::once("aws3").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn verify_command() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn ls_default_path() {
+        let cli = parse(&["ls"]).unwrap();
+        let Command::Ls(args) = cli.command else {
+            panic!()
+        };
+        assert_eq!(args.path, "s3://");
+    }
+
+    #[test]
+    fn global_options_after_subcommand() {
+        let cli = parse(&[
+            "ls",
+            "s3://bucket",
+            "--region",
+            "us-west-2",
+            "--output",
+            "json",
+        ])
+        .unwrap();
+        assert_eq!(cli.global.region.as_deref(), Some("us-west-2"));
+        assert_eq!(cli.global.output, Some(Output::Json));
+    }
+
+    #[test]
+    fn filters_keep_order() {
+        let cli = parse(&[
+            "cp",
+            ".",
+            "s3://bucket",
+            "--recursive",
+            "--exclude",
+            "*",
+            "--include",
+            "*.log",
+            "--exclude",
+            "tmp/*",
+        ])
+        .unwrap();
+        let Command::Cp(args) = cli.command else {
+            panic!()
+        };
+        assert_eq!(
+            args.transfer.filter.filters,
+            [
+                Filter::Exclude("*".into()),
+                Filter::Include("*.log".into()),
+                Filter::Exclude("tmp/*".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn optional_values() {
+        let cli = parse(&["cp", "a", "s3://bucket/a", "--sse", "--request-payer"]).unwrap();
+        let Command::Cp(args) = cli.command else {
+            panic!()
+        };
+        assert_eq!(args.transfer.sse, Some(Sse::Aes256));
+        assert_eq!(
+            args.transfer.request_payer.request_payer,
+            Some(RequestPayer::Requester)
+        );
+
+        let cli = parse(&["cp", "a", "s3://bucket/a", "--sse", "aws:kms"]).unwrap();
+        let Command::Cp(args) = cli.command else {
+            panic!()
+        };
+        assert_eq!(args.transfer.sse, Some(Sse::AwsKms));
+    }
+
+    #[test]
+    fn choice_names() {
+        let cli = parse(&[
+            "sync",
+            ".",
+            "s3://bucket",
+            "--acl",
+            "bucket-owner-full-control",
+            "--storage-class",
+            "GLACIER_IR",
+            "--checksum-algorithm",
+            "CRC64NVME",
+            "--metadata-directive",
+            "REPLACE",
+        ])
+        .unwrap();
+        let Command::Sync(args) = cli.command else {
+            panic!()
+        };
+        assert_eq!(args.transfer.acl, Some(Acl::BucketOwnerFullControl));
+        assert_eq!(args.transfer.storage_class, Some(StorageClass::GlacierIr));
+        assert_eq!(
+            args.transfer.checksum_algorithm,
+            Some(ChecksumAlgorithm::Crc64nvme)
+        );
+        assert_eq!(
+            args.transfer.metadata_directive,
+            Some(MetadataDirective::Replace)
+        );
+        assert!(parse(&["cp", "a", "s3://bucket/a", "--acl", "foo"]).is_err());
+    }
+
+    #[test]
+    fn mb_tags() {
+        let cli = parse(&[
+            "mb",
+            "s3://bucket",
+            "--tags",
+            "k1",
+            "v1",
+            "--tags",
+            "k2",
+            "v2",
+        ])
+        .unwrap();
+        let Command::Mb(args) = cli.command else {
+            panic!()
+        };
+        assert_eq!(args.tags, ["k1", "v1", "k2", "v2"]);
+    }
+
+    #[test]
+    fn missing_paths() {
+        assert!(parse(&["cp", "a"]).is_err());
+        assert!(parse(&["rm"]).is_err());
+        assert!(parse(&["cp", "a", "b", "c"]).is_err());
+    }
+}

@@ -68,7 +68,7 @@ jobs:
         run: echo name=${{ github.event.repository.name }} >> "$GITHUB_OUTPUT"
       - name: Run
         if: matrix.os == 'darwin' || matrix.arch == 'amd64'
-        run: target/${{ matrix.target }}/release/${{ steps.executable.outputs.name }}
+        run: target/${{ matrix.target }}/release/${{ steps.executable.outputs.name }} --version
       - name: Set artifact name
         id: artifact
         run: echo name=${{ steps.executable.outputs.name }}_${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name ||
@@ -107,7 +107,7 @@ jobs:
       - name: Test
         run: cargo test
       - name: Run
-        run: cargo run
+        run: cargo run -- --version
 
   release:
     name: Release
