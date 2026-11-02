@@ -11,7 +11,9 @@ fn ls_buckets() {
     env.bucket("bucket-a");
     env.bucket("bucket-b");
     let result = env.run(&["ls"]).success();
-    let buckets: Vec<_> = result.lines().iter().map(|line| &line[20..]).collect();
+    // The fake server lists the buckets in the order of the file system.
+    let mut buckets: Vec<_> = result.lines().iter().map(|line| &line[20..]).collect();
+    buckets.sort();
     assert_eq!(buckets, ["bucket-a", "bucket-b"]);
 }
 
