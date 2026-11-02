@@ -1,0 +1,19 @@
+[package]
+name = "aws3"
+version = "0.1.0"
+edition = "2024"
+description = "A fast command compatible with aws s3"
+repository = "https://github.com/itchyny/aws3"
+authors = ["itchyny <itchyny@cybozu.co.jp>"]
+license = "MIT"
+readme = "README.md"
+keywords = ["aws", "s3", "cli"]
+categories = ["command-line-utilities"]
+rust-version = "1.85"
+
+[dependencies]
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
