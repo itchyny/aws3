@@ -63,8 +63,19 @@ impl Env {
             async move {
                 let (parts, body) = request.into_parts();
                 let body = body.collect().await.map_err(|err| err.to_string())?;
+                let encode = parts.uri.query().is_some_and(|query| {
+                    query.split('&').any(|param| param == "encoding-type=url")
+                });
                 let request = http::Request::from_parts(parts, s3s::Body::from(body.to_bytes()));
-                s3.call(request).await.map_err(|err| format!("{err:?}"))
+                let response = s3.call(request).await.map_err(|err| format!("{err:?}"))?;
+                if !encode || !response.status().is_success() {
+                    return Ok(response);
+                }
+                let (mut parts, body) = response.into_parts();
+                let body = body.collect().await.map_err(|err| err.to_string())?;
+                let body = encode_keys(&String::from_utf8_lossy(&body.to_bytes()));
+                parts.headers.remove(http::header::CONTENT_LENGTH);
+                Ok::<_, String>(http::Response::from_parts(parts, s3s::Body::from(body)))
             }
         });
         runtime.spawn(async move {
@@ -244,6 +255,43 @@ s3 =
         std::fs::write(&path, content).unwrap();
         path
     }
+}
+
+/// URL-encodes the keys and the prefixes in the response of listing objects,
+/// since the fake server ignores `encoding-type=url` unlike S3.
+fn encode_keys(xml: &str) -> String {
+    let mut encoded = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(start) = rest
+        .find("<Key>")
+        .into_iter()
+        .chain(rest.find("<Prefix>"))
+        .min()
+    {
+        let (head, tail) = rest.split_at(start);
+        let (tag, tail) = tail.split_at(tail.find('>').unwrap() + 1);
+        let end = tail.find("</").unwrap();
+        encoded.push_str(head);
+        encoded.push_str(tag);
+        let value = tail[..end]
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&");
+        for byte in value.bytes() {
+            match byte {
+                b' ' => encoded.push('+'),
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                    encoded.push(byte as char)
+                }
+                _ => encoded.push_str(&format!("%{byte:02X}")),
+            }
+        }
+        rest = &tail[end..];
+    }
+    encoded.push_str(rest);
+    encoded
 }
 
 /// Creates the acceptor of TLS connections with a certificate signed by a new

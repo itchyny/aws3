@@ -64,6 +64,27 @@ fn rm_recursive() {
 }
 
 #[test]
+fn rm_url_encoded_keys() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for key in ["a+b c.txt", "100%25.txt", "ctrl\u{1}char.txt"] {
+        env.object("bucket", key, "x");
+    }
+    let result = env.run(&["rm", "s3://bucket", "--recursive"]).success();
+    let mut lines = result.lines();
+    lines.sort();
+    assert_eq!(
+        lines,
+        [
+            "delete: s3://bucket/100%25.txt",
+            "delete: s3://bucket/a+b c.txt",
+            "delete: s3://bucket/ctrl\u{1}char.txt",
+        ]
+    );
+    assert_eq!(env.object_content("bucket", "a+b c.txt"), None);
+}
+
+#[test]
 fn sync_upload() {
     let env = Env::new();
     env.bucket("bucket");

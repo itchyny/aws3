@@ -7,13 +7,13 @@ use std::time::SystemTime;
 
 use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::head_object::HeadObjectOutput;
-use aws_sdk_s3::types::RequestPayer;
+use aws_sdk_s3::types::{EncodingType, RequestPayer};
 use tokio::sync::mpsc::Sender;
 
 use super::params::{SseCustomerKey, set_sse_c};
 use super::paths::split_bucket_key;
 use crate::error::{Error, has_status_code};
-use crate::path::validate_bucket_name;
+use crate::path::{url_decode, validate_bucket_name};
 
 /// A file or an object listed by the generator.
 #[derive(Debug, Clone)]
@@ -223,6 +223,7 @@ async fn try_list_s3(
         .list_objects_v2()
         .bucket(bucket)
         .prefix(prefix)
+        .encoding_type(EncodingType::Url)
         .set_request_payer(options.request_payer.clone())
         .into_paginator();
     if let Some(page_size) = options.page_size {
@@ -232,7 +233,7 @@ async fn try_list_s3(
     while let Some(page) = pages.next().await {
         let page = page.map_err(|err| Error::sdk("ListObjectsV2", err).to_string())?;
         for object in page.contents() {
-            let key = object.key().unwrap_or_default();
+            let key = url_decode(object.key().unwrap_or_default());
             let size = object.size().unwrap_or_default().max(0) as u64;
             let source_path = format!("{bucket}/{key}");
             // Directory markers are only deleted, and a single object is

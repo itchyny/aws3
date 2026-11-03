@@ -6,13 +6,13 @@ use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::list_objects_v2::{ListObjectsV2Error, ListObjectsV2Output};
 use aws_sdk_s3::primitives::DateTime;
-use aws_sdk_s3::types::RequestPayer;
+use aws_sdk_s3::types::{EncodingType, RequestPayer};
 use chrono::Local;
 
 use crate::cli::{self, GlobalArgs, LsArgs};
 use crate::client;
 use crate::error::Error;
-use crate::path::{split_bucket_key, validate_bucket_name};
+use crate::path::{split_bucket_key, url_decode, validate_bucket_name};
 
 pub async fn run(args: &LsArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let config = client::load_config(global).await?;
@@ -96,6 +96,7 @@ impl Lister {
                 .bucket(bucket)
                 .prefix(key)
                 .set_delimiter((!args.recursive).then(|| "/".to_owned()))
+                .encoding_type(EncodingType::Url)
                 .set_request_payer(
                     args.request_payer
                         .request_payer
@@ -127,7 +128,7 @@ impl Lister {
 
     fn print_page(&mut self, output: &ListObjectsV2Output, use_basename: bool) -> io::Result<()> {
         for prefix in output.common_prefixes() {
-            let prefix = prefix.prefix().unwrap_or_default();
+            let prefix = url_decode(prefix.prefix().unwrap_or_default());
             let name = prefix.rsplit('/').nth(1).unwrap_or_default();
             writeln!(self.out, "{:>30} {name}/", "PRE")?;
             self.found = true;
@@ -136,11 +137,11 @@ impl Lister {
             let size = object.size().unwrap_or_default();
             self.total_size += size;
             self.total_objects += 1;
-            let key = object.key().unwrap_or_default();
+            let key = url_decode(object.key().unwrap_or_default());
             let name = if use_basename {
                 key.rsplit('/').next().unwrap_or_default()
             } else {
-                key
+                &key
             };
             writeln!(
                 self.out,

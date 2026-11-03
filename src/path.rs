@@ -19,6 +19,29 @@ fn access_point_name_start(path: &str) -> Option<usize> {
     matches!(path[index..].chars().next(), Some(':' | '/')).then_some(index + 1)
 }
 
+/// Decodes the URL-encoded key of a listing in the same way as
+/// `urllib.parse.unquote_plus` of Python, which the AWS CLI uses. The keys are
+/// requested to be encoded since XML cannot contain some characters.
+pub fn url_decode(value: &str) -> String {
+    let hex = |byte: u8| (byte as char).to_digit(16).map(|digit| digit as u8);
+    let mut bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    while let [byte, rest @ ..] = bytes {
+        bytes = rest;
+        match (byte, rest) {
+            (b'+', _) => decoded.push(b' '),
+            (b'%', [high, low, rest @ ..])
+                if let (Some(high), Some(low)) = (hex(*high), hex(*low)) =>
+            {
+                decoded.push(high << 4 | low);
+                bytes = rest;
+            }
+            _ => decoded.push(*byte),
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 /// The pattern of bucket names in the error message of the AWS CLI.
 const VALID_BUCKET: &str = r"^[a-zA-Z0-9.\-_]{1,255}$";
 
@@ -124,6 +147,19 @@ fn is_outpost_arn(arn: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode() {
+        assert_eq!(url_decode("plain.txt"), "plain.txt");
+        assert_eq!(url_decode("a%2Bb+c.txt"), "a+b c.txt");
+        assert_eq!(url_decode("100%2525.txt"), "100%25.txt");
+        assert_eq!(url_decode("%C3%BCn%C3%AF.txt"), "ünï.txt");
+        assert_eq!(url_decode("ctrl%01char"), "ctrl\u{1}char");
+        assert_eq!(url_decode("dir%2Fsub%20dir%2F"), "dir/sub dir/");
+        assert_eq!(url_decode("bad%zz%4"), "bad%zz%4");
+        assert_eq!(url_decode("%"), "%");
+        assert_eq!(url_decode("%FF"), "\u{FFFD}");
+    }
 
     #[test]
     fn bucket_name() {

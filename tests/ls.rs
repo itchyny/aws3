@@ -39,6 +39,38 @@ fn ls_objects() {
 }
 
 #[test]
+fn ls_url_encoded_keys() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for key in [
+        "a+b c.txt",
+        "100%25.txt",
+        "ünï.txt",
+        "ctrl\u{1}char.txt",
+        "sub dir/x.txt",
+    ] {
+        env.object("bucket", &format!("dir/{key}"), "x");
+    }
+    let result = env.run(&["ls", "s3://bucket/dir/"]).success();
+    let names: Vec<_> = result.lines().iter().map(|line| &line[31..]).collect();
+    assert_eq!(
+        names,
+        [
+            "sub dir/",
+            "100%25.txt",
+            "a+b c.txt",
+            "ctrl\u{1}char.txt",
+            "ünï.txt"
+        ]
+    );
+
+    let result = env
+        .run(&["ls", "s3://bucket/dir/sub dir/", "--recursive"])
+        .success();
+    assert!(result.lines()[0].ends_with(" dir/sub dir/x.txt"));
+}
+
+#[test]
 fn ls_recursive_summarize() {
     let env = Env::new();
     env.bucket("bucket");
