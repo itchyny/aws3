@@ -31,7 +31,41 @@ fn main() -> ExitCode {
 }
 
 async fn run(cli: &Cli) -> ExitCode {
-    let result = match &cli.command {
+    let result = match check_resources(&cli.command) {
+        Ok(()) => run_command(cli).await,
+        Err(err) => Err(err),
+    };
+    result.unwrap_or_else(|err| {
+        eprintln!("\naws3: [ERROR]: {err}");
+        err.exit_code()
+    })
+}
+
+/// Rejects the S3 paths of the resources unsupported by the s3 commands,
+/// which the AWS CLI checks on parsing the paths.
+fn check_resources(command: &Command) -> Result<(), error::Error> {
+    let s3_paths = |paths: &[&String]| {
+        paths
+            .iter()
+            .filter(|path| path.starts_with("s3://"))
+            .try_for_each(|path| path::check_supported_resource(path))
+    };
+    match command {
+        Command::Ls(args) => path::check_supported_resource(&args.path),
+        Command::Cp(args) => s3_paths(&[&args.source, &args.destination]),
+        Command::Mv(args) => s3_paths(&[&args.source, &args.destination]),
+        Command::Rm(args) => path::check_supported_resource(&args.path),
+        Command::Sync(args) => s3_paths(&[&args.source, &args.destination]),
+        Command::Mb(args) => path::check_supported_resource(&args.path),
+        Command::Rb(args) => path::check_supported_resource(&args.path),
+        Command::Website(args) => path::check_supported_resource(&args.path),
+        Command::Presign(args) => path::check_supported_resource(&args.path),
+    }
+    .map_err(error::Error::param_validation)
+}
+
+async fn run_command(cli: &Cli) -> Result<ExitCode, error::Error> {
+    match &cli.command {
         Command::Ls(args) => ls::run(args, &cli.global).await,
         Command::Cp(args) => transfer::cp(args, &cli.global).await,
         Command::Mv(args) => transfer::mv(args, &cli.global).await,
@@ -41,9 +75,5 @@ async fn run(cli: &Cli) -> ExitCode {
         Command::Rb(args) => bucket::rb(args, &cli.global).await,
         Command::Website(args) => bucket::website(args, &cli.global).await,
         Command::Presign(args) => presign::run(args, &cli.global).await,
-    };
-    result.unwrap_or_else(|err| {
-        eprintln!("\naws3: [ERROR]: {err}");
-        err.exit_code()
-    })
+    }
 }
