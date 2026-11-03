@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,7 @@ pub struct Env {
     storage: TempDir,
     work: TempDir,
     requests: Arc<Mutex<Vec<Request>>>,
+    regions: Arc<Mutex<HashMap<String, String>>>,
     _runtime: tokio::runtime::Runtime,
 }
 
@@ -34,6 +36,24 @@ pub struct Request {
     pub method: http::Method,
     pub uri: http::Uri,
     pub headers: http::HeaderMap,
+}
+
+impl Request {
+    /// Returns the bucket of the path-style request.
+    pub fn bucket(&self) -> &str {
+        let path = self.uri.path().trim_start_matches('/');
+        path.split('/').next().unwrap_or_default()
+    }
+
+    /// Returns the region in the credential scope of the signature.
+    pub fn signed_region(&self) -> &str {
+        let authorization = self.headers.get("authorization");
+        let authorization = authorization.and_then(|value| value.to_str().ok());
+        let credential = authorization.and_then(|value| value.split("Credential=").nth(1));
+        credential
+            .and_then(|value| value.split('/').nth(2))
+            .unwrap_or_default()
+    }
 }
 
 impl Env {
@@ -69,18 +89,28 @@ impl Env {
         // the server may respond early, e.g. on precondition failures, and
         // close the connection while the client is writing the body.
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let regions = Arc::new(Mutex::new(HashMap::<String, String>::new()));
         let service = hyper::service::service_fn({
-            let requests = requests.clone();
+            let (requests, regions) = (requests.clone(), regions.clone());
             move |request: http::Request<Incoming>| {
-                let (s3, requests) = (s3.clone(), requests.clone());
+                let (s3, requests, regions) = (s3.clone(), requests.clone(), regions.clone());
                 async move {
                     let (parts, body) = request.into_parts();
-                    requests.lock().unwrap().push(Request {
+                    let body = body.collect().await.map_err(|err| err.to_string())?;
+                    let request = Request {
                         method: parts.method.clone(),
                         uri: parts.uri.clone(),
                         headers: parts.headers.clone(),
-                    });
-                    let body = body.collect().await.map_err(|err| err.to_string())?;
+                    };
+                    requests.lock().unwrap().push(request.clone());
+                    // The requests to the bucket in another region are
+                    // redirected like S3.
+                    let region = regions.lock().unwrap().get(request.bucket()).cloned();
+                    if let Some(region) = region
+                        && request.signed_region() != region
+                    {
+                        return Ok(redirect_response(&request, &region));
+                    }
                     let encode = parts.uri.query().is_some_and(|query| {
                         query.split('&').any(|param| param == "encoding-type=url")
                     });
@@ -127,8 +157,16 @@ impl Env {
             storage,
             work,
             requests,
+            regions,
             _runtime: runtime,
         }
+    }
+
+    /// Places the bucket in the region, where the requests signed for other
+    /// regions are redirected.
+    pub fn bucket_region(&self, bucket: &str, region: &str) {
+        let mut regions = self.regions.lock().unwrap();
+        regions.insert(bucket.to_owned(), region.to_owned());
     }
 
     /// Returns the requests received by the server so far.
@@ -281,6 +319,27 @@ s3 =
         std::fs::write(&path, content).unwrap();
         path
     }
+}
+
+/// Returns the response of S3 to the request to the bucket in another region.
+fn redirect_response(request: &Request, region: &str) -> http::Response<s3s::Body> {
+    let body = if request.method == http::Method::HEAD {
+        String::new()
+    } else {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>PermanentRedirect</Code>\
+             <Message>The bucket you are attempting to access must be addressed using the \
+             specified endpoint. Please send all future requests to this endpoint.</Message>\
+             <Bucket>{}</Bucket></Error>",
+            request.bucket()
+        )
+    };
+    http::Response::builder()
+        .status(301)
+        .header("x-amz-bucket-region", region)
+        .header("content-type", "application/xml")
+        .body(s3s::Body::from(body))
+        .unwrap()
 }
 
 /// URL-encodes the keys and the prefixes in the response of listing objects,

@@ -29,6 +29,7 @@ use crate::config::S3Config;
 use crate::error::Error;
 use crate::filter::Filters;
 use crate::path::validate_bucket_name;
+use crate::redirect::Redirector;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
 use params::{Keys, RequestParams};
 use paths::{Endpoint, relative_path, split_bucket_key};
@@ -440,6 +441,8 @@ pub struct Context {
     cleanup: Mutex<Vec<JoinHandle<()>>>,
     /// The limit of the bandwidth of uploads and downloads.
     limiter: Option<Arc<bandwidth::Limiter>>,
+    /// The clients of the regions of the buckets found on redirects.
+    redirector: Redirector,
 }
 
 impl Context {
@@ -560,6 +563,7 @@ async fn run(
         cancel: watch::Sender::new(false),
         cleanup: Mutex::new(Vec::new()),
         limiter,
+        redirector: Redirector::default(),
     });
     // The first Ctrl-C cancels the transfers, and the second one exits.
     let listener = tokio::spawn({
@@ -702,7 +706,8 @@ fn spawn_generator(
                 checksum_mode: ctx.params.checksum_mode.clone(),
                 is_delete,
             };
-            generator::list_s3(&ctx.source_client, &path, dir_op, &options, &tx).await;
+            let client = &ctx.source_client;
+            generator::list_s3(client, &ctx.redirector, &path, dir_op, &options, &tx).await;
         });
     } else {
         let follow_symlinks = ctx.options.follow_symlinks;
@@ -1029,12 +1034,16 @@ async fn delete_object(
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
     let _permit = ctx.permit().await?;
-    client
-        .delete_object()
-        .bucket(bucket)
-        .key(key)
-        .set_request_payer(ctx.params.request_payer.clone())
-        .send()
+    ctx.redirector
+        .send(client, bucket, "DeleteObject", |client| async move {
+            client
+                .delete_object()
+                .bucket(bucket)
+                .key(key)
+                .set_request_payer(ctx.params.request_payer.clone())
+                .send()
+                .await
+        })
         .await
         .map_err(|err| Error::sdk("DeleteObject", err).to_string())?;
     Ok(Outcome::Done)

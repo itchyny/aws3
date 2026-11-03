@@ -9,6 +9,7 @@ mod ls;
 mod mime;
 mod path;
 mod presign;
+mod redirect;
 mod tls;
 mod transfer;
 

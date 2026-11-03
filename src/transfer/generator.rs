@@ -14,6 +14,7 @@ use super::params::{SseCustomerKey, set_sse_c};
 use super::paths::split_bucket_key;
 use crate::error::{Error, has_status_code};
 use crate::path::{url_decode, validate_bucket_name};
+use crate::redirect::Redirector;
 
 /// A file or an object listed by the generator.
 #[derive(Debug, Clone)]
@@ -195,18 +196,20 @@ pub struct ListOptions {
 /// `bucket/key` or `bucket/prefix/`.
 pub async fn list_s3(
     client: &Client,
+    redirector: &Redirector,
     path: &str,
     dir_op: bool,
     options: &ListOptions,
     tx: &Sender<Item>,
 ) {
-    if let Err(message) = try_list_s3(client, path, dir_op, options, tx).await {
+    if let Err(message) = try_list_s3(client, redirector, path, dir_op, options, tx).await {
         let _ = tx.send(Item::Error(message)).await;
     }
 }
 
 async fn try_list_s3(
     client: &Client,
+    redirector: &Redirector,
     path: &str,
     dir_op: bool,
     options: &ListOptions,
@@ -218,24 +221,37 @@ async fn try_list_s3(
         validate_bucket_name(bucket)?;
     }
     if !dir_op && !prefix.is_empty() {
-        let stat = head_single_object(client, bucket, prefix, options).await?;
+        let stat = head_single_object(client, redirector, bucket, prefix, options).await?;
         let _ = tx.send(Item::File(stat)).await;
         return Ok(());
     }
-    let mut paginator = client
-        .list_objects_v2()
-        .bucket(bucket)
-        .prefix(prefix)
-        .encoding_type(EncodingType::Url)
-        .set_request_payer(options.request_payer.clone())
-        .into_paginator();
-    if let Some(page_size) = options.page_size {
-        paginator = paginator.page_size(page_size);
+    let send = |client: &Client| {
+        let mut paginator = client
+            .list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix)
+            .encoding_type(EncodingType::Url)
+            .set_request_payer(options.request_payer.clone())
+            .into_paginator();
+        if let Some(page_size) = options.page_size {
+            paginator = paginator.page_size(page_size);
+        }
+        paginator.send()
+    };
+    let mut pages = send(&redirector.client(client, bucket));
+    let mut page = pages.next().await;
+    // The listing is restarted in the region of the bucket on redirects.
+    if let Some(Err(err)) = &page
+        && let Some(client) = redirector
+            .redirect(client, bucket, "ListObjectsV2", err)
+            .await
+    {
+        pages = send(&client);
+        page = pages.next().await;
     }
-    let mut pages = paginator.send();
-    while let Some(page) = pages.next().await {
-        let page = page.map_err(|err| Error::sdk("ListObjectsV2", err).to_string())?;
-        for object in page.contents() {
+    while let Some(result) = page {
+        let output = result.map_err(|err| Error::sdk("ListObjectsV2", err).to_string())?;
+        for object in output.contents() {
             let key = url_decode(object.key().unwrap_or_default());
             let size = object.size().unwrap_or_default().max(0) as u64;
             let source_path = format!("{bucket}/{key}");
@@ -266,12 +282,14 @@ async fn try_list_s3(
                 return Ok(());
             }
         }
+        page = pages.next().await;
     }
     Ok(())
 }
 
 async fn head_single_object(
     client: &Client,
+    redirector: &Redirector,
     bucket: &str,
     key: &str,
     options: &ListOptions,
@@ -285,14 +303,16 @@ async fn head_single_object(
             object: None,
         });
     }
-    let request = client
-        .head_object()
-        .bucket(bucket)
-        .key(key)
-        .set_request_payer(options.request_payer.clone())
-        .set_checksum_mode(options.checksum_mode.clone());
-    let output = set_sse_c!(request, &options.sse_c)
-        .send()
+    let output = redirector
+        .send(client, bucket, "HeadObject", |client| {
+            let request = client
+                .head_object()
+                .bucket(bucket)
+                .key(key)
+                .set_request_payer(options.request_payer.clone())
+                .set_checksum_mode(options.checksum_mode.clone());
+            set_sse_c!(request, &options.sse_c).send()
+        })
         .await
         .map_err(|err| {
             if has_status_code(&err, 404) {

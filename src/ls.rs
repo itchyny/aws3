@@ -2,9 +2,7 @@ use std::io::{self, BufWriter, Stdout, Write};
 use std::process::ExitCode;
 
 use aws_sdk_s3::Client;
-use aws_sdk_s3::config::http::HttpResponse;
-use aws_sdk_s3::error::SdkError;
-use aws_sdk_s3::operation::list_objects_v2::{ListObjectsV2Error, ListObjectsV2Output};
+use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output;
 use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::{EncodingType, RequestPayer};
 use chrono::Local;
@@ -13,6 +11,7 @@ use crate::cli::{self, GlobalArgs, LsArgs};
 use crate::client;
 use crate::error::Error;
 use crate::path::{split_bucket_key, url_decode, validate_bucket_name};
+use crate::redirect::Redirector;
 
 pub async fn run(args: &LsArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let config = client::load_config(global).await?;
@@ -108,14 +107,16 @@ impl Lister {
             }
             paginator.send()
         };
-        let mut pages = send(&client::new_client(config, None));
+        let client = client::new_client(config, None);
+        let mut pages = send(&client);
         let mut page = pages.next().await;
-        // Retry in the region of the bucket if it differs from the configured one.
+        // The listing is restarted in the region of the bucket on redirects.
         if let Some(Err(err)) = &page
-            && let Some(region) = bucket_region(err)
-            && Some(region) != config.sdk.region().map(|region| region.as_ref())
+            && let Some(client) = Redirector::default()
+                .redirect(&client, bucket, "ListObjectsV2", err)
+                .await
         {
-            pages = send(&client::new_client(config, Some(region)));
+            pages = send(&client);
             page = pages.next().await;
         }
         while let Some(result) = page {
@@ -170,12 +171,6 @@ impl Lister {
             size.to_string()
         }
     }
-}
-
-/// Returns the region of the bucket from the error response, as the AWS CLI
-/// follows the region of the bucket.
-fn bucket_region(err: &SdkError<ListObjectsV2Error, HttpResponse>) -> Option<&str> {
-    err.raw_response()?.headers().get("x-amz-bucket-region")
 }
 
 /// Formats the date time in the local time zone.

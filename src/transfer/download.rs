@@ -239,18 +239,22 @@ async fn get_object<'a>(
 ) -> Result<(GetObjectOutput, SemaphorePermit<'a>), String> {
     let params = &ctx.params;
     let pinned = etag.is_some();
-    let request = ctx
-        .source_client
-        .get_object()
-        .bucket(bucket)
-        .key(key)
-        .set_range(range)
-        .set_if_match(etag)
-        .set_request_payer(params.request_payer.clone())
-        .set_checksum_mode(params.checksum_mode.clone());
-    let request = set_sse_c!(request, &params.sse_c);
     let permit = ctx.permit().await?;
-    let output = request.send().await.map_err(|err| {
+    let result = ctx
+        .redirector
+        .send(&ctx.source_client, bucket, "GetObject", |client| {
+            let request = client
+                .get_object()
+                .bucket(bucket)
+                .key(key)
+                .set_range(range.clone())
+                .set_if_match(etag.clone())
+                .set_request_payer(params.request_payer.clone())
+                .set_checksum_mode(params.checksum_mode.clone());
+            set_sse_c!(request, &params.sse_c).send()
+        })
+        .await;
+    let output = result.map_err(|err| {
         if pinned && has_error_code(&err, "PreconditionFailed") {
             etag_mismatch(bucket, key)
         } else {
@@ -274,16 +278,16 @@ async fn head_object(
     key: &str,
 ) -> Result<aws_sdk_s3::operation::head_object::HeadObjectOutput, String> {
     let params = &ctx.params;
-    let request = ctx
-        .source_client
-        .head_object()
-        .bucket(bucket)
-        .key(key)
-        .set_request_payer(params.request_payer.clone());
-    let request = set_sse_c!(request, &params.sse_c);
     let _permit = ctx.permit().await?;
-    request
-        .send()
+    ctx.redirector
+        .send(&ctx.source_client, bucket, "HeadObject", |client| {
+            let request = client
+                .head_object()
+                .bucket(bucket)
+                .key(key)
+                .set_request_payer(params.request_payer.clone());
+            set_sse_c!(request, &params.sse_c).send()
+        })
         .await
         .map_err(|err| Error::sdk("HeadObject", err).to_string())
 }

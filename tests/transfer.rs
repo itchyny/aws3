@@ -64,6 +64,48 @@ fn rm_recursive() {
 }
 
 #[test]
+fn region_redirect() {
+    let env = Env::new();
+    env.bucket("far");
+    env.bucket_region("far", "ap-northeast-1");
+    env.object("far", "src.txt", "source");
+    env.write("dir/a.txt", "a");
+    env.write("dir/b.txt", "b");
+    let config = env.multipart_config();
+    let envs = [(config[0].0, config[0].1.as_str())];
+    env.write("big.bin", common::content(6 * 1024 * 1024));
+    // Returns the number of the redirected requests of the run.
+    let redirects = |args: &[&str]| {
+        let start = env.requests().len();
+        env.run_with_env(args, &envs).success();
+        env.requests()[start..]
+            .iter()
+            .filter(|request| request.signed_region() != "ap-northeast-1")
+            .count()
+    };
+    // The requests after the first redirect are sent to the region of the
+    // bucket, but the concurrent requests before it are redirected as well.
+    assert_eq!(redirects(&["ls", "s3://far"]), 1);
+    assert!(redirects(&["cp", "dir", "s3://far/dir", "--recursive"]) <= 2);
+    assert_eq!(redirects(&["cp", "big.bin", "s3://far/big.bin"]), 1);
+    assert_eq!(redirects(&["cp", "s3://far/src.txt", "out.txt"]), 1);
+    assert_eq!(
+        redirects(&["cp", "s3://far/src.txt", "s3://far/copy.txt"]),
+        1
+    );
+    assert_eq!(redirects(&["sync", "s3://far/dir", "synced"]), 1);
+    assert_eq!(redirects(&["rm", "s3://far/dir", "--recursive"]), 1);
+    assert_eq!(env.read("out.txt"), b"source");
+    assert_eq!(env.read("synced/a.txt"), b"a");
+    assert_eq!(env.object_content("far", "copy.txt").unwrap(), b"source");
+    assert_eq!(env.object_content("far", "dir/a.txt"), None);
+    assert_eq!(
+        env.object_content("far", "big.bin").unwrap().len(),
+        6 * 1024 * 1024
+    );
+}
+
+#[test]
 fn rm_url_encoded_keys() {
     let env = Env::new();
     env.bucket("bucket");

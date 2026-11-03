@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use aws_sdk_s3::config::RequestChecksumCalculation;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
+use aws_smithy_types::body::SdkBody;
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinSet;
 
@@ -153,6 +154,12 @@ async fn file_body(
     })
 }
 
+/// Clones the body to send the request again on redirects, where the bodies
+/// of the uploads are retryable.
+fn clone_body(body: &SdkBody) -> ByteStream {
+    ByteStream::new(body.try_clone().unwrap_or_else(SdkBody::taken))
+}
+
 /// Returns the body of the data in the memory, which limits the bandwidth.
 fn memory_body(ctx: &Context, data: Vec<u8>) -> ByteStream {
     match &ctx.limiter {
@@ -198,30 +205,34 @@ async fn put_object(
     content_type: Option<String>,
 ) -> Result<Outcome, String> {
     let params = &ctx.params;
-    let request = ctx
-        .client
-        .put_object()
-        .bucket(bucket)
-        .key(key)
-        .body(body)
-        .content_length(size as i64);
-    let request = set_object_params!(request, params)
-        .set_checksum_algorithm(checksum_algorithm(ctx))
-        .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
-    let request = set_sse_c!(request, &params.sse_c);
+    let body = body.into_inner();
     let has_content_type = content_type.is_some() || params.content_type.is_some();
-    let request = request.set_content_type(content_type.or(params.content_type.clone()));
+    let content_type = content_type.or(params.content_type.clone());
     let _permit = ctx.permit().await?;
-    // The SDK sends the default content type of the body, whereas the AWS CLI
-    // leaves it to S3, which defaults to binary/octet-stream.
-    let result = request
-        .customize()
-        .mutate_request(move |request| {
-            if !has_content_type {
-                request.headers_mut().remove("content-type");
-            }
+    let result = ctx
+        .redirector
+        .send(&ctx.client, bucket, "PutObject", |client| {
+            let request = client
+                .put_object()
+                .bucket(bucket)
+                .key(key)
+                .body(clone_body(&body))
+                .content_length(size as i64);
+            let request = set_object_params!(request, params)
+                .set_checksum_algorithm(checksum_algorithm(ctx))
+                .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
+            let request = set_sse_c!(request, &params.sse_c).set_content_type(content_type.clone());
+            // The SDK sends the default content type of the body, whereas the
+            // AWS CLI leaves it to S3, which defaults to binary/octet-stream.
+            request
+                .customize()
+                .mutate_request(move |request| {
+                    if !has_content_type {
+                        request.headers_mut().remove("content-type");
+                    }
+                })
+                .send()
         })
-        .send()
         .await;
     match result {
         Ok(_) => Ok(Outcome::Done),
@@ -287,17 +298,20 @@ impl MultipartUpload {
     ) -> Result<Self, String> {
         let params = &ctx.params;
         let checksum_algorithm = checksum_algorithm(ctx);
-        let request = ctx.client.create_multipart_upload().bucket(bucket).key(key);
-        let request =
-            set_object_params!(request, params).set_checksum_algorithm(checksum_algorithm.clone());
-        let request = set_sse_c!(request, &params.sse_c);
-        let request = match content_type {
-            Some(content_type) => request.content_type(content_type),
-            None => request,
-        };
         let _permit = ctx.permit().await?;
-        let output = request
-            .send()
+        let output = ctx
+            .redirector
+            .send(&ctx.client, bucket, "CreateMultipartUpload", |client| {
+                let request = client.create_multipart_upload().bucket(bucket).key(key);
+                let request = set_object_params!(request, params)
+                    .set_checksum_algorithm(checksum_algorithm.clone());
+                let request = set_sse_c!(request, &params.sse_c);
+                match &content_type {
+                    Some(content_type) => request.content_type(content_type),
+                    None => request,
+                }
+                .send()
+            })
             .await
             .map_err(|err| Error::sdk("CreateMultipartUpload", err).to_string())?;
         Ok(Self {
@@ -317,21 +331,23 @@ impl MultipartUpload {
         length: u64,
     ) -> PartResult {
         let params = &ctx.params;
-        let request = ctx
-            .client
-            .upload_part()
-            .bucket(&self.bucket)
-            .key(&self.key)
-            .upload_id(&self.upload_id)
-            .part_number(number)
-            .body(body)
-            .content_length(length as i64)
-            .set_checksum_algorithm(self.checksum_algorithm.clone())
-            .set_request_payer(params.request_payer.clone());
-        let request = set_sse_c!(request, &params.sse_c);
+        let body = body.into_inner();
         let _permit = ctx.permit().await?;
-        let output = request
-            .send()
+        let output = ctx
+            .redirector
+            .send(&ctx.client, &self.bucket, "UploadPart", |client| {
+                let request = client
+                    .upload_part()
+                    .bucket(&self.bucket)
+                    .key(&self.key)
+                    .upload_id(&self.upload_id)
+                    .part_number(number)
+                    .body(clone_body(&body))
+                    .content_length(length as i64)
+                    .set_checksum_algorithm(self.checksum_algorithm.clone())
+                    .set_request_payer(params.request_payer.clone());
+                set_sse_c!(request, &params.sse_c).send()
+            })
             .await
             .map_err(|err| Error::sdk("UploadPart", err).to_string())?;
         Ok(CompletedPart::builder()
@@ -380,22 +396,30 @@ impl MultipartUpload {
         }
         completed.sort_by_key(|part| part.part_number());
         let params = &ctx.params;
-        let request = ctx
-            .client
-            .complete_multipart_upload()
-            .bucket(&self.bucket)
-            .key(&self.key)
-            .upload_id(&self.upload_id)
-            .multipart_upload(
-                CompletedMultipartUpload::builder()
-                    .set_parts(Some(completed))
-                    .build(),
-            )
-            .set_request_payer(params.request_payer.clone())
-            .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
-        let request = set_sse_c!(request, &params.sse_c);
+        let upload = CompletedMultipartUpload::builder()
+            .set_parts(Some(completed))
+            .build();
         let _permit = ctx.permit().await?;
-        match request.send().await {
+        let result = ctx
+            .redirector
+            .send(
+                &ctx.client,
+                &self.bucket,
+                "CompleteMultipartUpload",
+                |client| {
+                    let request = client
+                        .complete_multipart_upload()
+                        .bucket(&self.bucket)
+                        .key(&self.key)
+                        .upload_id(&self.upload_id)
+                        .multipart_upload(upload.clone())
+                        .set_request_payer(params.request_payer.clone())
+                        .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
+                    set_sse_c!(request, &params.sse_c).send()
+                },
+            )
+            .await;
+        match result {
             Ok(_) => {
                 self.done.store(true, Ordering::Relaxed);
                 Ok(Outcome::Done)
@@ -425,13 +449,21 @@ impl MultipartUpload {
             return;
         }
         let _ = ctx
-            .client
-            .abort_multipart_upload()
-            .bucket(&self.bucket)
-            .key(&self.key)
-            .upload_id(&self.upload_id)
-            .set_request_payer(ctx.params.request_payer.clone())
-            .send()
+            .redirector
+            .send(
+                &ctx.client,
+                &self.bucket,
+                "AbortMultipartUpload",
+                |client| {
+                    client
+                        .abort_multipart_upload()
+                        .bucket(&self.bucket)
+                        .key(&self.key)
+                        .upload_id(&self.upload_id)
+                        .set_request_payer(ctx.params.request_payer.clone())
+                        .send()
+                },
+            )
             .await;
     }
 

@@ -152,25 +152,30 @@ async fn copy_single(
         }
         None => {}
     }
-    let request = ctx
-        .client
-        .copy_object()
-        .bucket(bucket)
-        .key(key)
-        .copy_source(copy_source(src_bucket, src_key));
-    let request = set_object_params!(request, params)
-        .set_metadata_directive(metadata_directive)
-        .set_tagging_directive(tagging_directive)
-        .set_annotation_directive(annotation_directive)
-        .set_checksum_algorithm(params.checksum_algorithm.clone())
-        .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
-    let request = set_sse_c!(request, &params.sse_c);
-    let mut request = set_copy_source_sse_c!(request, &params.sse_c_copy_source);
-    if let Some(head) = &inject {
-        request = set_source_props!(request, params, head);
-    }
     let _permit = ctx.permit().await?;
-    match request.send().await {
+    let result = ctx
+        .redirector
+        .send(&ctx.client, bucket, "CopyObject", |client| {
+            let request = client
+                .copy_object()
+                .bucket(bucket)
+                .key(key)
+                .copy_source(copy_source(src_bucket, src_key));
+            let request = set_object_params!(request, params)
+                .set_metadata_directive(metadata_directive.clone())
+                .set_tagging_directive(tagging_directive.clone())
+                .set_annotation_directive(annotation_directive.clone())
+                .set_checksum_algorithm(params.checksum_algorithm.clone())
+                .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
+            let request = set_sse_c!(request, &params.sse_c);
+            let mut request = set_copy_source_sse_c!(request, &params.sse_c_copy_source);
+            if let Some(head) = &inject {
+                request = set_source_props!(request, params, head);
+            }
+            request.send()
+        })
+        .await;
+    match result {
         Ok(_) => Ok(Outcome::Done),
         Err(err) if params.no_overwrite && has_error_code(&err, "PreconditionFailed") => {
             Ok(Outcome::Skipped)
@@ -207,18 +212,21 @@ async fn copy_multipart(
     };
     let tagging_header = serialize_tags(&tags);
     let put_tags_later = !tags.is_empty() && tagging_header.len() > MAX_TAGGING_HEADER_SIZE;
-    let request = ctx.client.create_multipart_upload().bucket(bucket).key(key);
-    let mut request = set_object_params!(request, params)
-        .set_checksum_algorithm(params.checksum_algorithm.clone())
-        .set_tagging((!tags.is_empty() && !put_tags_later).then_some(tagging_header));
-    request = set_sse_c!(request, &params.sse_c);
-    if let Some(head) = &source {
-        request = set_source_props!(request, params, head);
-    }
+    let tagging = (!tags.is_empty() && !put_tags_later).then_some(tagging_header);
     let output = {
         let _permit = ctx.permit().await?;
-        request
-            .send()
+        ctx.redirector
+            .send(&ctx.client, bucket, "CreateMultipartUpload", |client| {
+                let request = client.create_multipart_upload().bucket(bucket).key(key);
+                let mut request = set_object_params!(request, params)
+                    .set_checksum_algorithm(params.checksum_algorithm.clone())
+                    .set_tagging(tagging.clone());
+                request = set_sse_c!(request, &params.sse_c);
+                if let Some(head) = &source {
+                    request = set_source_props!(request, params, head);
+                }
+                request.send()
+            })
             .await
             .map_err(|err| Error::sdk("CreateMultipartUpload", err).to_string())?
     };
@@ -255,30 +263,35 @@ async fn copy_multipart(
     let outcome = upload.finish(ctx, completed, parts).await?;
     if put_tags_later && outcome == Outcome::Done {
         let permit = ctx.permit().await?;
+        let tagging = Tagging::builder()
+            .set_tag_set(Some(tags))
+            .build()
+            .map_err(|err| err.to_string())?;
         let result = ctx
-            .client
-            .put_object_tagging()
-            .bucket(bucket)
-            .key(key)
-            .tagging(
-                Tagging::builder()
-                    .set_tag_set(Some(tags))
-                    .build()
-                    .map_err(|err| err.to_string())?,
-            )
-            .set_request_payer(params.request_payer.clone())
-            .send()
+            .redirector
+            .send(&ctx.client, bucket, "PutObjectTagging", |client| {
+                client
+                    .put_object_tagging()
+                    .bucket(bucket)
+                    .key(key)
+                    .tagging(tagging.clone())
+                    .set_request_payer(params.request_payer.clone())
+                    .send()
+            })
             .await;
         drop(permit);
         if let Err(err) = result {
             let _permit = ctx.permit().await?;
             let _ = ctx
-                .client
-                .delete_object()
-                .bucket(bucket)
-                .key(key)
-                .set_request_payer(params.request_payer.clone())
-                .send()
+                .redirector
+                .send(&ctx.client, bucket, "DeleteObject", |client| {
+                    client
+                        .delete_object()
+                        .bucket(bucket)
+                        .key(key)
+                        .set_request_payer(params.request_payer.clone())
+                        .send()
+                })
                 .await;
             return Err(Error::sdk("PutObjectTagging", err).to_string());
         }
@@ -303,21 +316,25 @@ async fn upload_part_copy(
     end: u64,
 ) -> Result<CompletedPart, String> {
     let params = &ctx.params;
-    let request = ctx
-        .client
-        .upload_part_copy()
-        .bucket(&upload.bucket)
-        .key(&upload.key)
-        .upload_id(&upload.upload_id)
-        .part_number(number)
-        .copy_source(copy_source(&source.bucket, &source.key))
-        .copy_source_range(format!("bytes={start}-{end}"))
-        .set_copy_source_if_match(source.etag.clone())
-        .set_request_payer(params.request_payer.clone());
-    let request = set_sse_c!(request, &params.sse_c);
-    let request = set_copy_source_sse_c!(request, &params.sse_c_copy_source);
     let _permit = ctx.permit().await?;
-    let output = request.send().await.map_err(|err| {
+    let result = ctx
+        .redirector
+        .send(&ctx.client, &upload.bucket, "UploadPartCopy", |client| {
+            let request = client
+                .upload_part_copy()
+                .bucket(&upload.bucket)
+                .key(&upload.key)
+                .upload_id(&upload.upload_id)
+                .part_number(number)
+                .copy_source(copy_source(&source.bucket, &source.key))
+                .copy_source_range(format!("bytes={start}-{end}"))
+                .set_copy_source_if_match(source.etag.clone())
+                .set_request_payer(params.request_payer.clone());
+            let request = set_sse_c!(request, &params.sse_c);
+            set_copy_source_sse_c!(request, &params.sse_c_copy_source).send()
+        })
+        .await;
+    let output = result.map_err(|err| {
         if has_error_code(&err, "PreconditionFailed") {
             etag_mismatch(&source.bucket, &source.key)
         } else {
@@ -351,16 +368,16 @@ async fn head_source(
     if let Some(head) = head {
         return Ok(head.clone());
     }
-    let request = ctx
-        .source_client
-        .head_object()
-        .bucket(bucket)
-        .key(key)
-        .set_request_payer(ctx.params.request_payer.clone());
-    let request = set_sse_c!(request, &ctx.params.sse_c_copy_source);
     let _permit = ctx.permit().await?;
-    request
-        .send()
+    ctx.redirector
+        .send(&ctx.source_client, bucket, "HeadObject", |client| {
+            let request = client
+                .head_object()
+                .bucket(bucket)
+                .key(key)
+                .set_request_payer(ctx.params.request_payer.clone());
+            set_sse_c!(request, &ctx.params.sse_c_copy_source).send()
+        })
         .await
         .map_err(|err| Error::sdk("HeadObject", err).to_string())
 }
@@ -368,12 +385,15 @@ async fn head_source(
 async fn get_tags(ctx: &Context, bucket: &str, key: &str) -> Result<Vec<Tag>, String> {
     let _permit = ctx.permit().await?;
     let output = ctx
-        .source_client
-        .get_object_tagging()
-        .bucket(bucket)
-        .key(key)
-        .set_request_payer(ctx.params.request_payer.clone())
-        .send()
+        .redirector
+        .send(&ctx.source_client, bucket, "GetObjectTagging", |client| {
+            client
+                .get_object_tagging()
+                .bucket(bucket)
+                .key(key)
+                .set_request_payer(ctx.params.request_payer.clone())
+                .send()
+        })
         .await
         .map_err(|err| Error::sdk("GetObjectTagging", err).to_string())?;
     Ok(output.tag_set().to_vec())

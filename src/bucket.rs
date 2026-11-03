@@ -11,6 +11,7 @@ use crate::cli::{GlobalArgs, MbArgs, RbArgs, WebsiteArgs};
 use crate::client;
 use crate::error::Error;
 use crate::path::{split_bucket_key, validate_bucket_name};
+use crate::redirect::Redirector;
 use crate::transfer;
 
 pub async fn mb(args: &MbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
@@ -48,16 +49,20 @@ pub async fn mb(args: &MbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
         configuration = configuration.tags(tag);
         has_configuration = true;
     }
-    let result = client
-        .create_bucket()
-        .bucket(bucket)
-        .set_bucket_namespace(
-            bucket
-                .ends_with("-an")
-                .then_some(BucketNamespace::AccountRegional),
-        )
-        .set_create_bucket_configuration(has_configuration.then(|| configuration.build()))
-        .send()
+    let configuration = has_configuration.then(|| configuration.build());
+    let result = Redirector::default()
+        .send(&client, bucket, "CreateBucket", |client| {
+            client
+                .create_bucket()
+                .bucket(bucket)
+                .set_bucket_namespace(
+                    bucket
+                        .ends_with("-an")
+                        .then_some(BucketNamespace::AccountRegional),
+                )
+                .set_create_bucket_configuration(configuration.clone())
+                .send()
+        })
         .await;
     match result {
         Ok(_) => {
@@ -98,7 +103,12 @@ pub async fn rb(args: &RbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     }
     let config = client::load_config(global).await?;
     let client = client::new_client(&config, None);
-    match client.delete_bucket().bucket(bucket).send().await {
+    let result = Redirector::default()
+        .send(&client, bucket, "DeleteBucket", |client| {
+            client.delete_bucket().bucket(bucket).send()
+        })
+        .await;
+    match result {
         Ok(_) => {
             println!("remove_bucket: {bucket}");
             Ok(ExitCode::SUCCESS)
@@ -135,11 +145,15 @@ pub async fn website(args: &WebsiteArgs, global: &GlobalArgs) -> Result<ExitCode
     }
     let config = client::load_config(global).await?;
     let client = client::new_client(&config, None);
-    client
-        .put_bucket_website()
-        .bucket(bucket)
-        .website_configuration(configuration.build())
-        .send()
+    let configuration = configuration.build();
+    Redirector::default()
+        .send(&client, bucket, "PutBucketWebsite", |client| {
+            client
+                .put_bucket_website()
+                .bucket(bucket)
+                .website_configuration(configuration.clone())
+                .send()
+        })
         .await
         .map_err(|err| Error::sdk("PutBucketWebsite", err))?;
     Ok(ExitCode::SUCCESS)
