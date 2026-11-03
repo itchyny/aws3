@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use aws_sdk_s3::config::RequestChecksumCalculation;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
 use tokio::io::AsyncReadExt;
@@ -178,13 +179,14 @@ fn content_type(ctx: &Context, path: &str) -> Option<String> {
     }
 }
 
-/// Returns the checksum algorithm of uploads, which defaults to CRC32 like
-/// the AWS CLI.
-fn checksum_algorithm(ctx: &Context) -> ChecksumAlgorithm {
-    ctx.params
-        .checksum_algorithm
-        .clone()
-        .unwrap_or(ChecksumAlgorithm::Crc32)
+/// Returns the checksum algorithm of uploads, which defaults to CRC32 unless
+/// `request_checksum_calculation` is `when_required`, like the AWS CLI.
+fn checksum_algorithm(ctx: &Context) -> Option<ChecksumAlgorithm> {
+    ctx.params.checksum_algorithm.clone().or_else(|| {
+        let calculation = ctx.client.config().request_checksum_calculation();
+        (calculation != Some(&RequestChecksumCalculation::WhenRequired))
+            .then_some(ChecksumAlgorithm::Crc32)
+    })
 }
 
 async fn put_object(
@@ -204,7 +206,7 @@ async fn put_object(
         .body(body)
         .content_length(size as i64);
     let request = set_object_params!(request, params)
-        .set_checksum_algorithm(Some(checksum_algorithm(ctx)))
+        .set_checksum_algorithm(checksum_algorithm(ctx))
         .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
     let request = set_sse_c!(request, &params.sse_c);
     let has_content_type = content_type.is_some() || params.content_type.is_some();
@@ -287,7 +289,7 @@ impl MultipartUpload {
         let checksum_algorithm = checksum_algorithm(ctx);
         let request = ctx.client.create_multipart_upload().bucket(bucket).key(key);
         let request =
-            set_object_params!(request, params).checksum_algorithm(checksum_algorithm.clone());
+            set_object_params!(request, params).set_checksum_algorithm(checksum_algorithm.clone());
         let request = set_sse_c!(request, &params.sse_c);
         let request = match content_type {
             Some(content_type) => request.content_type(content_type),
@@ -302,7 +304,7 @@ impl MultipartUpload {
             bucket: bucket.to_owned(),
             key: key.to_owned(),
             upload_id: output.upload_id().unwrap_or_default().to_owned(),
-            checksum_algorithm: Some(checksum_algorithm),
+            checksum_algorithm,
             done: Arc::default(),
         })
     }

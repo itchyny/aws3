@@ -541,6 +541,52 @@ fn cp_multipart_etag() {
 }
 
 #[test]
+fn cp_request_checksum_calculation() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.multipart_config();
+    let config = config[0].1.as_str();
+    env.write("small.txt", "small");
+    env.write("big.bin", content(6 * 1024 * 1024));
+    // Returns whether the uploads of the run sent the checksums.
+    let checksums = |envs: &[(&str, &str)]| {
+        let start = env.requests().len();
+        for file in ["small.txt", "big.bin"] {
+            let mut envs = envs.to_vec();
+            envs.push(("AWS_CONFIG_FILE", config));
+            env.run_with_env(&["cp", file, &format!("s3://bucket/{file}")], &envs)
+                .success();
+        }
+        env.requests()[start..]
+            .iter()
+            .filter(|request| {
+                request.method == "PUT"
+                    || request.method == "POST"
+                        && request
+                            .uri
+                            .query()
+                            .is_some_and(|query| query.starts_with("uploads"))
+            })
+            .map(|request| {
+                request.headers.iter().any(|(name, value)| {
+                    name.as_str().starts_with("x-amz-checksum-")
+                        || name == "x-amz-sdk-checksum-algorithm"
+                        || name == "x-amz-trailer"
+                            && value.to_str().unwrap().starts_with("x-amz-checksum-")
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    // The single upload, and the creation and the two parts of the multipart
+    // upload, except for the completion.
+    assert_eq!(checksums(&[]), [true; 4]);
+    assert_eq!(
+        checksums(&[("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")]),
+        [false; 4]
+    );
+}
+
+#[test]
 fn cp_no_overwrite_upload() {
     let env = Env::new();
     env.bucket("bucket");
