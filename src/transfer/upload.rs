@@ -179,13 +179,13 @@ fn content_type(ctx: &Context, path: &str) -> Option<String> {
     }
 }
 
-/// Returns the checksum algorithm of uploads, which defaults to CRC32 unless
+/// Returns the checksum algorithm of uploads, which defaults to CRC64NVME unless
 /// `request_checksum_calculation` is `when_required`, like the AWS CLI.
 fn checksum_algorithm(ctx: &Context) -> Option<ChecksumAlgorithm> {
     ctx.params.checksum_algorithm.clone().or_else(|| {
         let calculation = ctx.client.config().request_checksum_calculation();
         (calculation != Some(&RequestChecksumCalculation::WhenRequired))
-            .then_some(ChecksumAlgorithm::Crc32)
+            .then_some(ChecksumAlgorithm::Crc64Nvme)
     })
 }
 

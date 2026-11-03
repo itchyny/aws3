@@ -580,6 +580,19 @@ fn cp_request_checksum_calculation() {
     // The single upload, and the creation and the two parts of the multipart
     // upload, except for the completion.
     assert_eq!(checksums(&[]), [true; 4]);
+    // The algorithm defaults to CRC64NVME like the AWS CLI.
+    let algorithms: Vec<_> = env
+        .requests()
+        .iter()
+        .filter_map(|request| {
+            let headers = &request.headers;
+            headers
+                .get("x-amz-sdk-checksum-algorithm")
+                .or_else(|| headers.get("x-amz-checksum-algorithm"))
+        })
+        .map(|value| value.to_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(algorithms, ["CRC64NVME"; 4]);
     assert_eq!(
         checksums(&[("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")]),
         [false; 4]
