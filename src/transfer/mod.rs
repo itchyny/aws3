@@ -30,7 +30,7 @@ use crate::error::Error;
 use crate::filter::Filters;
 use crate::path::validate_bucket_name;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
-use params::RequestParams;
+use params::{Keys, RequestParams};
 use paths::{Endpoint, relative_path, split_bucket_key};
 use printer::{PrintMode, Printer, TransferId};
 
@@ -166,14 +166,16 @@ pub async fn cp(args: &CpArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let mut options =
         Options::new(CommandName::Cp, paths, args.recursive).with_transfer_args(&args.transfer);
     options.expected_size = args.expected_size;
-    run(options, RequestParams::new(&args.transfer, global), global).await
+    let keys = Keys::load(&args.transfer)?;
+    run(options, RequestParams::new(&args.transfer, &keys), global).await
 }
 
 pub async fn mv(args: &MvArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let paths = vec![args.source.clone(), args.destination.clone()];
     let options =
         Options::new(CommandName::Mv, paths, args.recursive).with_transfer_args(&args.transfer);
-    run(options, RequestParams::new(&args.transfer, global), global).await
+    let keys = Keys::load(&args.transfer)?;
+    run(options, RequestParams::new(&args.transfer, &keys), global).await
 }
 
 pub async fn rm(args: &RmArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
@@ -204,7 +206,8 @@ pub async fn sync(args: &SyncArgs, global: &GlobalArgs) -> Result<ExitCode, Erro
     options.exact_timestamps = args.exact_timestamps;
     options.delete = args.delete;
     // The no-overwrite option is handled by comparing the files.
-    let params = RequestParams::new(&args.transfer, global).map(|params| RequestParams {
+    let keys = Keys::load(&args.transfer)?;
+    let params = RequestParams::new(&args.transfer, &keys).map(|params| RequestParams {
         no_overwrite: false,
         ..params
     });

@@ -2,6 +2,7 @@
 //! same way as `RequestParamsMapper` of the AWS CLI.
 
 use std::collections::HashMap;
+use std::io::ErrorKind;
 
 use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::{
@@ -11,7 +12,8 @@ use aws_sdk_s3::types::{
 use aws_smithy_types::base64;
 use md5::{Digest, Md5};
 
-use crate::cli::{self, BinaryFormat, GlobalArgs, TransferArgs};
+use crate::cli::{self, TransferArgs};
+use crate::error::Error;
 
 /// The customer-provided key of server-side encryption.
 #[derive(Debug, Clone)]
@@ -51,7 +53,7 @@ pub struct RequestParams {
 impl RequestParams {
     /// Creates the request parameters, where errors are reported as fatal
     /// errors like the AWS CLI does on submitting transfers.
-    pub fn new(args: &TransferArgs, global: &GlobalArgs) -> Result<Self, String> {
+    pub fn new(args: &TransferArgs, keys: &Keys) -> Result<Self, String> {
         let mut params = Self {
             acl: args
                 .acl
@@ -74,12 +76,11 @@ impl RequestParams {
                 .sse
                 .map(|sse| ServerSideEncryption::from(value_name(sse).as_str())),
             sse_kms_key_id: args.sse_kms_key_id.clone(),
-            sse_c: sse_customer_key(args.sse_c, args.sse_c_key.as_deref(), global)?,
+            sse_c: sse_customer_key(args.sse_c, keys.sse_c.as_deref()),
             sse_c_copy_source: sse_customer_key(
                 args.sse_c_copy_source,
-                args.sse_c_copy_source_key.as_deref(),
-                global,
-            )?,
+                keys.sse_c_copy_source.as_deref(),
+            ),
             request_payer: request_payer(args.request_payer.request_payer),
             checksum_algorithm: args
                 .checksum_algorithm
@@ -188,33 +189,62 @@ fn request_payer(payer: Option<cli::RequestPayer>) -> Option<RequestPayer> {
     payer.map(|cli::RequestPayer::Requester| RequestPayer::Requester)
 }
 
-fn sse_customer_key(
-    algorithm: Option<cli::SseC>,
-    key: Option<&str>,
-    global: &GlobalArgs,
-) -> Result<Option<SseCustomerKey>, String> {
+fn sse_customer_key(algorithm: Option<cli::SseC>, key: Option<&[u8]>) -> Option<SseCustomerKey> {
     let (Some(algorithm), Some(key)) = (algorithm, key) else {
-        return Ok(None);
+        return None;
     };
-    let key = parse_blob(key, global)?;
-    Ok(Some(SseCustomerKey {
+    Some(SseCustomerKey {
         algorithm: value_name(algorithm),
-        key: base64::encode(&key),
-        key_md5: base64::encode(Md5::digest(&key)),
-    }))
+        key: base64::encode(key),
+        key_md5: base64::encode(Md5::digest(key)),
+    })
 }
 
-/// Parses the blob argument, which is base64 encoded unless the binary
-/// format is `raw-in-base64-out`, or the content of a `fileb://` file.
-fn parse_blob(value: &str, global: &GlobalArgs) -> Result<Vec<u8>, String> {
-    if let Some(path) = value.strip_prefix("fileb://") {
-        return std::fs::read(path)
-            .map_err(|err| format!("Unable to load paramfile {value}: {err}"));
+/// The customer-provided keys of server-side encryption, which are loaded
+/// before the other arguments are validated, like the parameter files of the
+/// AWS CLI.
+#[derive(Debug, Default)]
+pub struct Keys {
+    sse_c: Option<Vec<u8>>,
+    sse_c_copy_source: Option<Vec<u8>>,
+}
+
+impl Keys {
+    pub fn load(args: &TransferArgs) -> Result<Self, Error> {
+        Ok(Self {
+            sse_c: load_key("--sse-c-key", args.sse_c_key.as_deref())?,
+            sse_c_copy_source: load_key(
+                "--sse-c-copy-source-key",
+                args.sse_c_copy_source_key.as_deref(),
+            )?,
+        })
     }
-    if global.cli_binary_format == Some(BinaryFormat::RawInBase64Out) {
-        return Ok(value.as_bytes().to_vec());
-    }
-    base64::decode(value).map_err(|_| format!("Invalid base64: \"{value}\""))
+}
+
+/// Loads the customer-provided key, which is not base64 encoded regardless
+/// of the binary format unlike the blobs of the API commands, or the content
+/// of a `fileb://` or `file://` file.
+fn load_key(name: &str, value: Option<&str>) -> Result<Option<Vec<u8>>, Error> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(path) = value
+        .strip_prefix("fileb://")
+        .or_else(|| value.strip_prefix("file://"))
+    else {
+        return Ok(Some(value.as_bytes().to_vec()));
+    };
+    std::fs::read(path).map(Some).map_err(|err| {
+        let err = match err.kind() {
+            ErrorKind::NotFound => format!("[Errno 2] No such file or directory: '{path}'"),
+            ErrorKind::PermissionDenied => format!("[Errno 13] Permission denied: '{path}'"),
+            ErrorKind::IsADirectory => format!("[Errno 21] Is a directory: '{path}'"),
+            _ => err.to_string(),
+        };
+        Error::param_validation(format!(
+            "Error parsing parameter '{name}': Unable to load paramfile {value}: {err}"
+        ))
+    })
 }
 
 /// Parses the timestamp argument, which is an ISO 8601 date time, an RFC 2822
@@ -337,7 +367,8 @@ mod tests {
         let Command::Cp(cp) = &cli.command else {
             unreachable!()
         };
-        RequestParams::new(&cp.transfer, &cli.global)
+        let keys = Keys::load(&cp.transfer).map_err(|err| err.to_string())?;
+        RequestParams::new(&cp.transfer, &keys)
     }
 
     #[test]
@@ -372,46 +403,35 @@ mod tests {
 
     #[test]
     fn sse_customer_key() {
-        // The key is base64 encoded by the default.
-        let params = parse(&[
-            "--sse-c",
-            "--sse-c-key",
-            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
-        ])
-        .unwrap();
-        let key = params.sse_c.unwrap();
-        assert_eq!(key.algorithm, "AES256");
-        assert_eq!(key.key, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=");
-        assert_eq!(
-            key.key_md5,
-            base64::encode(Md5::digest(b"0123456789abcdef0123456789abcdef"))
-        );
-
-        let params = parse(&[
-            "--sse-c",
-            "AES256",
-            "--sse-c-key",
-            "0123456789abcdef0123456789abcdef",
-            "--cli-binary-format",
-            "raw-in-base64-out",
-        ])
-        .unwrap();
-        assert_eq!(
-            params.sse_c.unwrap().key,
-            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
-        );
+        // The key is not base64 encoded regardless of the binary format.
+        let key = b"0123456789abcdef0123456789abcdef";
+        let encoded = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+        for args in [
+            &["--sse-c", "--sse-c-key", "0123456789abcdef0123456789abcdef"][..],
+            &[
+                "--sse-c",
+                "AES256",
+                "--sse-c-key",
+                "0123456789abcdef0123456789abcdef",
+                "--cli-binary-format",
+                "base64",
+            ],
+        ] {
+            let sse_c = parse(args).unwrap().sse_c.unwrap();
+            assert_eq!(sse_c.algorithm, "AES256");
+            assert_eq!(sse_c.key, encoded);
+            assert_eq!(sse_c.key_md5, base64::encode(Md5::digest(key)));
+        }
 
         let path = std::env::temp_dir().join(format!("aws3-test-key-{}", std::process::id()));
-        std::fs::write(&path, b"0123456789abcdef0123456789abcdef").unwrap();
-        let fileb = format!("fileb://{}", path.display());
-        let result = parse(&["--sse-c-copy-source", "--sse-c-copy-source-key", &fileb]);
+        std::fs::write(&path, key).unwrap();
+        for scheme in ["fileb", "file"] {
+            let arg = format!("{scheme}://{}", path.display());
+            let result = parse(&["--sse-c-copy-source", "--sse-c-copy-source-key", &arg]);
+            assert_eq!(result.unwrap().sse_c_copy_source.unwrap().key, encoded);
+        }
         std::fs::remove_file(&path).unwrap();
-        assert_eq!(
-            result.unwrap().sse_c_copy_source.unwrap().key,
-            "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
-        );
 
-        assert!(parse(&["--sse-c", "--sse-c-key", "not base64!"]).is_err());
         assert!(parse(&["--sse-c", "--sse-c-key", "fileb:///nonexistent"]).is_err());
     }
 
