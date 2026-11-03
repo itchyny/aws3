@@ -64,9 +64,38 @@ fn presign() {
         .run(&["presign", "s3://bucket/a b.txt", "--expires-in", "60"])
         .success();
     let url = result.stdout.trim_end();
-    assert!(url.contains("/bucket/a%20b.txt?"), "{url}");
+    // The query has no operation name, unlike the URLs of the SDK.
+    assert!(url.contains("/bucket/a%20b.txt?X-Amz-Algorithm="), "{url}");
     assert!(url.contains("X-Amz-Expires=60"), "{url}");
     assert!(url.contains("X-Amz-Signature="), "{url}");
+    // The signature is verified by the fake server.
+    env.object("bucket", "a b.txt", "hello");
+    assert_eq!(http_get(url), "hello");
+
+    let result = env.run(&["presign", "s3://bucket"]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+         Invalid length for parameter Key, value: 0, valid min length: 1\n"
+    );
+}
+
+/// Sends the GET request to the URL of HTTP, and returns the body.
+fn http_get(url: &str) -> String {
+    use std::io::{Read, Write};
+    let rest = url.strip_prefix("http://").unwrap();
+    let (host, path) = rest.split_at(rest.find('/').unwrap());
+    let mut stream = std::net::TcpStream::connect(host).unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    response.split_once("\r\n\r\n").unwrap().1.to_owned()
 }
 
 #[test]
