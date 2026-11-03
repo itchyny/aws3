@@ -9,6 +9,7 @@ mod generator;
 pub mod params;
 mod paths;
 mod printer;
+mod samepath;
 mod sync;
 mod upload;
 
@@ -82,6 +83,9 @@ pub struct Options {
     pub page_size: Option<i32>,
     pub filters: Vec<Filter>,
     pub source_region: Option<String>,
+    /// Whether the underlying buckets of the access points are resolved to
+    /// validate that `mv` does not move an object onto itself.
+    pub validate_same_s3_paths: bool,
     pub ignore_glacier_warnings: bool,
     pub force_glacier_transfer: bool,
     pub copy_props: CopyProps,
@@ -116,6 +120,7 @@ impl Options {
             page_size: None,
             filters: Vec::new(),
             source_region: None,
+            validate_same_s3_paths: false,
             ignore_glacier_warnings: false,
             force_glacier_transfer: false,
             copy_props: CopyProps::Default,
@@ -174,8 +179,9 @@ pub async fn cp(args: &CpArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
 
 pub async fn mv(args: &MvArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let paths = vec![args.source.clone(), args.destination.clone()];
-    let options =
+    let mut options =
         Options::new(CommandName::Mv, paths, args.recursive).with_transfer_args(&args.transfer);
+    options.validate_same_s3_paths = args.validate_same_s3_paths || samepath::enabled_by_env();
     let keys = Keys::load(&args.transfer)?;
     run(options, RequestParams::new(&args.transfer, &keys), global).await
 }
@@ -519,6 +525,11 @@ async fn run(
 ) -> Result<ExitCode, Error> {
     let plan = Plan::new(&mut options)?;
     let sdk_config = client::load_config(global).await?;
+    if options.command == CommandName::Mv && plan.paths_type == PathsType::S3S3 {
+        let region = options.source_region.as_deref();
+        let enabled = options.validate_same_s3_paths;
+        samepath::validate(&sdk_config, global, region, &plan.src, &plan.dest, enabled).await?;
+    }
     let client = client::new_client(&sdk_config, None);
     let source_client = match &options.source_region {
         Some(region) => client::new_client(&sdk_config, Some(region)),
