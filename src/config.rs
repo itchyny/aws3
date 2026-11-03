@@ -22,6 +22,8 @@ pub struct ProfileConfig {
     pub ca_bundle: Option<PathBuf>,
     /// The settings in the `s3` section.
     pub s3: S3Config,
+    /// The session of `aws login`, e.g. `arn:aws:iam::0123456789012:user/Admin`.
+    pub login_session: Option<String>,
 }
 
 impl ProfileConfig {
@@ -65,7 +67,16 @@ impl ProfileConfig {
         {
             s3.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
         }
-        Self { ca_bundle, s3 }
+        let login_session = settings
+            .profile
+            .iter()
+            .find(|(key, _)| key == "login_session")
+            .map(|(_, value)| value.clone());
+        Self {
+            ca_bundle,
+            s3,
+            login_session,
+        }
     }
 }
 

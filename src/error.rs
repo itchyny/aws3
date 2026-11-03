@@ -81,6 +81,39 @@ impl Error {
         }
     }
 
+    /// Creates an error of resolving the credentials of `aws login`, using the
+    /// same messages as `LoginCredentialFetcher` of the AWS CLI where the error
+    /// types of the SDK are private.
+    pub fn login(session: &str, err: &(dyn std::error::Error + 'static)) -> Self {
+        let mut source = Some(err);
+        let mut messages = Vec::new();
+        let mut not_found = false;
+        while let Some(err) = source {
+            if let Some(err) = err.downcast_ref::<std::io::Error>() {
+                not_found |= err.kind() == std::io::ErrorKind::NotFound;
+            }
+            messages.push(err.to_string());
+            source = err.source();
+        }
+        let has = |prefix: &str| messages.iter().any(|message| message.starts_with(prefix));
+        let message = if not_found {
+            format!(
+                "Error loading login session token: Unable to load a existing login session \
+                 for session {session}, Please reauthenticate with 'aws login'."
+            )
+        } else if has("missing field") || has("Expected field") {
+            "Error loading login session token: Failed to load access token from token cache, \
+             missing one or more required fields."
+                .to_owned()
+        } else if has("invalid JSON in cached Login token file") {
+            // The AWS CLI reports the cache key on the invalid JSON.
+            format!("'{}'", hex_sha256(session))
+        } else {
+            messages.pop().unwrap_or_default()
+        };
+        Self::new(message)
+    }
+
     pub fn exit_code(&self) -> ExitCode {
         ExitCode::from(self.code)
     }
@@ -131,6 +164,11 @@ fn reason_phrase(status: u16) -> &'static str {
         503 => "Service Unavailable",
         _ => "Unknown",
     }
+}
+
+fn hex_sha256(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+    crate::presign::hex(&Sha256::digest(value))
 }
 
 fn is_no_credentials(err: &(dyn std::error::Error + 'static)) -> bool {

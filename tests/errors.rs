@@ -62,6 +62,40 @@ fn no_credentials() {
 }
 
 #[test]
+fn login_session() {
+    let env = Env::new();
+    env.write("a.txt", "a");
+    let config = env.config(
+        r"[default]
+login_session = arn:aws:iam::123456789012:user/Admin
+",
+    );
+    let cache = env.path("login-cache");
+    // The errors of the credentials of `aws login` are reported before any
+    // requests, even on the dry runs.
+    for args in [
+        &["ls"][..],
+        &["cp", "a.txt", "s3://bucket/a.txt", "--dryrun"],
+    ] {
+        let mut command = env.command(args);
+        command
+            .env_remove("AWS_ACCESS_KEY_ID")
+            .env_remove("AWS_SECRET_ACCESS_KEY")
+            .env("AWS_CONFIG_FILE", &config)
+            .env("AWS_LOGIN_CACHE_DIRECTORY", &cache);
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(255));
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "\naws3: [ERROR]: Error loading login session token: Unable to load a existing \
+             login session for session arn:aws:iam::123456789012:user/Admin, Please \
+             reauthenticate with 'aws login'.\n"
+        );
+    }
+}
+
+#[test]
 fn ca_bundle() {
     let env = Env::new();
     env.bucket("bucket");

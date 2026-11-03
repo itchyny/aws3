@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use aws_config::{BehaviorVersion, SdkConfig};
+use aws_credential_types::provider::ProvideCredentials;
+use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::timeout::TimeoutConfig;
@@ -65,6 +67,16 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
         loader = loader.no_credentials();
     }
     let sdk = loader.load().await;
+    // The credentials of `aws login` are resolved on creating the clients,
+    // where the errors are reported before any requests like the AWS CLI.
+    if let Some(session) = &profile.login_session
+        && !global.no_sign_request
+        && let Some(provider) = sdk.credentials_provider()
+        && let Err(err) = provider.provide_credentials().await
+        && !matches!(err, CredentialsError::CredentialsNotLoaded(_))
+    {
+        return Err(Error::login(session, &err));
+    }
     let endpoint_url = global
         .endpoint_url
         .clone()

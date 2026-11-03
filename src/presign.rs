@@ -141,7 +141,8 @@ fn resign(url: &str, expires_in: i64, secret: &str) -> Option<String> {
     ))
 }
 
-fn hex(bytes: &[u8]) -> String {
+/// Encodes the bytes in lowercase hexadecimal digits.
+pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
