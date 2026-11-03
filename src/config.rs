@@ -109,7 +109,9 @@ impl Default for S3Config {
         Self {
             multipart_threshold: 8 * MIB,
             multipart_chunksize: 8 * MIB,
-            max_concurrent_requests: 10,
+            // The requests are more concurrent than 10 of the AWS CLI, which
+            // is slow for many small files.
+            max_concurrent_requests: 64,
             max_queue_size: 1000,
             addressing_style: AddressingStyle::Auto,
             use_accelerate_endpoint: false,

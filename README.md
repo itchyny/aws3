@@ -32,6 +32,8 @@ CLI.
   specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
 - `--debug`, `--query`, `--output` and `--color` are accepted but ignored.
 - `presign` rejects `--expires-in` longer than one week.
+- The default of `max_concurrent_requests` in the `s3` section is 64 instead
+  of 10, which makes the transfers of many small files faster.
 
 ## Installation
 

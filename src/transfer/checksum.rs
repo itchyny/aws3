@@ -71,13 +71,24 @@ impl FullObjectChecksum {
         })
     }
 
-    /// Returns the checksum of the part.
-    pub fn part(&self, offset: u64, data: &[u8]) -> PartChecksum {
+    /// Returns the empty checksum of the part at the offset.
+    pub fn part(&self, offset: u64) -> PartChecksum {
         PartChecksum {
             offset,
-            checksum: crc_fast::checksum(self.algorithm, data),
-            length: data.len() as u64,
+            checksum: 0,
+            length: 0,
         }
+    }
+
+    /// Updates the checksum of the part with the following data.
+    pub fn update(&self, part: &mut PartChecksum, data: &[u8]) {
+        let checksum = crc_fast::checksum(self.algorithm, data);
+        part.checksum = if part.length == 0 {
+            checksum
+        } else {
+            crc_fast::checksum_combine(self.algorithm, part.checksum, checksum, data.len() as u64)
+        };
+        part.length += data.len() as u64;
     }
 
     /// Combines the checksums of the parts, and returns the error message if
@@ -122,11 +133,18 @@ mod tests {
                 width,
                 expected: base64::encode(&whole.to_be_bytes()[8 - width..]),
             };
-            // The parts are combined in the order of the offsets.
+            // The parts are updated in pieces, and combined in the order of
+            // the offsets.
             let parts: Vec<_> = data
                 .chunks(3000)
                 .enumerate()
-                .map(|(i, chunk)| checksum.part(i as u64 * 3000, chunk))
+                .map(|(i, chunk)| {
+                    let mut part = checksum.part(i as u64 * 3000);
+                    chunk
+                        .chunks(700)
+                        .for_each(|piece| checksum.update(&mut part, piece));
+                    part
+                })
                 .rev()
                 .collect();
             assert_eq!(checksum.validate(parts.clone()), Ok(()));

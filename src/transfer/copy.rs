@@ -249,7 +249,10 @@ async fn copy_multipart(
     let mut offset = 0;
     let mut number = 1;
     while offset < size {
-        upload.wait_parts(ctx, &mut parts, &mut completed).await?;
+        let limit = ctx.config.max_concurrent_requests;
+        upload
+            .wait_parts(ctx, &mut parts, &mut completed, limit)
+            .await?;
         let end = (offset + chunk_size).min(size) - 1;
         let (ctx, upload, source) = (ctx.clone(), upload.clone(), source.clone());
         parts.spawn(async move {

@@ -5,8 +5,6 @@ use std::time::SystemTime;
 
 use aws_sdk_s3::config::ResponseChecksumValidation;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
-use aws_sdk_s3::primitives::ByteStream;
-use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::SemaphorePermit;
 use tokio::task::JoinSet;
@@ -17,6 +15,9 @@ use super::params::set_sse_c;
 use super::{Context, Outcome, TransferId};
 use crate::error::{Error, has_error_code};
 use crate::path::validate_bucket_name;
+
+/// The size of the pieces of the ranges written to the file.
+const WRITE_BUFFER_SIZE: usize = 1024 * 1024;
 
 /// Downloads the object to the local file, which is written to a temporary
 /// file in the same directory and renamed on completion.
@@ -185,23 +186,46 @@ async fn download_ranges(
         let (etag, checksum, parts) = (etag.clone(), checksum.clone(), parts.clone());
         ranges.spawn(async move {
             let range = format!("bytes={offset}-{end}");
-            let (output, permit) = get_object(&ctx, &bucket, &key, Some(range), etag).await?;
+            let (mut output, permit) = get_object(&ctx, &bucket, &key, Some(range), etag).await?;
             validate_content_range(offset, end, output.content_range())?;
-            let bytes = read_body(&ctx, output.body).await?;
+            // The body is written in pieces as it is read, which keeps the
+            // memory small regardless of the number of the ranges.
+            let mut part = checksum.as_ref().map(|checksum| checksum.part(offset));
+            let mut position = offset;
+            let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
+            loop {
+                let bytes = output
+                    .body
+                    .try_next()
+                    .await
+                    .map_err(|err| err.to_string())?;
+                if let Some(bytes) = &bytes {
+                    ctx.limit(bytes.len()).await;
+                    buffer.extend_from_slice(bytes);
+                }
+                if buffer.len() >= WRITE_BUFFER_SIZE || bytes.is_none() && !buffer.is_empty() {
+                    // The write is not interrupted by the cancellation of the
+                    // task, so that the file is not written after it.
+                    tokio::task::block_in_place(|| write_at(&file, &buffer, position))
+                        .map_err(|err| err.to_string())?;
+                    if let (Some(checksum), Some(part)) = (&checksum, &mut part) {
+                        checksum.update(part, &buffer);
+                    }
+                    position += buffer.len() as u64;
+                    ctx.progress(id, buffer.len() as u64);
+                    buffer.clear();
+                }
+                if bytes.is_none() {
+                    break;
+                }
+            }
             drop(permit);
-            if let Some(checksum) = &checksum {
-                let part = checksum.part(offset, &bytes);
+            if let Some(part) = part {
                 parts
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
                     .push(part);
             }
-            let length = bytes.len() as u64;
-            // The write is not interrupted by the cancellation of the task,
-            // so that the file is not written after the cancellation.
-            tokio::task::block_in_place(|| write_at(&file, &bytes, offset))
-                .map_err(|err| err.to_string())?;
-            ctx.progress(id, length);
             Ok::<_, String>(())
         });
         offset = end + 1;
@@ -260,23 +284,6 @@ async fn cancel_ranges(ranges: &mut JoinSet<RangeResult>, err: String) -> String
     ranges.abort_all();
     while ranges.join_next().await.is_some() {}
     err
-}
-
-/// Reads the body into the memory, within the bandwidth.
-async fn read_body(ctx: &Context, mut body: ByteStream) -> Result<Bytes, String> {
-    if ctx.limiter.is_none() {
-        return Ok(body
-            .collect()
-            .await
-            .map_err(|err| err.to_string())?
-            .into_bytes());
-    }
-    let mut data = Vec::new();
-    while let Some(bytes) = body.try_next().await.map_err(|err| err.to_string())? {
-        ctx.limit(bytes.len()).await;
-        data.extend_from_slice(&bytes);
-    }
-    Ok(data.into())
 }
 
 /// Sends the GetObject request, and returns the response with the permit of

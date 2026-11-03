@@ -14,6 +14,10 @@ use crate::error::{Error, has_error_code};
 use crate::mime::guess_content_type;
 use crate::path::validate_bucket_name;
 
+/// The number of the parts of the standard input in the memory, which is
+/// `max_in_memory_upload_chunks` of s3transfer.
+const MAX_IN_MEMORY_UPLOAD_CHUNKS: usize = 10;
+
 /// The size of the buffer to read files, which is the same as the default
 /// `io_chunksize` of the AWS CLI. The default of the SDK, 4 KiB, makes many
 /// small reads on the blocking threads, which takes much time in the kernel.
@@ -57,7 +61,10 @@ pub async fn upload_file(
     let mut offset = 0;
     let mut number = 1;
     while offset < size {
-        upload.wait_parts(ctx, &mut parts, &mut completed).await?;
+        let limit = ctx.config.max_concurrent_requests;
+        upload
+            .wait_parts(ctx, &mut parts, &mut completed, limit)
+            .await?;
         let length = chunk_size.min(size - offset);
         let (ctx, upload, path) = (ctx.clone(), upload.clone(), path.to_owned());
         parts.spawn(async move {
@@ -123,8 +130,10 @@ pub async fn upload_stdin(
             Ok(part)
         });
         number += 1;
-        // Keep the number of buffered parts bounded.
-        upload.wait_parts(ctx, &mut parts, &mut completed).await?;
+        // The parts in the memory are bounded in the same way as s3transfer.
+        upload
+            .wait_parts(ctx, &mut parts, &mut completed, MAX_IN_MEMORY_UPLOAD_CHUNKS)
+            .await?;
         if eof && pending.is_empty() {
             break;
         }
@@ -362,15 +371,16 @@ impl MultipartUpload {
     }
 
     /// Waits for the parts until the number of the parts in progress is less
-    /// than `max_concurrent_requests`, to keep the number of the tasks and the
-    /// buffered parts bounded. The upload is aborted if any of them failed.
+    /// than the limit, to keep the number of the tasks and the buffered parts
+    /// bounded. The upload is aborted if any of them failed.
     pub async fn wait_parts(
         &self,
         ctx: &Context,
         parts: &mut JoinSet<PartResult>,
         completed: &mut Vec<CompletedPart>,
+        limit: usize,
     ) -> Result<(), String> {
-        while parts.len() >= ctx.config.max_concurrent_requests {
+        while parts.len() >= limit {
             match join_part(parts.join_next().await) {
                 Some(Ok(part)) => completed.push(part),
                 Some(Err(err)) => return Err(self.fail(ctx, parts, err).await),
