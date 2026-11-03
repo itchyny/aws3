@@ -3,9 +3,11 @@ use std::hash::{BuildHasher, RandomState};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::SemaphorePermit;
 use tokio::task::JoinSet;
 
 use super::params::set_sse_c;
@@ -82,7 +84,7 @@ pub async fn download_stdout(
     // The size of the object is unknown, which is retrieved first like the
     // AWS CLI, and the errors of missing objects are reported by HeadObject.
     head_object(ctx, bucket, key).await?;
-    let mut output = get_object(ctx, bucket, key, None, None).await?;
+    let (mut output, _permit) = get_object(ctx, bucket, key, None, None).await?;
     let mut stdout = tokio::io::stdout();
     while let Some(bytes) = output
         .body
@@ -108,7 +110,7 @@ async fn download_whole(
     key: &str,
     path: &str,
 ) -> Result<(), String> {
-    let mut output = get_object(ctx, bucket, key, None, None).await?;
+    let (mut output, _permit) = get_object(ctx, bucket, key, None, None).await?;
     let mut file = tokio::fs::File::create(path)
         .await
         .map_err(|err| err.to_string())?;
@@ -160,8 +162,9 @@ async fn download_ranges(
         let etag = etag.clone();
         ranges.spawn(async move {
             let range = format!("bytes={offset}-{end}");
-            let output = get_object(&ctx, &bucket, &key, Some(range), etag).await?;
+            let (output, permit) = get_object(&ctx, &bucket, &key, Some(range), etag).await?;
             let bytes = read_body(&ctx, output.body).await?;
+            drop(permit);
             let length = bytes.len() as u64;
             tokio::task::spawn_blocking(move || write_at(&file, &bytes, offset))
                 .await
@@ -201,13 +204,16 @@ async fn read_body(ctx: &Context, mut body: ByteStream) -> Result<Bytes, String>
     Ok(data.into())
 }
 
-async fn get_object(
-    ctx: &Context,
+/// Sends the GetObject request, and returns the response with the permit of
+/// the request, which should be held until the body is read so that the
+/// concurrent reads are limited by `max_concurrent_requests`.
+async fn get_object<'a>(
+    ctx: &'a Context,
     bucket: &str,
     key: &str,
     range: Option<String>,
     etag: Option<String>,
-) -> Result<aws_sdk_s3::operation::get_object::GetObjectOutput, String> {
+) -> Result<(GetObjectOutput, SemaphorePermit<'a>), String> {
     let params = &ctx.params;
     let pinned = etag.is_some();
     let request = ctx
@@ -220,18 +226,19 @@ async fn get_object(
         .set_request_payer(params.request_payer.clone())
         .set_checksum_mode(params.checksum_mode.clone());
     let request = set_sse_c!(request, &params.sse_c);
-    let _permit = ctx
+    let permit = ctx
         .requests
         .acquire()
         .await
         .map_err(|err| err.to_string())?;
-    request.send().await.map_err(|err| {
+    let output = request.send().await.map_err(|err| {
         if pinned && has_error_code(&err, "PreconditionFailed") {
             format!("Contents of stored object \"{key}\" in bucket \"{bucket}\" did not match expected ETag.")
         } else {
             Error::sdk("GetObject", err).to_string()
         }
-    })
+    })?;
+    Ok((output, permit))
 }
 
 async fn head_object(
