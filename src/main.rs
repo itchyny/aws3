@@ -2,7 +2,9 @@ mod bucket;
 mod cli;
 mod client;
 mod config;
+mod east_asian_width;
 mod error;
+mod errorformat;
 mod filter;
 mod insecure;
 mod ls;
@@ -36,9 +38,29 @@ async fn run(cli: &Cli) -> ExitCode {
         Err(err) => Err(err),
     };
     result.unwrap_or_else(|err| {
-        eprintln!("\naws3: [ERROR]: {err}");
+        let (format, colored) = error_style(&cli.global);
+        eprint!("{}", err.render(format, colored));
         err.exit_code()
     })
+}
+
+/// Returns the format of the errors from the option, the environment variable
+/// or the config file, and whether the tables are colored, like the AWS CLI.
+fn error_style(global: &cli::GlobalArgs) -> (cli::ErrorFormat, bool) {
+    use clap::ValueEnum;
+    let format = global.cli_error_format.unwrap_or_else(|| {
+        std::env::var("AWS_CLI_ERROR_FORMAT")
+            .ok()
+            .or_else(|| config::ProfileConfig::load(global.profile.as_deref()).cli_error_format)
+            .and_then(|value| cli::ErrorFormat::from_str(&value, true).ok())
+            .unwrap_or(cli::ErrorFormat::Enhanced)
+    });
+    let colored = match global.color {
+        Some(cli::Color::On) => true,
+        Some(cli::Color::Off) => false,
+        _ => std::io::IsTerminal::is_terminal(&std::io::stdout()),
+    };
+    (format, colored)
 }
 
 /// Rejects the S3 paths of the resources unsupported by the s3 commands,

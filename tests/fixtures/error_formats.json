@@ -1,0 +1,610 @@
+[
+ {
+  "code": "NoSuchBucket",
+  "message": "The specified bucket does not exist",
+  "json": "{\n    \"Code\": \"NoSuchBucket\",\n    \"Message\": \"The specified bucket does not exist\"\n}\n",
+  "yaml": "Code: NoSuchBucket\nMessage: The specified bucket does not exist\n",
+  "text": "NoSuchBucket\tThe specified bucket does not exist\n",
+  "table": "---------------------------------------------------------\n|                         error                         |\n+---------------+---------------------------------------+\n|     Code      |                Message                |\n+---------------+---------------------------------------+\n|  NoSuchBucket |  The specified bucket does not exist  |\n+---------------+---------------------------------------+\n"
+ },
+ {
+  "code": "AccessDenied",
+  "message": "Access Denied",
+  "json": "{\n    \"Code\": \"AccessDenied\",\n    \"Message\": \"Access Denied\"\n}\n",
+  "yaml": "Code: AccessDenied\nMessage: Access Denied\n",
+  "text": "AccessDenied\tAccess Denied\n",
+  "table": "-----------------------------------\n|              error              |\n+---------------+-----------------+\n|     Code      |     Message     |\n+---------------+-----------------+\n|  AccessDenied |  Access Denied  |\n+---------------+-----------------+\n"
+ },
+ {
+  "code": "404",
+  "message": "Not Found",
+  "json": "{\n    \"Code\": \"404\",\n    \"Message\": \"Not Found\"\n}\n",
+  "yaml": "Code: '404'\nMessage: Not Found\n",
+  "text": "404\tNot Found\n",
+  "table": "-----------------------\n|        error        |\n+-------+-------------+\n| Code  |   Message   |\n+-------+-------------+\n|  404  |  Not Found  |\n+-------+-------------+\n"
+ },
+ {
+  "code": "NoCredentials",
+  "message": "Unable to locate credentials. You can configure credentials by running \"aws login\".",
+  "json": "{\n    \"Code\": \"NoCredentials\",\n    \"Message\": \"Unable to locate credentials. You can configure credentials by running \\\"aws login\\\".\"\n}\n",
+  "yaml": "Code: NoCredentials\nMessage: Unable to locate credentials. You can configure credentials by running \"aws\n  login\".\n",
+  "text": "NoCredentials\tUnable to locate credentials. You can configure credentials by running \"aws login\".\n",
+  "table": "----------------------------------------------------------------------------------------------------\n|                                               error                                              |\n+---------+----------------------------------------------------------------------------------------+\n|  Code   |  NoCredentials                                                                         |\n|  Message|  Unable to locate credentials. You can configure credentials by running \"aws login\".   |\n+---------+----------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "ParamValidation",
+  "message": "Parameter validation failed:\nInvalid length for parameter Key, value: 0, valid min length: 1",
+  "json": "{\n    \"Code\": \"ParamValidation\",\n    \"Message\": \"Parameter validation failed:\\nInvalid length for parameter Key, value: 0, valid min length: 1\"\n}\n",
+  "yaml": "Code: ParamValidation\nMessage: 'Parameter validation failed:\n\n  Invalid length for parameter Key, value: 0, valid min length: 1'\n",
+  "text": "ParamValidation\tParameter validation failed:\nInvalid length for parameter Key, value: 0, valid min length: 1\n",
+  "table": "-------------------------------------------------------------------------------------------------------------\n|                                                   error                                                   |\n+---------+-------------------------------------------------------------------------------------------------+\n|  Code   |  ParamValidation                                                                                |\n|  Message|  Parameter validation failed:\nInvalid length for parameter Key, value: 0, valid min length: 1   |\n+---------+-------------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "ParamValidation",
+  "message": "Parameter validation failed:\nInvalid bucket name \"bad~name\": Bucket name must match the regex \"^[a-zA-Z0-9.\\-_]{1,255}$\" or be an ARN matching the regex \"^arn:(aws).*:(s3|s3-object-lambda):[a-z\\-0-9]*:[0-9]{12}:accesspoint[/:][a-zA-Z0-9\\-.]{1,63}$|^arn:(aws).*:s3-outposts:[a-z\\-0-9]+:[0-9]{12}:outpost[/:][a-zA-Z0-9\\-]{1,63}[/:]accesspoint[/:][a-zA-Z0-9\\-]{1,63}$\"",
+  "json": "{\n    \"Code\": \"ParamValidation\",\n    \"Message\": \"Parameter validation failed:\\nInvalid bucket name \\\"bad~name\\\": Bucket name must match the regex \\\"^[a-zA-Z0-9.\\\\-_]{1,255}$\\\" or be an ARN matching the regex \\\"^arn:(aws).*:(s3|s3-object-lambda):[a-z\\\\-0-9]*:[0-9]{12}:accesspoint[/:][a-zA-Z0-9\\\\-.]{1,63}$|^arn:(aws).*:s3-outposts:[a-z\\\\-0-9]+:[0-9]{12}:outpost[/:][a-zA-Z0-9\\\\-]{1,63}[/:]accesspoint[/:][a-zA-Z0-9\\\\-]{1,63}$\\\"\"\n}\n",
+  "yaml": "Code: ParamValidation\nMessage: 'Parameter validation failed:\n\n  Invalid bucket name \"bad~name\": Bucket name must match the regex \"^[a-zA-Z0-9.\\-_]{1,255}$\"\n  or be an ARN matching the regex \"^arn:(aws).*:(s3|s3-object-lambda):[a-z\\-0-9]*:[0-9]{12}:accesspoint[/:][a-zA-Z0-9\\-.]{1,63}$|^arn:(aws).*:s3-outposts:[a-z\\-0-9]+:[0-9]{12}:outpost[/:][a-zA-Z0-9\\-]{1,63}[/:]accesspoint[/:][a-zA-Z0-9\\-]{1,63}$\"'\n",
+  "text": "ParamValidation\tParameter validation failed:\nInvalid bucket name \"bad~name\": Bucket name must match the regex \"^[a-zA-Z0-9.\\-_]{1,255}$\" or be an ARN matching the regex \"^arn:(aws).*:(s3|s3-object-lambda):[a-z\\-0-9]*:[0-9]{12}:accesspoint[/:][a-zA-Z0-9\\-.]{1,63}$|^arn:(aws).*:s3-outposts:[a-z\\-0-9]+:[0-9]{12}:outpost[/:][a-zA-Z0-9\\-]{1,63}[/:]accesspoint[/:][a-zA-Z0-9\\-]{1,63}$\"\n",
+  "table": "----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n|                                                                                                                                                                                            error                                                                                                                                                                                           |\n+---------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+\n|  Code   |  ParamValidation                                                                                                                                                                                                                                                                                                                                                                 |\n|  Message|  Parameter validation failed:\nInvalid bucket name \"bad~name\": Bucket name must match the regex \"^[a-zA-Z0-9.\\-_]{1,255}$\" or be an ARN matching the regex \"^arn:(aws).*:(s3|s3-object-lambda):[a-z\\-0-9]*:[0-9]{12}:accesspoint[/:][a-zA-Z0-9\\-.]{1,63}$|^arn:(aws).*:s3-outposts:[a-z\\-0-9]+:[0-9]{12}:outpost[/:][a-zA-Z0-9\\-]{1,63}[/:]accesspoint[/:][a-zA-Z0-9\\-]{1,63}$\"   |\n+---------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "ParamValidation",
+  "message": "s3 commands do not support S3 Object Lambda resources. Use s3api commands instead.",
+  "json": "{\n    \"Code\": \"ParamValidation\",\n    \"Message\": \"s3 commands do not support S3 Object Lambda resources. Use s3api commands instead.\"\n}\n",
+  "yaml": "Code: ParamValidation\nMessage: s3 commands do not support S3 Object Lambda resources. Use s3api commands\n  instead.\n",
+  "text": "ParamValidation\ts3 commands do not support S3 Object Lambda resources. Use s3api commands instead.\n",
+  "table": "---------------------------------------------------------------------------------------------------\n|                                              error                                              |\n+---------+---------------------------------------------------------------------------------------+\n|  Code   |  ParamValidation                                                                      |\n|  Message|  s3 commands do not support S3 Object Lambda resources. Use s3api commands instead.   |\n+---------+---------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "ParamValidation",
+  "message": "<S3Uri>\nError: Invalid argument type",
+  "json": "{\n    \"Code\": \"ParamValidation\",\n    \"Message\": \"<S3Uri>\\nError: Invalid argument type\"\n}\n",
+  "yaml": "Code: ParamValidation\nMessage: '<S3Uri>\n\n  Error: Invalid argument type'\n",
+  "text": "ParamValidation\t<S3Uri>\nError: Invalid argument type\n",
+  "table": "-------------------------------------------------------------\n|                           error                           |\n+------------------+----------------------------------------+\n|       Code       |                Message                 |\n+------------------+----------------------------------------+\n|  ParamValidation |  <S3Uri>\nError: Invalid argument type  |\n+------------------+----------------------------------------+\n"
+ },
+ {
+  "code": "ParamValidation",
+  "message": "Cannot mv a file onto itself: s3://bucket/key - s3://bucket/key",
+  "json": "{\n    \"Code\": \"ParamValidation\",\n    \"Message\": \"Cannot mv a file onto itself: s3://bucket/key - s3://bucket/key\"\n}\n",
+  "yaml": "Code: ParamValidation\nMessage: 'Cannot mv a file onto itself: s3://bucket/key - s3://bucket/key'\n",
+  "text": "ParamValidation\tCannot mv a file onto itself: s3://bucket/key - s3://bucket/key\n",
+  "table": "--------------------------------------------------------------------------------\n|                                     error                                    |\n+---------+--------------------------------------------------------------------+\n|  Code   |  ParamValidation                                                   |\n|  Message|  Cannot mv a file onto itself: s3://bucket/key - s3://bucket/key   |\n+---------+--------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "InvalidArgument",
+  "message": "The secret key was invalid for the specified algorithm.",
+  "json": "{\n    \"Code\": \"InvalidArgument\",\n    \"Message\": \"The secret key was invalid for the specified algorithm.\"\n}\n",
+  "yaml": "Code: InvalidArgument\nMessage: The secret key was invalid for the specified algorithm.\n",
+  "text": "InvalidArgument\tThe secret key was invalid for the specified algorithm.\n",
+  "table": "--------------------------------------------------------------------------------\n|                                     error                                    |\n+-----------------+------------------------------------------------------------+\n|      Code       |                          Message                           |\n+-----------------+------------------------------------------------------------+\n|  InvalidArgument|  The secret key was invalid for the specified algorithm.   |\n+-----------------+------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "a: b",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"a: b\"\n}\n",
+  "yaml": "Code: X\nMessage: 'a: b'\n",
+  "text": "X\ta: b\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  a: b     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "true",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"true\"\n}\n",
+  "yaml": "Code: X\nMessage: 'true'\n",
+  "text": "X\ttrue\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  true     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "123",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"123\"\n}\n",
+  "yaml": "Code: X\nMessage: '123'\n",
+  "text": "X\t123\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  123      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "- item",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"- item\"\n}\n",
+  "yaml": "Code: X\nMessage: '- item'\n",
+  "text": "X\t- item\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  - item   |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "  leading",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"  leading\"\n}\n",
+  "yaml": "Code: X\nMessage: '  leading'\n",
+  "text": "X\t  leading\n",
+  "table": "-----------------------\n|        error        |\n+-------+-------------+\n| Code  |   Message   |\n+-------+-------------+\n|  X    |    leading  |\n+-------+-------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "trailing ",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"trailing \"\n}\n",
+  "yaml": "Code: X\nMessage: 'trailing '\n",
+  "text": "X\ttrailing \n",
+  "table": "-----------------------\n|        error        |\n+-------+-------------+\n| Code  |   Message   |\n+-------+-------------+\n|  X    |  trailing   |\n+-------+-------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "has # hash",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"has # hash\"\n}\n",
+  "yaml": "Code: X\nMessage: 'has # hash'\n",
+  "text": "X\thas # hash\n",
+  "table": "------------------------\n|         error        |\n+-------+--------------+\n| Code  |   Message    |\n+-------+--------------+\n|  X    |  has # hash  |\n+-------+--------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "it's",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"it's\"\n}\n",
+  "yaml": "Code: X\nMessage: it's\n",
+  "text": "X\tit's\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  it's     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "tab\there",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"tab\\there\"\n}\n",
+  "yaml": "Code: X\nMessage: \"tab\\there\"\n",
+  "text": "X\ttab\there\n",
+  "table": "----------------------\n|        error       |\n+-------+------------+\n| Code  |  Message   |\n+-------+------------+\n|  X    |  tab\there  |\n+-------+------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "ünï ✓",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"ünï ✓\"\n}\n",
+  "yaml": "Code: X\nMessage: ünï ✓\n",
+  "text": "X\tünï ✓\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  ünï ✓   |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "null",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"null\"\n}\n",
+  "yaml": "Code: X\nMessage: 'null'\n",
+  "text": "X\tnull\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  null     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"\"\n}\n",
+  "yaml": "Code: X\nMessage: ''\n",
+  "text": "X\t\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |           |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "@at",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"@at\"\n}\n",
+  "yaml": "Code: X\nMessage: '@at'\n",
+  "text": "X\t@at\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  @at      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "%pct",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"%pct\"\n}\n",
+  "yaml": "Code: X\nMessage: '%pct'\n",
+  "text": "X\t%pct\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  %pct     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "key: value with a very long text that goes on and on beyond the width of eighty columns for sure",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"key: value with a very long text that goes on and on beyond the width of eighty columns for sure\"\n}\n",
+  "yaml": "Code: X\nMessage: 'key: value with a very long text that goes on and on beyond the width of\n  eighty columns for sure'\n",
+  "text": "X\tkey: value with a very long text that goes on and on beyond the width of eighty columns for sure\n",
+  "table": "-----------------------------------------------------------------------------------------------------------------\n|                                                     error                                                     |\n+---------+-----------------------------------------------------------------------------------------------------+\n|  Code   |  X                                                                                                  |\n|  Message|  key: value with a very long text that goes on and on beyond the width of eighty columns for sure   |\n+---------+-----------------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "a very long plain text without any colons that goes on and on beyond the width of eighty columns for sure, really",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"a very long plain text without any colons that goes on and on beyond the width of eighty columns for sure, really\"\n}\n",
+  "yaml": "Code: X\nMessage: a very long plain text without any colons that goes on and on beyond the\n  width of eighty columns for sure, really\n",
+  "text": "X\ta very long plain text without any colons that goes on and on beyond the width of eighty columns for sure, really\n",
+  "table": "----------------------------------------------------------------------------------------------------------------------------------\n|                                                              error                                                             |\n+---------+----------------------------------------------------------------------------------------------------------------------+\n|  Code   |  X                                                                                                                   |\n|  Message|  a very long plain text without any colons that goes on and on beyond the width of eighty columns for sure, really   |\n+---------+----------------------------------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "line1\nline2\n",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"line1\\nline2\\n\"\n}\n",
+  "yaml": "Code: X\nMessage: 'line1\n\n  line2\n\n  '\n",
+  "text": "X\tline1\nline2\n\n",
+  "table": "--------------------------\n|          error         |\n+-------+----------------+\n| Code  |    Message     |\n+-------+----------------+\n|  X    |  line1\nline2\n  |\n+-------+----------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "ends with colon:",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"ends with colon:\"\n}\n",
+  "yaml": "Code: X\nMessage: 'ends with colon:'\n",
+  "text": "X\tends with colon:\n",
+  "table": "------------------------------\n|            error           |\n+-------+--------------------+\n| Code  |      Message       |\n+-------+--------------------+\n|  X    |  ends with colon:  |\n+-------+--------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "{brace}",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"{brace}\"\n}\n",
+  "yaml": "Code: X\nMessage: '{brace}'\n",
+  "text": "X\t{brace}\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  {brace}  |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "*star",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"*star\"\n}\n",
+  "yaml": "Code: X\nMessage: '*star'\n",
+  "text": "X\t*star\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  *star    |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "!bang",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"!bang\"\n}\n",
+  "yaml": "Code: X\nMessage: '!bang'\n",
+  "text": "X\t!bang\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  !bang    |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "ctrl\u0001char",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"ctrl\\u0001char\"\n}\n",
+  "yaml": "Code: X\nMessage: \"ctrl\\x01char\"\n",
+  "text": "X\tctrl\u0001char\n",
+  "table": "-----------------------\n|        error        |\n+-------+-------------+\n| Code  |   Message   |\n+-------+-------------+\n|  X    |  ctrl\u0001char  |\n+-------+-------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "yes",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"yes\"\n}\n",
+  "yaml": "Code: X\nMessage: yes\n",
+  "text": "X\tyes\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  yes      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "True",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"True\"\n}\n",
+  "yaml": "Code: X\nMessage: 'True'\n",
+  "text": "X\tTrue\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  True     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "FALSE",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"FALSE\"\n}\n",
+  "yaml": "Code: X\nMessage: 'FALSE'\n",
+  "text": "X\tFALSE\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  FALSE    |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "Null",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"Null\"\n}\n",
+  "yaml": "Code: X\nMessage: 'Null'\n",
+  "text": "X\tNull\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  Null     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "NULL",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"NULL\"\n}\n",
+  "yaml": "Code: X\nMessage: 'NULL'\n",
+  "text": "X\tNULL\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  NULL     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "~",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"~\"\n}\n",
+  "yaml": "Code: X\nMessage: '~'\n",
+  "text": "X\t~\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  ~        |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "1.5",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"1.5\"\n}\n",
+  "yaml": "Code: X\nMessage: '1.5'\n",
+  "text": "X\t1.5\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  1.5      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "1e3",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"1e3\"\n}\n",
+  "yaml": "Code: X\nMessage: '1e3'\n",
+  "text": "X\t1e3\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  1e3      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "+1",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"+1\"\n}\n",
+  "yaml": "Code: X\nMessage: '+1'\n",
+  "text": "X\t+1\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  +1       |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "-1",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"-1\"\n}\n",
+  "yaml": "Code: X\nMessage: '-1'\n",
+  "text": "X\t-1\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  -1       |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "0x1F",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"0x1F\"\n}\n",
+  "yaml": "Code: X\nMessage: '0x1F'\n",
+  "text": "X\t0x1F\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  0x1F     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "0o17",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"0o17\"\n}\n",
+  "yaml": "Code: X\nMessage: '0o17'\n",
+  "text": "X\t0o17\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  0o17     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "017",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"017\"\n}\n",
+  "yaml": "Code: X\nMessage: '017'\n",
+  "text": "X\t017\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  017      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "1_000",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"1_000\"\n}\n",
+  "yaml": "Code: X\nMessage: '1_000'\n",
+  "text": "X\t1_000\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  1_000    |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": ".inf",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \".inf\"\n}\n",
+  "yaml": "Code: X\nMessage: '.inf'\n",
+  "text": "X\t.inf\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  .inf     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": ".NaN",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \".NaN\"\n}\n",
+  "yaml": "Code: X\nMessage: '.NaN'\n",
+  "text": "X\t.NaN\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  .NaN     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "2026-01-01",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"2026-01-01\"\n}\n",
+  "yaml": "Code: X\nMessage: '2026-01-01'\n",
+  "text": "X\t2026-01-01\n",
+  "table": "------------------------\n|         error        |\n+-------+--------------+\n| Code  |   Message    |\n+-------+--------------+\n|  X    |  2026-01-01  |\n+-------+--------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "2026-01-01T00:00:00Z",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"2026-01-01T00:00:00Z\"\n}\n",
+  "yaml": "Code: X\nMessage: '2026-01-01T00:00:00Z'\n",
+  "text": "X\t2026-01-01T00:00:00Z\n",
+  "table": "----------------------------------\n|              error             |\n+------+-------------------------+\n| Code |         Message         |\n+------+-------------------------+\n|  X   |  2026-01-01T00:00:00Z   |\n+------+-------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "2026-1-2 3:04:05.6 +09:00",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"2026-1-2 3:04:05.6 +09:00\"\n}\n",
+  "yaml": "Code: X\nMessage: '2026-1-2 3:04:05.6 +09:00'\n",
+  "text": "X\t2026-1-2 3:04:05.6 +09:00\n",
+  "table": "---------------------------------------\n|                error                |\n+------+------------------------------+\n| Code |           Message            |\n+------+------------------------------+\n|  X   |  2026-1-2 3:04:05.6 +09:00   |\n+------+------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "12:30",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"12:30\"\n}\n",
+  "yaml": "Code: X\nMessage: 12:30\n",
+  "text": "X\t12:30\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  12:30    |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "=",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"=\"\n}\n",
+  "yaml": "Code: X\nMessage: '='\n",
+  "text": "X\t=\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  =        |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "<<",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"<<\"\n}\n",
+  "yaml": "Code: X\nMessage: '<<'\n",
+  "text": "X\t<<\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  <<       |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "-",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"-\"\n}\n",
+  "yaml": "Code: X\nMessage: '-'\n",
+  "text": "X\t-\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  -        |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "?",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"?\"\n}\n",
+  "yaml": "Code: X\nMessage: '?'\n",
+  "text": "X\t?\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  ?        |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "a:b",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"a:b\"\n}\n",
+  "yaml": "Code: X\nMessage: a:b\n",
+  "text": "X\ta:b\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  a:b      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "-x",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"-x\"\n}\n",
+  "yaml": "Code: X\nMessage: -x\n",
+  "text": "X\t-x\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  -x       |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "--- x",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"--- x\"\n}\n",
+  "yaml": "Code: X\nMessage: '--- x'\n",
+  "text": "X\t--- x\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  --- x    |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "... x",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"... x\"\n}\n",
+  "yaml": "Code: X\nMessage: '... x'\n",
+  "text": "X\t... x\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  ... x    |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "ab",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"ab\"\n}\n",
+  "yaml": "Code: X\nMessage: \"a\\Nb\"\n",
+  "text": "X\tab\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  ab      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "a b",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"a b\"\n}\n",
+  "yaml": "Code: X\nMessage: a b\n",
+  "text": "X\ta b\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  a b      |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "﻿x",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"﻿x\"\n}\n",
+  "yaml": "Code: X\nMessage: \"\\uFEFFx\"\n",
+  "text": "X\t﻿x\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  ﻿x       |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "a  b",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"a  b\"\n}\n",
+  "yaml": "Code: X\nMessage: a  b\n",
+  "text": "X\ta  b\n",
+  "table": "---------------------\n|       error       |\n+-------+-----------+\n| Code  |  Message  |\n+-------+-----------+\n|  X    |  a  b     |\n+-------+-----------+\n"
+ },
+ {
+  "code": "X",
+  "message": "a b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"a b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b\"\n}\n",
+  "yaml": "Code: X\nMessage: a b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b\n  b b b b\n",
+  "text": "X\ta b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b\n",
+  "table": "--------------------------------------------------------------------------------------------------\n|                                              error                                             |\n+---------+--------------------------------------------------------------------------------------+\n|  Code   |  X                                                                                   |\n|  Message|  a b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b b   |\n+---------+--------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\n}\n",
+  "yaml": "Code: X\nMessage: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n",
+  "text": "X\txxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n",
+  "table": "-----------------------------------------------------------------------------------------------------------\n|                                                  error                                                  |\n+---------+-----------------------------------------------------------------------------------------------+\n|  Code   |  X                                                                                            |\n|  Message|  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   |\n+---------+-----------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "tab\tword word word word word word word word word word word word word word word word word word word word ",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"tab\\tword word word word word word word word word word word word word word word word word word word word \"\n}\n",
+  "yaml": "Code: X\nMessage: \"tab\\tword word word word word word word word word word word word word word\n  word word word word word word \"\n",
+  "text": "X\ttab\tword word word word word word word word word word word word word word word word word word word word \n",
+  "table": "-------------------------------------------------------------------------------------------------------------------------\n|                                                         error                                                         |\n+---------+-------------------------------------------------------------------------------------------------------------+\n|  Code   |  X                                                                                                          |\n|  Message|  tab\tword word word word word word word word word word word word word word word word word word word word    |\n+---------+-------------------------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "line\nword word word word word word word word word word word word word word word word word word word word ",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"line\\nword word word word word word word word word word word word word word word word word word word word \"\n}\n",
+  "yaml": "Code: X\nMessage: 'line\n\n  word word word word word word word word word word word word word word word word\n  word word word word '\n",
+  "text": "X\tline\nword word word word word word word word word word word word word word word word word word word word \n",
+  "table": "--------------------------------------------------------------------------------------------------------------------------\n|                                                          error                                                         |\n+---------+--------------------------------------------------------------------------------------------------------------+\n|  Code   |  X                                                                                                           |\n|  Message|  line\nword word word word word word word word word word word word word word word word word word word word    |\n+---------+--------------------------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": " word word word word word word word word word word word word word word word word word word word word ",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \" word word word word word word word word word word word word word word word word word word word word \"\n}\n",
+  "yaml": "Code: X\nMessage: ' word word word word word word word word word word word word word word word\n  word word word word word '\n",
+  "text": "X\t word word word word word word word word word word word word word word word word word word word word \n",
+  "table": "----------------------------------------------------------------------------------------------------------------------\n|                                                        error                                                       |\n+---------+----------------------------------------------------------------------------------------------------------+\n|  Code   |  X                                                                                                       |\n|  Message|   word word word word word word word word word word word word word word word word word word word word    |\n+---------+----------------------------------------------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "quote ' and \" both",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"quote ' and \\\" both\"\n}\n",
+  "yaml": "Code: X\nMessage: quote ' and \" both\n",
+  "text": "X\tquote ' and \" both\n",
+  "table": "--------------------------------\n|             error            |\n+-------+----------------------+\n| Code  |       Message        |\n+-------+----------------------+\n|  X    |  quote ' and \" both  |\n+-------+----------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "back\\slash",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"back\\\\slash\"\n}\n",
+  "yaml": "Code: X\nMessage: back\\slash\n",
+  "text": "X\tback\\slash\n",
+  "table": "------------------------\n|         error        |\n+-------+--------------+\n| Code  |   Message    |\n+-------+--------------+\n|  X    |  back\\slash  |\n+-------+--------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "日本語のエラー",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"日本語のエラー\"\n}\n",
+  "yaml": "Code: X\nMessage: 日本語のエラー\n",
+  "text": "X\t日本語のエラー\n",
+  "table": "----------------------------\n|           error          |\n+-------+------------------+\n| Code  |     Message      |\n+-------+------------------+\n|  X    |  日本語のエラー  |\n+-------+------------------+\n"
+ },
+ {
+  "code": "X",
+  "message": "한국어 ✔ 😀",
+  "json": "{\n    \"Code\": \"X\",\n    \"Message\": \"한국어 ✔ 😀\"\n}\n",
+  "yaml": "Code: X\nMessage: \"한국어 ✔ \\U0001F600\"\n",
+  "text": "X\t한국어 ✔ 😀\n",
+  "table": "-------------------------\n|         error         |\n+-------+---------------+\n| Code  |    Message    |\n+-------+---------------+\n|  X    |  한국어 ✔ 😀  |\n+-------+---------------+\n"
+ },
+ {
+  "code": "404",
+  "message": "Not Found",
+  "json": "{\n    \"Code\": \"404\",\n    \"Message\": \"Not Found\"\n}\n",
+  "yaml": "Code: '404'\nMessage: Not Found\n",
+  "text": "404\tNot Found\n",
+  "table": "-----------------------\n|        error        |\n+-------+-------------+\n| Code  |   Message   |\n+-------+-------------+\n|  404  |  Not Found  |\n+-------+-------------+\n"
+ },
+ {
+  "code": "PreconditionFailed",
+  "message": "At least one of the pre-conditions you specified did not hold",
+  "json": "{\n    \"Code\": \"PreconditionFailed\",\n    \"Message\": \"At least one of the pre-conditions you specified did not hold\"\n}\n",
+  "yaml": "Code: PreconditionFailed\nMessage: At least one of the pre-conditions you specified did not hold\n",
+  "text": "PreconditionFailed\tAt least one of the pre-conditions you specified did not hold\n",
+  "table": "------------------------------------------------------------------------------\n|                                    error                                   |\n+---------+------------------------------------------------------------------+\n|  Code   |  PreconditionFailed                                              |\n|  Message|  At least one of the pre-conditions you specified did not hold   |\n+---------+------------------------------------------------------------------+\n"
+ },
+ {
+  "code": "ParamValidation",
+  "message": "Value for multipart_chunksize must be a positive integer: 0",
+  "json": "{\n    \"Code\": \"ParamValidation\",\n    \"Message\": \"Value for multipart_chunksize must be a positive integer: 0\"\n}\n",
+  "yaml": "Code: ParamValidation\nMessage: 'Value for multipart_chunksize must be a positive integer: 0'\n",
+  "text": "ParamValidation\tValue for multipart_chunksize must be a positive integer: 0\n",
+  "table": "----------------------------------------------------------------------------\n|                                   error                                  |\n+---------+----------------------------------------------------------------+\n|  Code   |  ParamValidation                                               |\n|  Message|  Value for multipart_chunksize must be a positive integer: 0   |\n+---------+----------------------------------------------------------------+\n"
+ }
+]

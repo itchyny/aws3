@@ -24,6 +24,8 @@ pub struct ProfileConfig {
     pub s3: S3Config,
     /// The session of `aws login`, e.g. `arn:aws:iam::0123456789012:user/Admin`.
     pub login_session: Option<String>,
+    /// The format of the errors, e.g. `json`.
+    pub cli_error_format: Option<String>,
 }
 
 impl ProfileConfig {
@@ -67,15 +69,18 @@ impl ProfileConfig {
         {
             s3.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
         }
-        let login_session = settings
-            .profile
-            .iter()
-            .find(|(key, _)| key == "login_session")
-            .map(|(_, value)| value.clone());
+        let setting = |name: &str| {
+            settings
+                .profile
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        };
         Self {
             ca_bundle,
             s3,
-            login_session,
+            login_session: setting("login_session"),
+            cli_error_format: setting("cli_error_format"),
         }
     }
 }

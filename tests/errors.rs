@@ -96,6 +96,49 @@ login_session = arn:aws:iam::123456789012:user/Admin
 }
 
 #[test]
+fn cli_error_format() {
+    let env = Env::new();
+    let run = |format: &[&str], envs: &[(&str, &str)]| {
+        let mut args = vec!["presign", "s3://bucket"];
+        args.extend(format);
+        let result = env.run_with_env(&args, envs);
+        assert_eq!(result.code, 252);
+        result.stderr
+    };
+    let message = "Parameter validation failed:\nInvalid length for parameter Key, value: 0, \
+                   valid min length: 1";
+    assert_eq!(
+        run(&[], &[]),
+        format!("\naws3: [ERROR]: An error occurred (ParamValidation): {message}\n")
+    );
+    assert_eq!(
+        run(&["--cli-error-format", "legacy"], &[]),
+        format!("\naws3: [ERROR]: {message}\n")
+    );
+    let json = format!(
+        "{{\n    \"Code\": \"ParamValidation\",\n    \"Message\": {}\n}}\n",
+        serde_json::to_string(message).unwrap()
+    );
+    assert_eq!(run(&["--cli-error-format", "json"], &[]), json);
+    assert_eq!(run(&[], &[("AWS_CLI_ERROR_FORMAT", "JSON")]), json);
+    assert_eq!(
+        run(&["--cli-error-format", "text"], &[]),
+        format!("ParamValidation\t{message}\n")
+    );
+    let config = env.config("[default]\ncli_error_format = yaml\n");
+    assert_eq!(
+        run(&[], &[("AWS_CONFIG_FILE", config.to_str().unwrap())]),
+        "Code: ParamValidation\nMessage: 'Parameter validation failed:\n\n  \
+         Invalid length for parameter Key, value: 0, valid min length: 1'\n"
+    );
+    // The invalid formats of the environment variable are ignored.
+    assert_eq!(
+        run(&[], &[("AWS_CLI_ERROR_FORMAT", "bogus")]),
+        run(&[], &[])
+    );
+}
+
+#[test]
 fn ca_bundle() {
     let env = Env::new();
     env.bucket("bucket");

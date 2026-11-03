@@ -4,6 +4,9 @@ use std::process::ExitCode;
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 
+use crate::cli::ErrorFormat;
+use crate::errorformat;
+
 /// Exit code of the AWS CLI on parameter validation errors.
 const EXIT_PARAM_VALIDATION: u8 = 252;
 /// Exit code of the AWS CLI when credentials are not found.
@@ -17,6 +20,25 @@ const EXIT_GENERAL: u8 = 255;
 pub struct Error {
     code: u8,
     message: String,
+    /// The code and the message of the error for the structured formats of
+    /// `--cli-error-format`, which other errors are not formatted in.
+    info: Option<ErrorInfo>,
+}
+
+#[derive(Debug)]
+struct ErrorInfo {
+    kind: ErrorKind,
+    code: String,
+    message: String,
+}
+
+/// The kinds of the errors of the handlers of the AWS CLI, which format the
+/// errors in `--cli-error-format`.
+#[derive(Debug, PartialEq, Eq)]
+enum ErrorKind {
+    ParamValidation,
+    Client,
+    NoCredentials,
 }
 
 impl Error {
@@ -24,6 +46,7 @@ impl Error {
         Self {
             code: EXIT_GENERAL,
             message: message.into(),
+            info: None,
         }
     }
 
@@ -33,6 +56,11 @@ impl Error {
         Self {
             code: EXIT_PARAM_VALIDATION,
             message: format!("An error occurred (ParamValidation): {message}"),
+            info: Some(ErrorInfo {
+                kind: ErrorKind::ParamValidation,
+                code: "ParamValidation".to_owned(),
+                message: message.to_string(),
+            }),
         }
     }
 
@@ -63,18 +91,32 @@ impl Error {
                     message: format!(
                         "An error occurred ({code}) when calling the {operation} operation: {message}"
                     ),
+                    info: Some(ErrorInfo {
+                        kind: ErrorKind::Client,
+                        code,
+                        message,
+                    }),
                 }
             }
+            // The message of the transfers is extended by the error handler of
+            // the commands.
             _ if is_no_credentials(&err) => Self {
                 code: EXIT_NO_CREDENTIALS,
-                message: "An error occurred (NoCredentials): Unable to locate credentials. \
-                          You can configure credentials by running \"aws configure\"."
-                    .into(),
+                message: "Unable to locate credentials".to_owned(),
+                info: Some(ErrorInfo {
+                    kind: ErrorKind::NoCredentials,
+                    code: "NoCredentials".to_owned(),
+                    message: "Unable to locate credentials. \
+                              You can configure credentials by running \"aws login\"."
+                        .to_owned(),
+                }),
             },
-            SdkError::DispatchFailure(failure) if failure.is_io() || failure.is_timeout() => Self {
-                code: EXIT_GENERAL,
-                message: format!("Could not connect to the endpoint URL: {}", Chain(&err)),
-            },
+            SdkError::DispatchFailure(failure) if failure.is_io() || failure.is_timeout() => {
+                Self::new(format!(
+                    "Could not connect to the endpoint URL: {}",
+                    Chain(&err)
+                ))
+            }
             // The innermost error describes the cause, e.g. an invalid
             // combination of the configurations to resolve the endpoint.
             _ => endpoint_error(&root_cause(&err).to_string()),
@@ -114,6 +156,31 @@ impl Error {
         Self::new(message)
     }
 
+    /// Renders the error for the standard error in the format, in the same way
+    /// as the error handlers of the AWS CLI.
+    pub fn render(&self, format: ErrorFormat, colored: bool) -> String {
+        let plain = |message: &str| format!("\naws3: [ERROR]: {}\n", message.trim());
+        let Some(info) = &self.info else {
+            return plain(&self.message);
+        };
+        let (code, message) = (info.code.as_str(), info.message.as_str());
+        match format {
+            ErrorFormat::Enhanced if info.kind == ErrorKind::NoCredentials => {
+                plain(&format!("An error occurred ({code}): {message}"))
+            }
+            ErrorFormat::Enhanced => plain(&self.message),
+            // The legacy format omits the code except for the client errors.
+            ErrorFormat::Legacy if info.kind == ErrorKind::Client => plain(&self.message),
+            ErrorFormat::Legacy => plain(message),
+            ErrorFormat::Json => errorformat::json(code, message),
+            ErrorFormat::Yaml => errorformat::yaml(code, message),
+            ErrorFormat::Text => errorformat::text(code, message),
+            ErrorFormat::Table => {
+                errorformat::table(code, message, errorformat::terminal_width(), colored)
+            }
+        }
+    }
+
     pub fn exit_code(&self) -> ExitCode {
         ExitCode::from(self.code)
     }
@@ -127,10 +194,7 @@ impl fmt::Display for Error {
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
-        Self {
-            code: EXIT_GENERAL,
-            message: err.to_string(),
-        }
+        Self::new(err.to_string())
     }
 }
 
