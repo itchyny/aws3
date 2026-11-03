@@ -307,7 +307,14 @@ fn write_at(file: &File, mut bytes: &[u8], mut offset: u64) -> std::io::Result<(
     Ok(())
 }
 
+/// Sets the times of the file in whole seconds, since the AWS CLI drops the
+/// fractions of the times of the objects, e.g. `2026-01-01T00:00:00.123Z`
+/// listed by S3-compatible storage.
 fn set_file_times(path: &str, time: SystemTime) -> std::io::Result<()> {
+    let secs = time
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |time| time.as_secs());
+    let time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
     let file = File::options().write(true).open(path)?;
     file.set_times(FileTimes::new().set_accessed(time).set_modified(time))
 }

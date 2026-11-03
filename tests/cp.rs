@@ -114,6 +114,14 @@ fn cp_download() {
         ]
     );
     assert_eq!(env.read("out/dir/sub/c.txt"), b"c");
+    // The listed times of the objects have the fractions of the files of the
+    // fake server, which are dropped like the AWS CLI.
+    let modified = std::fs::metadata(env.path("out/dir/b.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let since_epoch = modified.duration_since(std::time::UNIX_EPOCH).unwrap();
+    assert_eq!(since_epoch.subsec_nanos(), 0);
 }
 
 #[test]
