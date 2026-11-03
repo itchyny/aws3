@@ -175,7 +175,7 @@ async fn download_ranges(
     let mut ranges = JoinSet::new();
     let mut offset = 0;
     while offset < size {
-        while ranges.len() >= ctx.config.max_concurrent_requests {
+        while ranges.len() >= ctx.config.max_concurrent_parts {
             if let Some(Err(err)) = join_range(ranges.join_next().await) {
                 return Err(cancel_ranges(&mut ranges, err).await);
             }

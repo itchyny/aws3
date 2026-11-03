@@ -62,7 +62,7 @@ pub async fn upload_file(
     let mut offset = 0;
     let mut number = 1;
     while offset < size {
-        let limit = ctx.config.max_concurrent_requests;
+        let limit = ctx.config.max_concurrent_parts;
         upload
             .wait_parts(ctx, &mut parts, &mut completed, limit)
             .await?;

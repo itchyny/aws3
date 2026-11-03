@@ -32,7 +32,9 @@ CLI.
   specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
 - `--debug`, `--query`, `--output` and `--color` are accepted but ignored.
 - The default of `max_concurrent_requests` in the `s3` section is 64 instead
-  of 10, which makes the transfers of many small files faster.
+  of 10, which makes the transfers of many small files faster. The parts of a
+  multipart transfer are up to 10 by default, which use the bandwidth with
+  less CPU.
 - `payload_signing_enabled = true` in the `s3` section does not sign the
   payloads of uploads over HTTPS.
 

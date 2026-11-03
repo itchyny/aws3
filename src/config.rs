@@ -90,6 +90,10 @@ pub struct S3Config {
     pub multipart_threshold: u64,
     pub multipart_chunksize: u64,
     pub max_concurrent_requests: usize,
+    /// The maximum number of the parts of a multipart transfer in progress,
+    /// which is fewer than the requests by default, since the parts of a large
+    /// file use the network bandwidth with fewer requests and less CPU.
+    pub max_concurrent_parts: usize,
     pub max_queue_size: usize,
     pub addressing_style: AddressingStyle,
     pub use_accelerate_endpoint: bool,
@@ -131,6 +135,7 @@ impl Default for S3Config {
             // The requests are more concurrent than 10 of the AWS CLI, which
             // is slow for many small files.
             max_concurrent_requests: 64,
+            max_concurrent_parts: 10,
             max_queue_size: 1000,
             addressing_style: AddressingStyle::Auto,
             use_accelerate_endpoint: false,
@@ -237,6 +242,9 @@ impl S3Config {
         self.multipart_threshold = or(multipart_threshold, self.multipart_threshold);
         self.max_concurrent_requests =
             or(max_concurrent_requests, self.max_concurrent_requests as u64) as usize;
+        // The explicit setting is applied to the parts as well.
+        self.max_concurrent_parts =
+            or(max_concurrent_requests, self.max_concurrent_parts as u64) as usize;
         self.max_queue_size = or(max_queue_size, self.max_queue_size as u64) as usize;
         self.max_bandwidth = max_bandwidth;
         Ok(())
@@ -507,6 +515,11 @@ s3 =
         assert_eq!(valid.multipart_chunksize, 16 * MIB);
         assert_eq!(valid.multipart_threshold, 1024 * MIB);
         assert_eq!(valid.max_concurrent_requests, 20);
+        assert_eq!(valid.max_concurrent_parts, 20);
+        // The parts are fewer than the requests by default.
+        let default = config("[default]\n");
+        assert_eq!(default.max_concurrent_requests, 64);
+        assert_eq!(default.max_concurrent_parts, 10);
         assert_eq!(valid.max_bandwidth, Some(10 * MIB));
         for (setting, error) in [
             (
