@@ -5,6 +5,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use http_body_util::BodyExt;
+use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder as ConnBuilder;
 use s3s::auth::SimpleAuth;
@@ -48,11 +50,23 @@ impl Env {
         let scheme = if tls { "https" } else { "http" };
         let endpoint = format!("{scheme}://{}", listener.local_addr().unwrap());
         let acceptor = tls.then(|| tls_acceptor(&work.path().join("ca.pem")));
-        let service = {
+        let s3 = {
             let mut builder = S3ServiceBuilder::new(FileSystem::new(storage.path()).unwrap());
             builder.set_auth(SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
             builder.build()
         };
+        // The request bodies are read before the requests are handled, since
+        // the server may respond early, e.g. on precondition failures, and
+        // close the connection while the client is writing the body.
+        let service = hyper::service::service_fn(move |request: http::Request<Incoming>| {
+            let s3 = s3.clone();
+            async move {
+                let (parts, body) = request.into_parts();
+                let body = body.collect().await.map_err(|err| err.to_string())?;
+                let request = http::Request::from_parts(parts, s3s::Body::from(body.to_bytes()));
+                s3.call(request).await.map_err(|err| format!("{err:?}"))
+            }
+        });
         runtime.spawn(async move {
             let server = ConnBuilder::new(TokioExecutor::new());
             loop {
