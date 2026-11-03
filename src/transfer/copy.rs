@@ -6,6 +6,7 @@ use aws_sdk_s3::types::{
 };
 use tokio::task::JoinSet;
 
+use super::download::etag_mismatch;
 use super::generator::ObjectProps;
 use super::params::{set_copy_source_sse_c, set_object_params, set_sse_c};
 use super::upload::{MultipartUpload, adjust_chunk_size};
@@ -237,16 +238,19 @@ async fn copy_multipart(
     };
     let _guard = upload.abort_guard(ctx);
     let chunk_size = adjust_chunk_size(ctx.config.multipart_chunksize, Some(size));
-    let source = copy_source(src_bucket, src_key);
+    let source = Arc::new(PartSource {
+        bucket: src_bucket.to_owned(),
+        key: src_key.to_owned(),
+        etag,
+    });
     let mut parts = JoinSet::new();
     let mut offset = 0;
     let mut number = 1;
     while offset < size {
         let end = (offset + chunk_size).min(size) - 1;
-        let (ctx, upload, source, etag) =
-            (ctx.clone(), upload.clone(), source.clone(), etag.clone());
+        let (ctx, upload, source) = (ctx.clone(), upload.clone(), source.clone());
         parts.spawn(async move {
-            let part = upload_part_copy(&ctx, &upload, number, &source, etag, offset, end).await?;
+            let part = upload_part_copy(&ctx, &upload, number, &source, offset, end).await?;
             ctx.progress(id, end - offset + 1);
             Ok(part)
         });
@@ -284,12 +288,19 @@ async fn copy_multipart(
     Ok(outcome)
 }
 
+/// The source object of the part copies, with the ETag to ensure that the
+/// object is not modified during the copy.
+struct PartSource {
+    bucket: String,
+    key: String,
+    etag: Option<String>,
+}
+
 async fn upload_part_copy(
     ctx: &Context,
     upload: &MultipartUpload,
     number: i32,
-    source: &str,
-    etag: Option<String>,
+    source: &PartSource,
     start: u64,
     end: u64,
 ) -> Result<CompletedPart, String> {
@@ -301,9 +312,9 @@ async fn upload_part_copy(
         .key(&upload.key)
         .upload_id(&upload.upload_id)
         .part_number(number)
-        .copy_source(source)
+        .copy_source(copy_source(&source.bucket, &source.key))
         .copy_source_range(format!("bytes={start}-{end}"))
-        .set_copy_source_if_match(etag)
+        .set_copy_source_if_match(source.etag.clone())
         .set_request_payer(params.request_payer.clone());
     let request = set_sse_c!(request, &params.sse_c);
     let request = set_copy_source_sse_c!(request, &params.sse_c_copy_source);
@@ -312,10 +323,13 @@ async fn upload_part_copy(
         .acquire()
         .await
         .map_err(|err| err.to_string())?;
-    let output = request
-        .send()
-        .await
-        .map_err(|err| Error::sdk("UploadPartCopy", err).to_string())?;
+    let output = request.send().await.map_err(|err| {
+        if has_error_code(&err, "PreconditionFailed") {
+            etag_mismatch(&source.bucket, &source.key)
+        } else {
+            Error::sdk("UploadPartCopy", err).to_string()
+        }
+    })?;
     let result = output.copy_part_result();
     Ok(CompletedPart::builder()
         .part_number(number)

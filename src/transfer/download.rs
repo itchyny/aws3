@@ -233,12 +233,20 @@ async fn get_object<'a>(
         .map_err(|err| err.to_string())?;
     let output = request.send().await.map_err(|err| {
         if pinned && has_error_code(&err, "PreconditionFailed") {
-            format!("Contents of stored object \"{key}\" in bucket \"{bucket}\" did not match expected ETag.")
+            etag_mismatch(bucket, key)
         } else {
             Error::sdk("GetObject", err).to_string()
         }
     })?;
     Ok((output, permit))
+}
+
+/// Returns the error message of the object modified during the multipart
+/// download or copy, in the same way as s3transfer.
+pub fn etag_mismatch(bucket: &str, key: &str) -> String {
+    format!(
+        "Contents of stored object \"{key}\" in bucket \"{bucket}\" did not match expected ETag."
+    )
 }
 
 async fn head_object(
