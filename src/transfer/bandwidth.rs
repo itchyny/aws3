@@ -1,14 +1,13 @@
 //! The limit of the bandwidth shared by the transfers of a command, in the
 //! same way as `max_bandwidth` of the AWS CLI.
 
-use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
 use aws_sdk_s3::primitives::ByteStream;
-use aws_smithy_types::body::SdkBody;
+use aws_smithy_types::body::{Error as BoxError, SdkBody};
 use bytes::Bytes;
 use http_body::{Body, Frame, SizeHint};
 use tokio::time::{Instant, Sleep};
@@ -48,23 +47,32 @@ impl Limiter {
         tokio::time::sleep_until(self.reserve(bytes)).await;
     }
 
-    /// Returns the body of the data to upload, which is transferred in chunks
-    /// within the bandwidth, and can be retried.
+    /// Returns the body of the data to upload within the bandwidth.
     pub fn body(self: &Arc<Self>, data: Bytes) -> ByteStream {
+        self.stream(ByteStream::from(data))
+    }
+
+    /// Wraps the stream to upload, which is transferred in chunks within the
+    /// bandwidth, and can be retried if the stream can be.
+    pub fn stream(self: &Arc<Self>, stream: ByteStream) -> ByteStream {
         let limiter = self.clone();
-        ByteStream::new(SdkBody::retryable(move || {
+        stream.map(move |body| {
             SdkBody::from_body_1_x(LimitedBody {
-                data: data.clone(),
+                inner: body,
+                pending: Bytes::new(),
                 limiter: limiter.clone(),
                 sleep: None,
             })
-        }))
+        })
     }
 }
 
-/// The body which yields the data in chunks within the bandwidth.
+/// The body which yields the data of the inner body in chunks within the
+/// bandwidth.
 struct LimitedBody {
-    data: Bytes,
+    inner: SdkBody,
+    /// The data read from the inner body but not yielded yet.
+    pending: Bytes,
     limiter: Arc<Limiter>,
     /// The wait for the current chunk.
     sleep: Option<Pin<Box<Sleep>>>,
@@ -72,31 +80,44 @@ struct LimitedBody {
 
 impl Body for LimitedBody {
     type Data = Bytes;
-    type Error = Infallible;
+    type Error = BoxError;
 
     fn poll_frame(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Frame<Bytes>, Infallible>>> {
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
         let this = self.get_mut();
-        if this.data.is_empty() {
-            return Poll::Ready(None);
+        while this.pending.is_empty() {
+            match ready!(Pin::new(&mut this.inner).poll_frame(cx)) {
+                Some(Ok(frame)) => match frame.into_data() {
+                    Ok(data) => this.pending = data,
+                    Err(frame) => return Poll::Ready(Some(Ok(frame))),
+                },
+                Some(Err(err)) => return Poll::Ready(Some(Err(err))),
+                None => return Poll::Ready(None),
+            }
         }
-        let size = this.data.len().min(CHUNK_SIZE);
+        let size = this.pending.len().min(CHUNK_SIZE);
         let sleep = this
             .sleep
             .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(this.limiter.reserve(size))));
         ready!(sleep.as_mut().poll(cx));
         this.sleep = None;
-        Poll::Ready(Some(Ok(Frame::data(this.data.split_to(size)))))
+        Poll::Ready(Some(Ok(Frame::data(this.pending.split_to(size)))))
     }
 
     fn is_end_stream(&self) -> bool {
-        self.data.is_empty()
+        self.pending.is_empty() && self.inner.is_end_stream()
     }
 
     fn size_hint(&self) -> SizeHint {
-        SizeHint::with_exact(self.data.len() as u64)
+        let mut hint = Body::size_hint(&self.inner);
+        let pending = self.pending.len() as u64;
+        hint.set_lower(hint.lower() + pending);
+        if let Some(upper) = hint.upper() {
+            hint.set_upper(upper + pending);
+        }
+        hint
     }
 }
 

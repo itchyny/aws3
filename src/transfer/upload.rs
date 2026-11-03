@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::AsyncReadExt;
 use tokio::task::JoinSet;
 
 use super::params::{set_object_params, set_sse_c};
@@ -134,35 +134,26 @@ pub async fn upload_stdin(
     upload.finish(ctx, completed, parts).await
 }
 
-/// Returns the body of the range of the file, which is read on sending, or
-/// read into the memory to limit the bandwidth.
+/// Returns the body of the range of the file, which is read on sending
+/// within the bandwidth.
 async fn file_body(
     ctx: &Context,
     path: &str,
     offset: u64,
     length: u64,
 ) -> Result<ByteStream, String> {
-    let Some(limiter) = &ctx.limiter else {
-        return ByteStream::read_from()
-            .buffer_size(READ_BUFFER_SIZE)
-            .path(path)
-            .offset(offset)
-            .length(Length::Exact(length))
-            .build()
-            .await
-            .map_err(|err| err.to_string());
-    };
-    let mut file = tokio::fs::File::open(path)
+    let stream = ByteStream::read_from()
+        .buffer_size(READ_BUFFER_SIZE)
+        .path(path)
+        .offset(offset)
+        .length(Length::Exact(length))
+        .build()
         .await
         .map_err(|err| err.to_string())?;
-    file.seek(std::io::SeekFrom::Start(offset))
-        .await
-        .map_err(|err| err.to_string())?;
-    let mut data = vec![0; length as usize];
-    file.read_exact(&mut data)
-        .await
-        .map_err(|err| err.to_string())?;
-    Ok(limiter.body(data.into()))
+    Ok(match &ctx.limiter {
+        Some(limiter) => limiter.stream(stream),
+        None => stream,
+    })
 }
 
 /// Returns the body of the data in the memory, which limits the bandwidth.
