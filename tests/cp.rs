@@ -767,3 +767,27 @@ s3 =
         result.stderr
     );
 }
+
+#[test]
+fn cp_invalid_transfer_settings() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "a");
+    let config = env.config(
+        r"[default]
+s3 =
+  multipart_chunksize = 0
+",
+    );
+    let envs = [("AWS_CONFIG_FILE", config.to_str().unwrap())];
+    let result = env.run_with_env(&["cp", "a.txt", "s3://bucket/a.txt"], &envs);
+    assert_eq!(result.code, 255);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: Value for multipart_chunksize must be a positive integer: 0\n"
+    );
+    assert_eq!(env.object_content("bucket", "a.txt"), None);
+
+    // The commands other than the transfer commands do not validate them.
+    env.run_with_env(&["ls", "s3://bucket"], &envs).success();
+}

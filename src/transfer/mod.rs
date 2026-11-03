@@ -531,13 +531,12 @@ async fn run(
         }
     };
     let config = sdk_config.s3.clone();
-    let limiter = match &config.max_bandwidth {
-        Some(rate) => match crate::config::parse_rate(rate).map_err(Error::new)? {
-            0 => None,
-            rate => Some(Arc::new(bandwidth::Limiter::new(rate))),
-        },
-        None => None,
-    };
+    if let Some(err) = &config.invalid {
+        return Err(Error::new(err));
+    }
+    let limiter = config
+        .max_bandwidth
+        .map(|rate| Arc::new(bandwidth::Limiter::new(rate)));
     let ctx = Arc::new(Context {
         client,
         source_client,
