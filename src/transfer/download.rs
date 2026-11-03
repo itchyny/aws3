@@ -29,6 +29,16 @@ pub async fn download_file(
     etag: Option<&str>,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
+    // The size and the ETag are retrieved when the ETag is unavailable on
+    // listing, like s3transfer, so that both are of the same object.
+    let (size, etag) = match etag {
+        Some(etag) => (size, Some(etag.to_owned())),
+        None => {
+            let head = head_object(ctx, bucket, key).await?;
+            let size = head.content_length().unwrap_or_default().max(0) as u64;
+            (size, head.e_tag().map(str::to_owned))
+        }
+    };
     if let Some(parent) = std::path::Path::new(path).parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -139,16 +149,8 @@ async fn download_ranges(
     key: &str,
     path: &str,
     size: u64,
-    etag: Option<&str>,
+    etag: Option<String>,
 ) -> Result<(), String> {
-    // The ETag is retrieved when it is unavailable on listing, like the AWS CLI.
-    let etag = match etag {
-        Some(etag) => Some(etag.to_owned()),
-        None => head_object(ctx, bucket, key)
-            .await?
-            .e_tag()
-            .map(str::to_owned),
-    };
     let file = File::create(path).map_err(|err| err.to_string())?;
     file.set_len(size).map_err(|err| err.to_string())?;
     let file = Arc::new(file);

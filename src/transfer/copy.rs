@@ -85,13 +85,23 @@ pub async fn copy_object(
     object: Option<&ObjectProps>,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
-    let head = object.and_then(|object| object.head.as_deref());
+    let mut head = object.and_then(|object| object.head.as_deref());
+    let mut size = size;
+    let mut etag = object.and_then(|object| object.etag.clone());
+    // The size and the ETag are retrieved when the ETag is unavailable on
+    // listing, like s3transfer, so that both are of the same object.
+    let fetched;
+    if etag.is_none() {
+        fetched = head_source(ctx, src_bucket, src_key, head).await?;
+        size = fetched.content_length().unwrap_or_default().max(0) as u64;
+        etag = fetched.e_tag().map(str::to_owned);
+        head = Some(&fetched);
+    }
     if size < ctx.config.multipart_threshold {
         let outcome = copy_single(ctx, src_bucket, src_key, bucket, key, head).await?;
         ctx.progress(id, size);
         Ok(outcome)
     } else {
-        let etag = object.and_then(|object| object.etag.as_deref());
         copy_multipart(ctx, id, src_bucket, src_key, bucket, key, size, head, etag).await
     }
 }
@@ -179,7 +189,7 @@ async fn copy_multipart(
     key: &str,
     size: u64,
     head: Option<&HeadObjectOutput>,
-    etag: Option<&str>,
+    etag: Option<String>,
 ) -> Result<Outcome, String> {
     let params = &ctx.params;
     let copy_props = copy_props(ctx);
@@ -190,15 +200,6 @@ async fn copy_multipart(
             Some(head_source(ctx, src_bucket, src_key, head).await?)
         }
         _ => None,
-    };
-    // The ETag is retrieved when it is unavailable on listing, like the AWS CLI.
-    let etag = match (etag, &source) {
-        (Some(etag), _) => Some(etag.to_owned()),
-        (None, Some(head)) => head.e_tag().map(str::to_owned),
-        (None, None) => head_source(ctx, src_bucket, src_key, head)
-            .await?
-            .e_tag()
-            .map(str::to_owned),
     };
     let tags = match copy_props {
         Some(CopyProps::Default | CopyProps::All) => get_tags(ctx, src_bucket, src_key).await?,
