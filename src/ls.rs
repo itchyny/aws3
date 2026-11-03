@@ -1,7 +1,6 @@
 use std::io::{self, BufWriter, Stdout, Write};
 use std::process::ExitCode;
 
-use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output;
 use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::{EncodingType, RequestPayer};
@@ -89,40 +88,25 @@ impl Lister {
         key: &str,
         args: &LsArgs,
     ) -> Result<(), Error> {
-        let send = |client: &Client| {
-            let mut paginator = client
+        let client = client::new_client(config, None);
+        let redirector = Redirector::default();
+        let mut pages = redirector.list_objects_v2(&client, bucket, |client| {
+            client
                 .list_objects_v2()
                 .bucket(bucket)
                 .prefix(key)
                 .set_delimiter((!args.recursive).then(|| "/".to_owned()))
                 .encoding_type(EncodingType::Url)
+                .set_max_keys(args.page_size)
                 .set_request_payer(
                     args.request_payer
                         .request_payer
                         .map(|cli::RequestPayer::Requester| RequestPayer::Requester),
                 )
-                .into_paginator();
-            if let Some(page_size) = args.page_size {
-                paginator = paginator.page_size(page_size);
-            }
-            paginator.send()
-        };
-        let client = client::new_client(config, None);
-        let mut pages = send(&client);
-        let mut page = pages.next().await;
-        // The listing is restarted in the region of the bucket on redirects.
-        if let Some(Err(err)) = &page
-            && let Some(client) = Redirector::default()
-                .redirect(&client, bucket, "ListObjectsV2", err)
-                .await
-        {
-            pages = send(&client);
-            page = pages.next().await;
-        }
-        while let Some(result) = page {
+        });
+        while let Some(result) = pages.next().await {
             let output = result.map_err(|err| Error::sdk("ListObjectsV2", err))?;
             self.print_page(&output, !args.recursive)?;
-            page = pages.next().await;
         }
         Ok(())
     }

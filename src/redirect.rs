@@ -8,6 +8,8 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_s3::operation::list_objects_v2::builders::ListObjectsV2FluentBuilder;
+use aws_sdk_s3::operation::list_objects_v2::{ListObjectsV2Error, ListObjectsV2Output};
 
 /// The clients of the regions of the buckets, which are found on redirects
 /// and used for the following requests to the buckets.
@@ -19,7 +21,7 @@ pub struct Redirector {
 impl Redirector {
     /// Returns the client for the bucket, which is of the region of the
     /// bucket if the requests to it were redirected.
-    pub fn client(&self, client: &Client, bucket: &str) -> Client {
+    fn client(&self, client: &Client, bucket: &str) -> Client {
         let clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
         clients.get(bucket).unwrap_or(client).clone()
     }
@@ -50,9 +52,30 @@ impl Redirector {
         }
     }
 
+    /// Returns the pages of the objects in the bucket, where each request of
+    /// the pages is redirected to the region of the bucket.
+    pub fn list_objects_v2<'a, F>(
+        &'a self,
+        client: &'a Client,
+        bucket: &'a str,
+        build: F,
+    ) -> ListPages<'a, F>
+    where
+        F: Fn(&Client) -> ListObjectsV2FluentBuilder,
+    {
+        ListPages {
+            redirector: self,
+            client,
+            bucket,
+            build,
+            token: None,
+            done: false,
+        }
+    }
+
     /// Returns the client of the region of the bucket if the error is caused
     /// by the request to another region, which is used for the bucket later.
-    pub async fn redirect<E: ProvideErrorMetadata>(
+    async fn redirect<E: ProvideErrorMetadata>(
         &self,
         client: &Client,
         bucket: &str,
@@ -71,6 +94,51 @@ impl Redirector {
         let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
         clients.insert(bucket.to_owned(), client.clone());
         Some(client)
+    }
+}
+
+/// The pages of ListObjectsV2, which continue in the region of the bucket on
+/// redirects, unlike the paginator of the SDK bound to a client.
+pub struct ListPages<'a, F> {
+    redirector: &'a Redirector,
+    client: &'a Client,
+    bucket: &'a str,
+    build: F,
+    token: Option<String>,
+    done: bool,
+}
+
+impl<F> ListPages<'_, F>
+where
+    F: Fn(&Client) -> ListObjectsV2FluentBuilder,
+{
+    /// Returns the next page, which ends on the last page or on an error.
+    pub async fn next(
+        &mut self,
+    ) -> Option<Result<ListObjectsV2Output, SdkError<ListObjectsV2Error, HttpResponse>>> {
+        if self.done {
+            return None;
+        }
+        let token = self.token.clone();
+        let result = self
+            .redirector
+            .send(self.client, self.bucket, "ListObjectsV2", |client| {
+                (self.build)(&client)
+                    .set_continuation_token(token.clone())
+                    .send()
+            })
+            .await;
+        // The pages end without the next token or with the same token, like
+        // the paginator of the SDK.
+        let next = match &result {
+            Ok(output) => output
+                .next_continuation_token()
+                .filter(|next| !next.is_empty()),
+            Err(_) => None,
+        };
+        self.done = next.is_none() || next == token.as_deref();
+        self.token = next.map(str::to_owned);
+        Some(result)
     }
 }
 
@@ -97,8 +165,8 @@ fn is_redirect<E: ProvideErrorMetadata>(err: &SdkError<E, HttpResponse>, operati
 /// Returns the region of the bucket in the header or the body of the response.
 fn response_region(response: &HttpResponse) -> Option<String> {
     match response.headers().get("x-amz-bucket-region") {
-        Some(region) => Some(region.to_owned()),
-        None => body_region(response),
+        Some(region) if !region.is_empty() => Some(region.to_owned()),
+        _ => body_region(response),
     }
 }
 

@@ -226,31 +226,16 @@ async fn try_list_s3(
         let _ = tx.send(Item::File(stat)).await;
         return Ok(());
     }
-    let send = |client: &Client| {
-        let mut paginator = client
+    let mut pages = redirector.list_objects_v2(client, bucket, |client| {
+        client
             .list_objects_v2()
             .bucket(bucket)
             .prefix(prefix)
             .encoding_type(EncodingType::Url)
+            .set_max_keys(options.page_size)
             .set_request_payer(options.request_payer.clone())
-            .into_paginator();
-        if let Some(page_size) = options.page_size {
-            paginator = paginator.page_size(page_size);
-        }
-        paginator.send()
-    };
-    let mut pages = send(&redirector.client(client, bucket));
-    let mut page = pages.next().await;
-    // The listing is restarted in the region of the bucket on redirects.
-    if let Some(Err(err)) = &page
-        && let Some(client) = redirector
-            .redirect(client, bucket, "ListObjectsV2", err)
-            .await
-    {
-        pages = send(&client);
-        page = pages.next().await;
-    }
-    while let Some(result) = page {
+    });
+    while let Some(result) = pages.next().await {
         let output = result.map_err(|err| Error::sdk("ListObjectsV2", err).to_string())?;
         for object in output.contents() {
             let key = url_decode(object.key().unwrap_or_default());
@@ -283,7 +268,6 @@ async fn try_list_s3(
                 return Ok(());
             }
         }
-        page = pages.next().await;
     }
     Ok(())
 }
