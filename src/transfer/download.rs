@@ -9,6 +9,7 @@ use tokio::task::JoinSet;
 use super::params::set_sse_c;
 use super::{Context, Outcome, TransferId};
 use crate::error::Error;
+use crate::path::validate_bucket_name;
 
 /// Downloads the object to the local file, which is written to a temporary
 /// file in the same directory and renamed on completion.
@@ -21,6 +22,7 @@ pub async fn download_file(
     size: u64,
     last_modified: Option<SystemTime>,
 ) -> Result<Outcome, String> {
+    validate_bucket_name(bucket)?;
     if let Some(parent) = std::path::Path::new(path).parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -72,6 +74,7 @@ pub async fn download_stdout(
     bucket: &str,
     key: &str,
 ) -> Result<Outcome, String> {
+    validate_bucket_name(bucket)?;
     // The size of the object is unknown, which is retrieved first like the
     // AWS CLI, and the errors of missing objects are reported by HeadObject.
     head_object(ctx, bucket, key).await?;

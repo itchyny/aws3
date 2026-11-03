@@ -12,11 +12,14 @@ use chrono::Local;
 use crate::cli::{self, GlobalArgs, LsArgs};
 use crate::client;
 use crate::error::Error;
-use crate::path::split_bucket_key;
+use crate::path::{split_bucket_key, validate_bucket_name};
 
 pub async fn run(args: &LsArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let config = client::load_config(global).await?;
     let (bucket, key) = split_bucket_key(&args.path);
+    if !bucket.is_empty() {
+        validate_bucket_name(bucket).map_err(Error::param_validation)?;
+    }
     let mut lister = Lister::new(args.human_readable);
     if bucket.is_empty() {
         lister.list_buckets(&config, args).await?;

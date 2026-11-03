@@ -10,6 +10,7 @@ use super::params::{set_object_params, set_sse_c};
 use super::{Context, Outcome, TransferId};
 use crate::error::{Error, has_error_code};
 use crate::mime::guess_content_type;
+use crate::path::validate_bucket_name;
 
 /// The size of the buffer to read files, which is the same as the default
 /// `io_chunksize` of the AWS CLI. The default of the SDK, 4 KiB, makes many
@@ -31,6 +32,7 @@ pub async fn upload_file(
     bucket: &str,
     key: &str,
 ) -> Result<Outcome, String> {
+    validate_bucket_name(bucket)?;
     let metadata = tokio::fs::metadata(path)
         .await
         .map_err(|err| err.to_string())?;
@@ -86,6 +88,7 @@ pub async fn upload_stdin(
     bucket: &str,
     key: &str,
 ) -> Result<Outcome, String> {
+    validate_bucket_name(bucket)?;
     let mut stdin = tokio::io::stdin();
     let threshold = ctx.config.multipart_threshold;
     let mut pending = read_chunk(&mut stdin, threshold).await?;

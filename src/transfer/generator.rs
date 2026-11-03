@@ -13,6 +13,7 @@ use tokio::sync::mpsc::Sender;
 use super::params::{SseCustomerKey, set_sse_c};
 use super::paths::split_bucket_key;
 use crate::error::{Error, has_status_code};
+use crate::path::validate_bucket_name;
 
 /// A file or an object listed by the generator.
 #[derive(Debug, Clone)]
@@ -209,6 +210,10 @@ async fn try_list_s3(
     tx: &Sender<Item>,
 ) -> Result<(), String> {
     let (bucket, prefix) = split_bucket_key(path);
+    // A single object to delete is not requested on listing.
+    if !(options.is_delete && !dir_op && !prefix.is_empty()) {
+        validate_bucket_name(bucket)?;
+    }
     if !dir_op && !prefix.is_empty() {
         let stat = head_single_object(client, bucket, prefix, options).await?;
         let _ = tx.send(Item::File(stat)).await;

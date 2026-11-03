@@ -183,3 +183,61 @@ fn tls_verification() {
     assert_eq!(result.lines(), ["download: s3://bucket/a.txt to ./out.txt"]);
     assert_eq!(env.read("out.txt"), b"hello");
 }
+
+#[test]
+fn invalid_bucket_name() {
+    let env = Env::new();
+    env.write("a.txt", "a");
+    let report = "Parameter validation failed:\nInvalid bucket name \"bad~name\": Bucket name must match the regex";
+
+    // The requests are validated like the AWS CLI, so the errors are reported
+    // in the same way as the errors of the requests.
+    let result = env.run(&["ls", "s3://bad~name/"]);
+    assert_eq!(result.code, 252);
+    assert!(
+        result.stderr.starts_with(&format!(
+            "\naws3: [ERROR]: An error occurred (ParamValidation): {report}"
+        )),
+        "{}",
+        result.stderr
+    );
+    let result = env.run(&["cp", "s3://bad~name/key", "out.txt"]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result.stderr.starts_with(&format!("fatal error: {report}")),
+        "{}",
+        result.stderr
+    );
+    let result = env.run(&["cp", "a.txt", "s3://bad~name/key", "--no-progress"]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result.stderr.starts_with(&format!(
+            "upload failed: ./a.txt to s3://bad~name/key {report}"
+        )),
+        "{}",
+        result.stderr
+    );
+    let result = env.run(&["rm", "s3://bad~name/key"]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result
+            .stderr
+            .starts_with(&format!("delete failed: s3://bad~name/key {report}"))
+    );
+    let result = env.run(&["mb", "s3://bad~name"]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result
+            .stderr
+            .starts_with(&format!("make_bucket failed: s3://bad~name {report}"))
+    );
+
+    // No requests are made on dry runs.
+    let result = env
+        .run(&["cp", "a.txt", "s3://bad~name/key", "--dryrun"])
+        .success();
+    assert_eq!(
+        result.lines(),
+        ["(dryrun) upload: ./a.txt to s3://bad~name/key"]
+    );
+}

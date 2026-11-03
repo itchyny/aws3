@@ -10,7 +10,7 @@ use aws_sdk_s3::types::{
 use crate::cli::{GlobalArgs, MbArgs, RbArgs, WebsiteArgs};
 use crate::client;
 use crate::error::Error;
-use crate::path::split_bucket_key;
+use crate::path::{split_bucket_key, validate_bucket_name};
 use crate::transfer;
 
 pub async fn mb(args: &MbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
@@ -20,6 +20,10 @@ pub async fn mb(args: &MbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
         ));
     };
     let (bucket, _) = split_bucket_key(path);
+    if let Err(message) = validate_bucket_name(bucket) {
+        eprintln!("make_bucket failed: {} {message}", args.path);
+        return Ok(ExitCode::FAILURE);
+    }
     let config = client::load_config(global).await?;
     let client = client::new_client(&config, None);
     let region = client
@@ -88,6 +92,10 @@ pub async fn rb(args: &RbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
             "remove_bucket failed: Unable to delete all objects in the bucket, bucket will not be deleted.",
         ));
     }
+    if let Err(message) = validate_bucket_name(bucket) {
+        eprintln!("remove_bucket failed: {} {message}", args.path);
+        return Ok(ExitCode::FAILURE);
+    }
     let config = client::load_config(global).await?;
     let client = client::new_client(&config, None);
     match client.delete_bucket().bucket(bucket).send().await {
@@ -109,6 +117,7 @@ pub async fn rb(args: &RbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
 pub async fn website(args: &WebsiteArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let path = args.path.strip_prefix("s3://").unwrap_or(&args.path);
     let bucket = path.strip_suffix('/').unwrap_or(path);
+    validate_bucket_name(bucket).map_err(Error::param_validation)?;
     let mut configuration = WebsiteConfiguration::builder();
     if let Some(suffix) = &args.index_document {
         let document = IndexDocument::builder()

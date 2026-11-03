@@ -27,6 +27,7 @@ use crate::client;
 use crate::config::S3Config;
 use crate::error::Error;
 use crate::filter::Filters;
+use crate::path::validate_bucket_name;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
 use params::RequestParams;
 use paths::{Endpoint, relative_path, split_bucket_key};
@@ -993,6 +994,7 @@ async fn delete_object(
     bucket: &str,
     key: &str,
 ) -> Result<Outcome, String> {
+    validate_bucket_name(bucket)?;
     let _permit = ctx
         .requests
         .acquire()

@@ -11,6 +11,7 @@ use super::upload::{MultipartUpload, adjust_chunk_size};
 use super::{Context, Outcome, TransferId};
 use crate::cli::CopyProps;
 use crate::error::{Error, has_error_code};
+use crate::path::validate_bucket_name;
 
 /// Sets the properties replaced by the REPLACE metadata directive, taking
 /// those not specified from the HeadObject response of the source object.
@@ -81,6 +82,7 @@ pub async fn copy_object(
     size: u64,
     head: Option<&HeadObjectOutput>,
 ) -> Result<Outcome, String> {
+    validate_bucket_name(bucket)?;
     if size < ctx.config.multipart_threshold {
         let outcome = copy_single(ctx, src_bucket, src_key, bucket, key, head).await?;
         ctx.progress(id, size);
