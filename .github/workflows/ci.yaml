@@ -68,7 +68,7 @@ jobs:
             fi
             artifact=$name-$VERSION-$target
             mkdir "$artifact"
-            cp README.md LICENSE "$executable" "$artifact"
+            cp README.md CHANGELOG.md LICENSE "$executable" "$artifact"
             if [[ $OS == windows ]]; then
               powershell Compress-Archive -Path "$artifact" -DestinationPath "$artifact.zip"
             else
