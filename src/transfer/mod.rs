@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use aws_sdk_s3::Client;
-use tokio::sync::{Semaphore, mpsc, watch};
+use tokio::sync::{Semaphore, SemaphorePermit, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
 use crate::cli::{
@@ -440,6 +440,13 @@ pub struct Context {
 }
 
 impl Context {
+    /// Acquires the permit of a request, which should be held until the
+    /// request including its body completes, to limit the concurrent requests
+    /// by `max_concurrent_requests`.
+    async fn permit(&self) -> Result<SemaphorePermit<'_>, String> {
+        self.requests.acquire().await.map_err(|err| err.to_string())
+    }
+
     fn is_cancelled(&self) -> bool {
         *self.cancel.borrow()
     }
@@ -1018,11 +1025,7 @@ async fn delete_object(
     key: &str,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
-    let _permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let _permit = ctx.permit().await?;
     client
         .delete_object()
         .bucket(bucket)

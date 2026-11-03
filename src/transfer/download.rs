@@ -226,11 +226,7 @@ async fn get_object<'a>(
         .set_request_payer(params.request_payer.clone())
         .set_checksum_mode(params.checksum_mode.clone());
     let request = set_sse_c!(request, &params.sse_c);
-    let permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let permit = ctx.permit().await?;
     let output = request.send().await.map_err(|err| {
         if pinned && has_error_code(&err, "PreconditionFailed") {
             etag_mismatch(bucket, key)
@@ -262,11 +258,7 @@ async fn head_object(
         .key(key)
         .set_request_payer(params.request_payer.clone());
     let request = set_sse_c!(request, &params.sse_c);
-    let _permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let _permit = ctx.permit().await?;
     request
         .send()
         .await

@@ -213,11 +213,7 @@ async fn put_object(
     let request = set_sse_c!(request, &params.sse_c);
     let has_content_type = content_type.is_some() || params.content_type.is_some();
     let request = request.set_content_type(content_type.or(params.content_type.clone()));
-    let _permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let _permit = ctx.permit().await?;
     // The SDK sends the default content type of the body, whereas the AWS CLI
     // leaves it to S3, which defaults to binary/octet-stream.
     let result = request
@@ -301,11 +297,7 @@ impl MultipartUpload {
             Some(content_type) => request.content_type(content_type),
             None => request,
         };
-        let _permit = ctx
-            .requests
-            .acquire()
-            .await
-            .map_err(|err| err.to_string())?;
+        let _permit = ctx.permit().await?;
         let output = request
             .send()
             .await
@@ -339,11 +331,7 @@ impl MultipartUpload {
             .set_checksum_algorithm(self.checksum_algorithm.clone())
             .set_request_payer(params.request_payer.clone());
         let request = set_sse_c!(request, &params.sse_c);
-        let _permit = ctx
-            .requests
-            .acquire()
-            .await
-            .map_err(|err| err.to_string())?;
+        let _permit = ctx.permit().await?;
         let output = request
             .send()
             .await
@@ -389,11 +377,7 @@ impl MultipartUpload {
             .set_request_payer(params.request_payer.clone())
             .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
         let request = set_sse_c!(request, &params.sse_c);
-        let _permit = ctx
-            .requests
-            .acquire()
-            .await
-            .map_err(|err| err.to_string())?;
+        let _permit = ctx.permit().await?;
         match request.send().await {
             Ok(_) => {
                 self.done.store(true, Ordering::Relaxed);

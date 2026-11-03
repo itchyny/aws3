@@ -159,11 +159,7 @@ async fn copy_single(
     if let Some(head) = &inject {
         request = set_source_props!(request, params, head);
     }
-    let _permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let _permit = ctx.permit().await?;
     match request.send().await {
         Ok(_) => Ok(Outcome::Done),
         Err(err) if params.no_overwrite && has_error_code(&err, "PreconditionFailed") => {
@@ -219,11 +215,7 @@ async fn copy_multipart(
         request = set_source_props!(request, params, head);
     }
     let output = {
-        let _permit = ctx
-            .requests
-            .acquire()
-            .await
-            .map_err(|err| err.to_string())?;
+        let _permit = ctx.permit().await?;
         request
             .send()
             .await
@@ -259,6 +251,7 @@ async fn copy_multipart(
     }
     let outcome = upload.finish(ctx, Vec::new(), parts).await?;
     if put_tags_later && outcome == Outcome::Done {
+        let permit = ctx.permit().await?;
         let result = ctx
             .client
             .put_object_tagging()
@@ -273,7 +266,9 @@ async fn copy_multipart(
             .set_request_payer(params.request_payer.clone())
             .send()
             .await;
+        drop(permit);
         if let Err(err) = result {
+            let _permit = ctx.permit().await?;
             let _ = ctx
                 .client
                 .delete_object()
@@ -318,11 +313,7 @@ async fn upload_part_copy(
         .set_request_payer(params.request_payer.clone());
     let request = set_sse_c!(request, &params.sse_c);
     let request = set_copy_source_sse_c!(request, &params.sse_c_copy_source);
-    let _permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let _permit = ctx.permit().await?;
     let output = request.send().await.map_err(|err| {
         if has_error_code(&err, "PreconditionFailed") {
             etag_mismatch(&source.bucket, &source.key)
@@ -364,11 +355,7 @@ async fn head_source(
         .key(key)
         .set_request_payer(ctx.params.request_payer.clone());
     let request = set_sse_c!(request, &ctx.params.sse_c_copy_source);
-    let _permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let _permit = ctx.permit().await?;
     request
         .send()
         .await
@@ -376,11 +363,7 @@ async fn head_source(
 }
 
 async fn get_tags(ctx: &Context, bucket: &str, key: &str) -> Result<Vec<Tag>, String> {
-    let _permit = ctx
-        .requests
-        .acquire()
-        .await
-        .map_err(|err| err.to_string())?;
+    let _permit = ctx.permit().await?;
     let output = ctx
         .source_client
         .get_object_tagging()
