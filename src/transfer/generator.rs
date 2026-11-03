@@ -6,8 +6,9 @@ use std::path::{MAIN_SEPARATOR as SEP, Path};
 use std::time::SystemTime;
 
 use aws_sdk_s3::Client;
+use aws_sdk_s3::config::ResponseChecksumValidation;
 use aws_sdk_s3::operation::head_object::HeadObjectOutput;
-use aws_sdk_s3::types::{EncodingType, RequestPayer};
+use aws_sdk_s3::types::{ChecksumMode, EncodingType, RequestPayer};
 use tokio::sync::mpsc::Sender;
 
 use super::params::{SseCustomerKey, set_sse_c};
@@ -303,6 +304,13 @@ async fn head_single_object(
             object: None,
         });
     }
+    // The checksum mode is enabled for the full object checksum unless the
+    // response checksums are validated only when required.
+    let validation = client.config().response_checksum_validation();
+    let checksum_mode = options.checksum_mode.clone().or_else(|| {
+        (validation != Some(&ResponseChecksumValidation::WhenRequired))
+            .then_some(ChecksumMode::Enabled)
+    });
     let output = redirector
         .send(client, bucket, "HeadObject", |client| {
             let request = client
@@ -310,7 +318,7 @@ async fn head_single_object(
                 .bucket(bucket)
                 .key(key)
                 .set_request_payer(options.request_payer.clone())
-                .set_checksum_mode(options.checksum_mode.clone());
+                .set_checksum_mode(checksum_mode.clone());
             set_sse_c!(request, &options.sse_c).send()
         })
         .await

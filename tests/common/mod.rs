@@ -116,7 +116,16 @@ impl Env {
                     });
                     let request =
                         http::Request::from_parts(parts, s3s::Body::from(body.to_bytes()));
-                    let response = s3.call(request).await.map_err(|err| format!("{err:?}"))?;
+                    let mut response = s3.call(request).await.map_err(|err| format!("{err:?}"))?;
+                    // The checksums of CRC64NVME are of the full objects on S3,
+                    // whose type is not responded by the fake server.
+                    let headers = response.headers_mut();
+                    if headers.contains_key("x-amz-checksum-crc64nvme")
+                        && !headers.contains_key("x-amz-checksum-type")
+                    {
+                        let value = http::HeaderValue::from_static("FULL_OBJECT");
+                        headers.insert("x-amz-checksum-type", value);
+                    }
                     if !encode || !response.status().is_success() {
                         return Ok(response);
                     }

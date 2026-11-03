@@ -608,6 +608,51 @@ fn cp_request_checksum_calculation() {
 }
 
 #[test]
+fn cp_full_object_checksum() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let data = content(11 * 1024 * 1024);
+    env.write("big.bin", &data);
+    // The object is uploaded at once to store its checksum on the fake server,
+    // and downloaded in parts.
+    let single = env.config("[default]\ns3 =\n  multipart_threshold = 64MB\n");
+    let single = [("AWS_CONFIG_FILE", single.to_str().unwrap())];
+    env.run_with_env(&["cp", "big.bin", "s3://bucket/big.bin"], &single)
+        .success();
+    let config = env.multipart_config();
+    let envs = [(config[0].0, config[0].1.as_str())];
+    env.run_with_env(&["cp", "s3://bucket/big.bin", "out.bin"], &envs)
+        .success();
+    assert_eq!(env.read("out.bin"), data);
+
+    // The object is corrupted on the storage, whose stored checksum does not
+    // match the downloaded parts.
+    let mut corrupted = data.clone();
+    corrupted[6 * 1024 * 1024] ^= 1;
+    env.object("bucket", "big.bin", &corrupted);
+    let result = env.run_with_env(&["cp", "s3://bucket/big.bin", "corrupted.bin"], &envs);
+    assert_eq!(result.code, 1, "{}", result.stderr);
+    assert!(
+        result.stderr.starts_with(
+            "download failed: s3://bucket/big.bin to ./corrupted.bin Expected full object \
+             checksum (crc64nvme) "
+        ),
+        "{}",
+        result.stderr
+    );
+    assert!(!env.path("corrupted.bin").exists());
+
+    // The checksums are not validated when only required.
+    let validation = [
+        ("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required"),
+        envs[0],
+    ];
+    env.run_with_env(&["cp", "s3://bucket/big.bin", "corrupted.bin"], &validation)
+        .success();
+    assert_eq!(env.read("corrupted.bin"), corrupted);
+}
+
+#[test]
 fn cp_no_overwrite_upload() {
     let env = Env::new();
     env.bucket("bucket");

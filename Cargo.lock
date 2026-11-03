@@ -625,6 +625,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "crc-fast",
  "http",
  "http-body",
  "http-body-util",

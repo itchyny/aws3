@@ -2,6 +2,7 @@
 //! `CommandArchitecture` of the AWS CLI.
 
 mod bandwidth;
+mod checksum;
 mod copy;
 mod download;
 mod generator;
@@ -976,9 +977,7 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
                     &task.dest,
                     task.size.unwrap_or(0),
                     task.last_modified,
-                    task.object
-                        .as_ref()
-                        .and_then(|object| object.etag.as_deref()),
+                    task.object.as_ref(),
                 )
                 .await?
             }

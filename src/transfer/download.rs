@@ -1,8 +1,9 @@
 use std::fs::{File, FileTimes};
 use std::hash::{BuildHasher, RandomState};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
+use aws_sdk_s3::config::ResponseChecksumValidation;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use bytes::Bytes;
@@ -10,6 +11,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::SemaphorePermit;
 use tokio::task::JoinSet;
 
+use super::checksum::FullObjectChecksum;
+use super::generator::ObjectProps;
 use super::params::set_sse_c;
 use super::{Context, Outcome, TransferId};
 use crate::error::{Error, has_error_code};
@@ -26,9 +29,16 @@ pub async fn download_file(
     path: &str,
     size: u64,
     last_modified: Option<SystemTime>,
-    etag: Option<&str>,
+    object: Option<&ObjectProps>,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
+    let etag = object.and_then(|object| object.etag.as_deref());
+    // The full object checksum of a single object is validated on multipart
+    // downloads, which is unavailable on listing.
+    let checksum = object
+        .and_then(|object| object.head.as_deref())
+        .filter(|_| validates_checksum(ctx))
+        .and_then(FullObjectChecksum::from_head);
     // The size and the ETag are retrieved when the ETag is unavailable on
     // listing, like s3transfer, so that both are of the same object.
     let (size, etag) = match etag {
@@ -50,7 +60,7 @@ pub async fn download_file(
     if size < ctx.config.multipart_threshold {
         download_whole(ctx, id, bucket, key, &temp_path).await?;
     } else {
-        download_ranges(ctx, id, bucket, key, &temp_path, size, etag).await?;
+        download_ranges(ctx, id, bucket, key, &temp_path, size, etag, checksum).await?;
     }
     if let Some(time) = last_modified
         && let Err(err) = set_file_times(&temp_path, time)
@@ -144,6 +154,7 @@ async fn download_whole(
 /// object modified during the download fails instead of mixing the contents.
 /// The number of the ranges in progress is bounded, which also bounds the
 /// ranges read into the memory and waiting to be written.
+#[allow(clippy::too_many_arguments)]
 async fn download_ranges(
     ctx: &Arc<Context>,
     id: TransferId,
@@ -152,8 +163,11 @@ async fn download_ranges(
     path: &str,
     size: u64,
     etag: Option<String>,
+    checksum: Option<FullObjectChecksum>,
 ) -> Result<(), String> {
     let file = File::create(path).map_err(|err| err.to_string())?;
+    let checksum = checksum.map(Arc::new);
+    let parts = Arc::new(Mutex::new(Vec::new()));
     file.set_len(size).map_err(|err| err.to_string())?;
     let file = Arc::new(file);
     let chunk_size = ctx.config.multipart_chunksize;
@@ -168,12 +182,20 @@ async fn download_ranges(
         let end = (offset + chunk_size).min(size) - 1;
         let (ctx, file) = (ctx.clone(), file.clone());
         let (bucket, key) = (bucket.to_owned(), key.to_owned());
-        let etag = etag.clone();
+        let (etag, checksum, parts) = (etag.clone(), checksum.clone(), parts.clone());
         ranges.spawn(async move {
             let range = format!("bytes={offset}-{end}");
             let (output, permit) = get_object(&ctx, &bucket, &key, Some(range), etag).await?;
+            validate_content_range(offset, end, output.content_range())?;
             let bytes = read_body(&ctx, output.body).await?;
             drop(permit);
+            if let Some(checksum) = &checksum {
+                let part = checksum.part(offset, &bytes);
+                parts
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push(part);
+            }
             let length = bytes.len() as u64;
             // The write is not interrupted by the cancellation of the task,
             // so that the file is not written after the cancellation.
@@ -189,7 +211,37 @@ async fn download_ranges(
             return Err(cancel_ranges(&mut ranges, err).await);
         }
     }
+    if let Some(checksum) = &checksum {
+        let parts = std::mem::take(&mut *parts.lock().unwrap_or_else(PoisonError::into_inner));
+        checksum.validate(parts)?;
+    }
     file.sync_all().map_err(|err| err.to_string())
+}
+
+/// Returns whether the checksums of the responses are validated, by the
+/// setting of `response_checksum_validation` or the checksum mode option.
+fn validates_checksum(ctx: &Context) -> bool {
+    let validation = ctx.source_client.config().response_checksum_validation();
+    validation != Some(&ResponseChecksumValidation::WhenRequired)
+        || ctx.params.checksum_mode.is_some()
+}
+
+/// Validates the content range of the response of the ranged download, in the
+/// same way as `_validate_content_range` of s3transfer.
+fn validate_content_range(start: u64, end: u64, content_range: Option<&str>) -> Result<(), String> {
+    // The content range looks like `bytes 0-8388607/39542919`.
+    let Some(content_range) = content_range else {
+        return Ok(());
+    };
+    let range = content_range.split('/').next().unwrap_or_default();
+    let range = range.strip_prefix("bytes ").unwrap_or(range);
+    let requested = format!("{start}-{end}");
+    if range == requested {
+        return Ok(());
+    }
+    Err(format!(
+        "Requested range: `{requested}` does not match content range in response: `{range}`"
+    ))
 }
 
 type RangeResult = Result<(), String>;
