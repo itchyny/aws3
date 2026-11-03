@@ -1,6 +1,7 @@
 //! The transfer commands, i.e. cp, mv, rm and sync, in the same way as the
 //! `CommandArchitecture` of the AWS CLI.
 
+mod bandwidth;
 mod copy;
 mod download;
 mod generator;
@@ -434,6 +435,8 @@ pub struct Context {
     /// The tasks to clean up the cancelled transfers, e.g. to abort the
     /// multipart uploads.
     cleanup: Mutex<Vec<JoinHandle<()>>>,
+    /// The limit of the bandwidth of uploads and downloads.
+    limiter: Option<Arc<bandwidth::Limiter>>,
 }
 
 impl Context {
@@ -479,6 +482,13 @@ impl Context {
         self.printer().warning(message);
     }
 
+    /// Waits until the bytes can be transferred within the bandwidth.
+    async fn limit(&self, bytes: usize) {
+        if let Some(limiter) = &self.limiter {
+            limiter.consume(bytes).await;
+        }
+    }
+
     fn notice(&self, message: &str) {
         self.printer().notice(message);
     }
@@ -521,6 +531,13 @@ async fn run(
         }
     };
     let config = sdk_config.s3.clone();
+    let limiter = match &config.max_bandwidth {
+        Some(rate) => match crate::config::parse_rate(rate).map_err(Error::new)? {
+            0 => None,
+            rate => Some(Arc::new(bandwidth::Limiter::new(rate))),
+        },
+        None => None,
+    };
     let ctx = Arc::new(Context {
         client,
         source_client,
@@ -533,6 +550,7 @@ async fn run(
         next_id: AtomicU64::new(0),
         cancel: watch::Sender::new(false),
         cleanup: Mutex::new(Vec::new()),
+        limiter,
     });
     // The first Ctrl-C cancels the transfers, and the second one exits.
     let listener = tokio::spawn({

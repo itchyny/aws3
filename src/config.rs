@@ -85,6 +85,9 @@ pub struct S3Config {
     pub use_arn_region: Option<bool>,
     /// Whether the ARNs of multi-region access points are rejected.
     pub disable_multiregion_access_points: bool,
+    /// The maximum bandwidth of transfers, which is parsed by the transfer
+    /// commands since other commands do not report invalid values.
+    pub max_bandwidth: Option<String>,
 }
 
 /// The style of the URLs of buckets.
@@ -111,6 +114,7 @@ impl Default for S3Config {
             use_dualstack_endpoint: false,
             use_arn_region: None,
             disable_multiregion_access_points: false,
+            max_bandwidth: None,
         }
     }
 }
@@ -157,6 +161,7 @@ impl S3Config {
                 "use_arn_region" => {
                     config.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
                 }
+                "max_bandwidth" => config.max_bandwidth = Some(value.clone()),
                 "s3_disable_multiregion_access_points" => {
                     config.disable_multiregion_access_points = value.eq_ignore_ascii_case("true");
                 }
@@ -222,6 +227,34 @@ fn profile_settings(content: &str, profile: &str) -> Settings {
         }
     }
     settings
+}
+
+/// Parses the rate in bytes per second, e.g. `10MB/s`, or in bits per second,
+/// e.g. `10Mb/s`, or an integer in bytes per second, in the same way as
+/// `_convert_human_readable_rates` of the AWS CLI.
+pub fn parse_rate(value: &str) -> Result<u64, String> {
+    let rate = if let Some(size) = value.strip_suffix("B/s") {
+        parse_rate_size(size, "B")
+    } else if let Some(size) = value.strip_suffix("b/s") {
+        parse_rate_size(size, "b").map(|bits| bits / 8)
+    } else {
+        value.parse().ok()
+    };
+    rate.ok_or_else(|| {
+        format!(
+            "Invalid rate: {value}. The value must be expressed as an integer in terms of bytes \
+             per second (e.g. 10485760) or a rate in terms of bytes per second (e.g. 10MB/s or \
+             800KB/s) or bits per second (e.g. 10Mb/s or 800Kb/s)"
+        )
+    })
+}
+
+/// Parses the size of a rate without `/s`, e.g. `1024` of `1024B/s` or `10MB`
+/// of `10MB/s`, with the unit character.
+fn parse_rate_size(size: &str, unit: &str) -> Option<u64> {
+    size.parse()
+        .ok()
+        .or_else(|| parse_size(&format!("{size}{unit}")))
 }
 
 /// Parses the size with an optional suffix, e.g. `64MB` or `1GiB`, in the
@@ -303,6 +336,20 @@ ca_bundle = /etc/other.pem
             ]
         );
         assert!(profile_settings(content, "missing").profile.is_empty());
+    }
+
+    #[test]
+    fn rate() {
+        assert_eq!(parse_rate("10485760"), Ok(10 * MIB));
+        assert_eq!(parse_rate("1024B/s"), Ok(1024));
+        assert_eq!(parse_rate("10MB/s"), Ok(10 * MIB));
+        assert_eq!(parse_rate("800KB/s"), Ok(800 * 1024));
+        assert_eq!(parse_rate("1MiB/s"), Ok(MIB));
+        assert_eq!(parse_rate("10Mb/s"), Ok(10 * MIB / 8));
+        assert_eq!(parse_rate("8000b/s"), Ok(1000));
+        assert!(parse_rate("fast").is_err());
+        assert!(parse_rate("10MB").is_err());
+        assert!(parse_rate("10XB/s").is_err());
     }
 
     #[test]

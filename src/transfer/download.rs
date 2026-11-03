@@ -3,6 +3,8 @@ use std::hash::{BuildHasher, RandomState};
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use aws_sdk_s3::primitives::ByteStream;
+use bytes::Bytes;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinSet;
 
@@ -86,6 +88,7 @@ pub async fn download_stdout(
         .await
         .map_err(|err| err.to_string())?
     {
+        ctx.limit(bytes.len()).await;
         stdout
             .write_all(&bytes)
             .await
@@ -113,6 +116,7 @@ async fn download_whole(
         .await
         .map_err(|err| err.to_string())?
     {
+        ctx.limit(bytes.len()).await;
         file.write_all(&bytes)
             .await
             .map_err(|err| err.to_string())?;
@@ -144,12 +148,7 @@ async fn download_ranges(
         ranges.spawn(async move {
             let range = format!("bytes={offset}-{end}");
             let output = get_object(&ctx, &bucket, &key, Some(range)).await?;
-            let bytes = output
-                .body
-                .collect()
-                .await
-                .map_err(|err| err.to_string())?
-                .into_bytes();
+            let bytes = read_body(&ctx, output.body).await?;
             let length = bytes.len() as u64;
             tokio::task::spawn_blocking(move || write_at(&file, &bytes, offset))
                 .await
@@ -170,6 +169,23 @@ async fn download_ranges(
         }
     }
     file.sync_all().map_err(|err| err.to_string())
+}
+
+/// Reads the body into the memory, within the bandwidth.
+async fn read_body(ctx: &Context, mut body: ByteStream) -> Result<Bytes, String> {
+    if ctx.limiter.is_none() {
+        return Ok(body
+            .collect()
+            .await
+            .map_err(|err| err.to_string())?
+            .into_bytes());
+    }
+    let mut data = Vec::new();
+    while let Some(bytes) = body.try_next().await.map_err(|err| err.to_string())? {
+        ctx.limit(bytes.len()).await;
+        data.extend_from_slice(&bytes);
+    }
+    Ok(data.into())
 }
 
 async fn get_object(

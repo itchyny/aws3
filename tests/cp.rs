@@ -671,3 +671,52 @@ fn cp_ctrl_c() {
     // The cancelled multipart upload is aborted.
     assert_eq!(env.multipart_uploads(), 0);
 }
+
+#[test]
+fn cp_max_bandwidth() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let data = content(640 * 1024);
+    env.write("a.bin", &data);
+    let config = env.config(
+        r"[default]
+s3 =
+  max_bandwidth = 1MB/s
+",
+    );
+    let config = config.to_string_lossy().into_owned();
+    let envs = [("AWS_CONFIG_FILE", config.as_str())];
+    // The data of 640 KiB is transferred in three chunks of 256 KiB at most,
+    // where the third chunk waits for the bandwidth of the first two chunks.
+    for args in [
+        ["cp", "a.bin", "s3://bucket/a.bin", "--no-progress"],
+        ["cp", "s3://bucket/a.bin", "b.bin", "--no-progress"],
+    ] {
+        let start = std::time::Instant::now();
+        env.run_with_env(&args, &envs).success();
+        assert!(
+            start.elapsed() >= std::time::Duration::from_millis(450),
+            "{args:?}"
+        );
+    }
+    assert_eq!(env.object_content("bucket", "a.bin").unwrap(), data);
+    assert_eq!(env.read("b.bin"), data);
+
+    let config = env.config(
+        r"[default]
+s3 =
+  max_bandwidth = fast
+",
+    );
+    let config = config.to_string_lossy().into_owned();
+    let result = env.run_with_env(
+        &["cp", "a.bin", "s3://bucket/c.bin"],
+        &[("AWS_CONFIG_FILE", &config)],
+    );
+    assert_eq!(result.code, 255);
+    assert!(
+        result.stderr.contains("Invalid rate: fast."),
+        "{}",
+        result.stderr
+    );
+}

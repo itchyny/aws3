@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::task::JoinSet;
 
 use super::params::{set_object_params, set_sse_c};
@@ -42,12 +42,7 @@ pub async fn upload_file(
     let size = metadata.len();
     let content_type = content_type(ctx, path);
     if size < ctx.config.multipart_threshold {
-        let body = ByteStream::read_from()
-            .buffer_size(READ_BUFFER_SIZE)
-            .path(path)
-            .build()
-            .await
-            .map_err(|err| err.to_string())?;
+        let body = file_body(ctx, path, 0, size).await?;
         let outcome = put_object(ctx, bucket, key, body, size, content_type).await?;
         ctx.progress(id, size);
         return Ok(outcome);
@@ -62,14 +57,7 @@ pub async fn upload_file(
         let length = chunk_size.min(size - offset);
         let (ctx, upload, path) = (ctx.clone(), upload.clone(), path.to_owned());
         parts.spawn(async move {
-            let body = ByteStream::read_from()
-                .buffer_size(READ_BUFFER_SIZE)
-                .path(path)
-                .offset(offset)
-                .length(Length::Exact(length))
-                .build()
-                .await
-                .map_err(|err| err.to_string())?;
+            let body = file_body(&ctx, &path, offset, length).await?;
             let part = upload.upload_part(&ctx, number, body, length).await?;
             ctx.progress(id, length);
             Ok(part)
@@ -94,7 +82,7 @@ pub async fn upload_stdin(
     let mut pending = read_chunk(&mut stdin, threshold).await?;
     if (pending.len() as u64) < threshold {
         let size = pending.len() as u64;
-        let outcome = put_object(ctx, bucket, key, ByteStream::from(pending), size, None).await?;
+        let outcome = put_object(ctx, bucket, key, memory_body(ctx, pending), size, None).await?;
         ctx.progress(id, size);
         return Ok(outcome);
     }
@@ -125,7 +113,7 @@ pub async fn upload_stdin(
         let (part_ctx, part_upload) = (ctx.clone(), upload.clone());
         parts.spawn(async move {
             let part = part_upload
-                .upload_part(&part_ctx, number, ByteStream::from(body), length)
+                .upload_part(&part_ctx, number, memory_body(&part_ctx, body), length)
                 .await?;
             part_ctx.progress(id, length);
             Ok(part)
@@ -144,6 +132,45 @@ pub async fn upload_stdin(
         }
     }
     upload.finish(ctx, completed, parts).await
+}
+
+/// Returns the body of the range of the file, which is read on sending, or
+/// read into the memory to limit the bandwidth.
+async fn file_body(
+    ctx: &Context,
+    path: &str,
+    offset: u64,
+    length: u64,
+) -> Result<ByteStream, String> {
+    let Some(limiter) = &ctx.limiter else {
+        return ByteStream::read_from()
+            .buffer_size(READ_BUFFER_SIZE)
+            .path(path)
+            .offset(offset)
+            .length(Length::Exact(length))
+            .build()
+            .await
+            .map_err(|err| err.to_string());
+    };
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|err| err.to_string())?;
+    file.seek(std::io::SeekFrom::Start(offset))
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut data = vec![0; length as usize];
+    file.read_exact(&mut data)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(limiter.body(data.into()))
+}
+
+/// Returns the body of the data in the memory, which limits the bandwidth.
+fn memory_body(ctx: &Context, data: Vec<u8>) -> ByteStream {
+    match &ctx.limiter {
+        Some(limiter) => limiter.body(data.into()),
+        None => ByteStream::from(data),
+    }
 }
 
 async fn read_chunk(reader: &mut tokio::io::Stdin, size: u64) -> Result<Vec<u8>, String> {
