@@ -98,6 +98,9 @@ pub struct S3Config {
     pub disable_multiregion_access_points: bool,
     /// The maximum bandwidth of transfers in bytes per second.
     pub max_bandwidth: Option<u64>,
+    /// Whether the payloads of the requests are signed, which is disabled by
+    /// `false`, otherwise decided by the SDK.
+    pub payload_signing_enabled: Option<bool>,
     /// The error of the invalid transfer settings, which is reported by the
     /// transfer commands since other commands do not validate them.
     pub invalid: Option<String>,
@@ -130,6 +133,7 @@ impl Default for S3Config {
             use_arn_region: None,
             disable_multiregion_access_points: false,
             max_bandwidth: None,
+            payload_signing_enabled: None,
             invalid: None,
         }
     }
@@ -156,6 +160,10 @@ impl S3Config {
                 }
                 "use_arn_region" => {
                     config.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
+                }
+                // Only `true` is true like `ensure_boolean` of the AWS CLI.
+                "payload_signing_enabled" => {
+                    config.payload_signing_enabled = Some(value.eq_ignore_ascii_case("true"));
                 }
                 "s3_disable_multiregion_access_points" => {
                     config.disable_multiregion_access_points = value.eq_ignore_ascii_case("true");

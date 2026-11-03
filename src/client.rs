@@ -4,9 +4,13 @@ use std::time::Duration;
 use aws_config::{BehaviorVersion, SdkConfig};
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::provider::error::CredentialsError;
+use aws_runtime::auth::PayloadSigningOverride;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::timeout::TimeoutConfig;
+use aws_sdk_s3::config::{ConfigBag, Intercept, RuntimeComponents};
+use aws_smithy_runtime_api::box_error::BoxError;
+use aws_smithy_runtime_api::client::interceptors::context::BeforeTransmitInterceptorContextMut;
 
 use crate::cli::GlobalArgs;
 use aws_types::service_config::ServiceConfigKey;
@@ -89,6 +93,34 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
     })
 }
 
+/// Disables the signing of the payloads of all the requests, which is enabled
+/// over HTTP by default, for `payload_signing_enabled = false`.
+#[derive(Debug)]
+struct UnsignedPayload;
+
+impl Intercept for UnsignedPayload {
+    fn name(&self) -> &'static str {
+        "UnsignedPayload"
+    }
+
+    fn modify_before_signing(
+        &self,
+        _context: &mut BeforeTransmitInterceptorContextMut<'_>,
+        _components: &RuntimeComponents,
+        config: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        // The streaming bodies with the checksum trailers remain chunked.
+        let unsigned = match config.load::<PayloadSigningOverride>() {
+            Some(PayloadSigningOverride::StreamingSignedPayloadTrailer) => {
+                PayloadSigningOverride::StreamingUnsignedPayloadTrailer
+            }
+            _ => PayloadSigningOverride::unsigned_payload(),
+        };
+        config.interceptor_state().store_put(unsigned);
+        Ok(())
+    }
+}
+
 /// Returns the endpoint URL specific to S3, i.e. `AWS_ENDPOINT_URL_S3` or the
 /// `s3` service in the `services` section of the config file.
 fn s3_endpoint_url(sdk: &SdkConfig) -> Option<String> {
@@ -109,6 +141,9 @@ pub fn new_client(config: &Config, region: Option<&str>) -> Client {
         .accelerate(config.s3.use_accelerate_endpoint)
         .disable_multi_region_access_points(config.s3.disable_multiregion_access_points);
     builder.set_use_arn_region(config.s3.use_arn_region);
+    if config.s3.payload_signing_enabled == Some(false) {
+        builder = builder.interceptor(UnsignedPayload);
+    }
     // Custom endpoints disable the dual-stack and FIPS endpoints like the AWS
     // CLI. The settings of the profile and the environment variables are
     // loaded by the SDK, which are overridden if enabled in the `s3` section.

@@ -653,6 +653,41 @@ fn cp_full_object_checksum() {
 }
 
 #[test]
+fn cp_payload_signing_disabled() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.config(
+        r"[default]
+s3 =
+  multipart_threshold = 5MB
+  multipart_chunksize = 5MB
+  payload_signing_enabled = false
+",
+    );
+    let envs = [("AWS_CONFIG_FILE", config.to_str().unwrap())];
+    let data = content(6 * 1024 * 1024);
+    env.write("small.txt", "small");
+    env.write("big.bin", &data);
+    let start = env.requests().len();
+    for file in ["small.txt", "big.bin"] {
+        env.run_with_env(&["cp", file, &format!("s3://bucket/{file}")], &envs)
+            .success();
+    }
+    // The payloads are not signed, and the checksums are sent in the headers
+    // instead of the trailers of the chunks.
+    let requests = env.requests();
+    for request in &requests[start..] {
+        assert_eq!(request.headers["x-amz-content-sha256"], "UNSIGNED-PAYLOAD");
+        assert!(!request.headers.contains_key("x-amz-trailer"));
+        if request.method == "PUT" {
+            assert!(request.headers.contains_key("x-amz-checksum-crc64nvme"));
+        }
+    }
+    assert_eq!(env.object_content("bucket", "small.txt").unwrap(), b"small");
+    assert_eq!(env.object_content("bucket", "big.bin").unwrap(), data);
+}
+
+#[test]
 fn cp_no_overwrite_upload() {
     let env = Env::new();
     env.bucket("bucket");

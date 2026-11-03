@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use aws_sdk_s3::config::RequestChecksumCalculation;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
+use aws_smithy_checksums::ChecksumAlgorithm as Checksums;
 use aws_smithy_types::body::SdkBody;
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinSet;
@@ -141,6 +142,29 @@ pub async fn upload_stdin(
     upload.finish(ctx, completed, parts).await
 }
 
+/// The body of an upload, with the checksum computed before sending if the
+/// payloads are not signed.
+pub struct UploadBody {
+    stream: ByteStream,
+    checksum: Option<String>,
+}
+
+/// Returns whether the checksums of the uploads are computed before sending,
+/// which disables the aws-chunked encoding of the SDK whose chunks are signed
+/// over HTTP, so that the payloads are not signed like the AWS CLI.
+fn precomputes_checksum(ctx: &Context) -> Option<ChecksumAlgorithm> {
+    (ctx.config.payload_signing_enabled == Some(false))
+        .then(|| checksum_algorithm(ctx))
+        .flatten()
+}
+
+/// Returns the checksum of the data in base64.
+fn checksum(algorithm: &ChecksumAlgorithm, data: &[&[u8]]) -> Option<String> {
+    let mut checksum = algorithm.as_str().parse::<Checksums>().ok()?.into_impl();
+    data.iter().for_each(|data| checksum.update(data));
+    Some(aws_smithy_types::base64::encode(checksum.finalize()))
+}
+
 /// Returns the body of the range of the file, which is read on sending
 /// within the bandwidth.
 async fn file_body(
@@ -148,7 +172,14 @@ async fn file_body(
     path: &str,
     offset: u64,
     length: u64,
-) -> Result<ByteStream, String> {
+) -> Result<UploadBody, String> {
+    let checksum = match precomputes_checksum(ctx) {
+        Some(algorithm) => {
+            let data = read_range(path, offset, length).await?;
+            checksum(&algorithm, &[&data])
+        }
+        None => None,
+    };
     let stream = ByteStream::read_from()
         .buffer_size(READ_BUFFER_SIZE)
         .path(path)
@@ -157,10 +188,44 @@ async fn file_body(
         .build()
         .await
         .map_err(|err| err.to_string())?;
-    Ok(match &ctx.limiter {
+    let stream = match &ctx.limiter {
         Some(limiter) => limiter.stream(stream),
         None => stream,
-    })
+    };
+    Ok(UploadBody { stream, checksum })
+}
+
+/// Reads the range of the file, to compute the checksum before sending.
+async fn read_range(path: &str, offset: u64, length: u64) -> Result<Vec<u8>, String> {
+    use tokio::io::AsyncSeekExt;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|err| err.to_string())?;
+    file.seek(std::io::SeekFrom::Start(offset))
+        .await
+        .map_err(|err| err.to_string())?;
+    let mut data = Vec::new();
+    file.take(length)
+        .read_to_end(&mut data)
+        .await
+        .map_err(|err| err.to_string())?;
+    Ok(data)
+}
+
+/// Sets the checksum value of the algorithm computed before sending.
+macro_rules! set_checksum {
+    ($builder:expr, $algorithm:expr, $checksum:expr) => {{
+        let builder = $builder;
+        let checksum: &Option<String> = $checksum;
+        match ($algorithm, checksum.clone()) {
+            (Some(ChecksumAlgorithm::Crc32), Some(value)) => builder.checksum_crc32(value),
+            (Some(ChecksumAlgorithm::Crc32C), Some(value)) => builder.checksum_crc32_c(value),
+            (Some(ChecksumAlgorithm::Crc64Nvme), Some(value)) => builder.checksum_crc64_nvme(value),
+            (Some(ChecksumAlgorithm::Sha1), Some(value)) => builder.checksum_sha1(value),
+            (Some(ChecksumAlgorithm::Sha256), Some(value)) => builder.checksum_sha256(value),
+            _ => builder,
+        }
+    }};
 }
 
 /// Clones the body to send the request again on redirects, where the bodies
@@ -170,11 +235,13 @@ fn clone_body(body: &SdkBody) -> ByteStream {
 }
 
 /// Returns the body of the data in the memory, which limits the bandwidth.
-fn memory_body(ctx: &Context, data: Vec<u8>) -> ByteStream {
-    match &ctx.limiter {
+fn memory_body(ctx: &Context, data: Vec<u8>) -> UploadBody {
+    let checksum = precomputes_checksum(ctx).and_then(|algorithm| checksum(&algorithm, &[&data]));
+    let stream = match &ctx.limiter {
         Some(limiter) => limiter.body(data.into()),
         None => ByteStream::from(data),
-    }
+    };
+    UploadBody { stream, checksum }
 }
 
 async fn read_chunk(reader: &mut tokio::io::Stdin, size: u64) -> Result<Vec<u8>, String> {
@@ -209,12 +276,14 @@ async fn put_object(
     ctx: &Context,
     bucket: &str,
     key: &str,
-    body: ByteStream,
+    body: UploadBody,
     size: u64,
     content_type: Option<String>,
 ) -> Result<Outcome, String> {
     let params = &ctx.params;
-    let body = body.into_inner();
+    let UploadBody { stream, checksum } = body;
+    let body = stream.into_inner();
+    let algorithm = checksum_algorithm(ctx);
     let has_content_type = content_type.is_some() || params.content_type.is_some();
     let content_type = content_type.or(params.content_type.clone());
     let _permit = ctx.permit().await?;
@@ -228,8 +297,9 @@ async fn put_object(
                 .body(clone_body(&body))
                 .content_length(size as i64);
             let request = set_object_params!(request, params)
-                .set_checksum_algorithm(checksum_algorithm(ctx))
+                .set_checksum_algorithm(algorithm.clone())
                 .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
+            let request = set_checksum!(request, &algorithm, &checksum);
             let request = set_sse_c!(request, &params.sse_c).set_content_type(content_type.clone());
             // The SDK sends the default content type of the body, whereas the
             // AWS CLI leaves it to S3, which defaults to binary/octet-stream.
@@ -336,11 +406,12 @@ impl MultipartUpload {
         &self,
         ctx: &Context,
         number: i32,
-        body: ByteStream,
+        body: UploadBody,
         length: u64,
     ) -> PartResult {
         let params = &ctx.params;
-        let body = body.into_inner();
+        let UploadBody { stream, checksum } = body;
+        let body = stream.into_inner();
         let _permit = ctx.permit().await?;
         let output = ctx
             .redirector
@@ -355,6 +426,7 @@ impl MultipartUpload {
                     .content_length(length as i64)
                     .set_checksum_algorithm(self.checksum_algorithm.clone())
                     .set_request_payer(params.request_payer.clone());
+                let request = set_checksum!(request, &self.checksum_algorithm, &checksum);
                 set_sse_c!(request, &params.sse_c).send()
             })
             .await
