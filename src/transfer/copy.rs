@@ -236,10 +236,12 @@ async fn copy_multipart(
         key: src_key.to_owned(),
         etag,
     });
+    let mut completed = Vec::new();
     let mut parts = JoinSet::new();
     let mut offset = 0;
     let mut number = 1;
     while offset < size {
+        upload.wait_parts(ctx, &mut parts, &mut completed).await?;
         let end = (offset + chunk_size).min(size) - 1;
         let (ctx, upload, source) = (ctx.clone(), upload.clone(), source.clone());
         parts.spawn(async move {
@@ -250,7 +252,7 @@ async fn copy_multipart(
         offset = end + 1;
         number += 1;
     }
-    let outcome = upload.finish(ctx, Vec::new(), parts).await?;
+    let outcome = upload.finish(ctx, completed, parts).await?;
     if put_tags_later && outcome == Outcome::Done {
         let permit = ctx.permit().await?;
         let result = ctx

@@ -142,6 +142,8 @@ async fn download_whole(
 /// Downloads the ranges of the object concurrently, and writes them at the
 /// offsets of the file. The ranges are requested with the ETag, so that the
 /// object modified during the download fails instead of mixing the contents.
+/// The number of the ranges in progress is bounded, which also bounds the
+/// ranges read into the memory and waiting to be written.
 async fn download_ranges(
     ctx: &Arc<Context>,
     id: TransferId,
@@ -158,6 +160,11 @@ async fn download_ranges(
     let mut ranges = JoinSet::new();
     let mut offset = 0;
     while offset < size {
+        while ranges.len() >= ctx.config.max_concurrent_requests {
+            if let Some(Err(err)) = join_range(ranges.join_next().await) {
+                return Err(cancel_ranges(&mut ranges, err).await);
+            }
+        }
         let end = (offset + chunk_size).min(size) - 1;
         let (ctx, file) = (ctx.clone(), file.clone());
         let (bucket, key) = (bucket.to_owned(), key.to_owned());
@@ -168,25 +175,39 @@ async fn download_ranges(
             let bytes = read_body(&ctx, output.body).await?;
             drop(permit);
             let length = bytes.len() as u64;
-            tokio::task::spawn_blocking(move || write_at(&file, &bytes, offset))
-                .await
-                .map_err(|err| err.to_string())?
+            // The write is not interrupted by the cancellation of the task,
+            // so that the file is not written after the cancellation.
+            tokio::task::block_in_place(|| write_at(&file, &bytes, offset))
                 .map_err(|err| err.to_string())?;
             ctx.progress(id, length);
             Ok::<_, String>(())
         });
         offset = end + 1;
     }
-    while let Some(result) = ranges.join_next().await {
-        if let Err(err) = result
-            .map_err(|err| err.to_string())
-            .and_then(|result| result)
-        {
-            ranges.abort_all();
-            return Err(err);
+    while let Some(result) = join_range(ranges.join_next().await) {
+        if let Err(err) = result {
+            return Err(cancel_ranges(&mut ranges, err).await);
         }
     }
     file.sync_all().map_err(|err| err.to_string())
+}
+
+type RangeResult = Result<(), String>;
+
+fn join_range(result: Option<Result<RangeResult, tokio::task::JoinError>>) -> Option<RangeResult> {
+    result.map(|result| {
+        result
+            .map_err(|err| err.to_string())
+            .and_then(|range| range)
+    })
+}
+
+/// Cancels the remaining ranges and waits for them, so that the file is not
+/// written after the temporary file is removed, and returns the error.
+async fn cancel_ranges(ranges: &mut JoinSet<RangeResult>, err: String) -> String {
+    ranges.abort_all();
+    while ranges.join_next().await.is_some() {}
+    err
 }
 
 /// Reads the body into the memory, within the bandwidth.

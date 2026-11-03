@@ -50,10 +50,12 @@ pub async fn upload_file(
     let chunk_size = adjust_chunk_size(ctx.config.multipart_chunksize, Some(size));
     let upload = MultipartUpload::create(ctx, bucket, key, content_type).await?;
     let _guard = upload.abort_guard(ctx);
+    let mut completed = Vec::new();
     let mut parts = JoinSet::new();
     let mut offset = 0;
     let mut number = 1;
     while offset < size {
+        upload.wait_parts(ctx, &mut parts, &mut completed).await?;
         let length = chunk_size.min(size - offset);
         let (ctx, upload, path) = (ctx.clone(), upload.clone(), path.to_owned());
         parts.spawn(async move {
@@ -65,7 +67,7 @@ pub async fn upload_file(
         offset += length;
         number += 1;
     }
-    upload.finish(ctx, Vec::new(), parts).await
+    upload.finish(ctx, completed, parts).await
 }
 
 /// Uploads the standard input to the object, where the size is unknown
@@ -120,13 +122,7 @@ pub async fn upload_stdin(
         });
         number += 1;
         // Keep the number of buffered parts bounded.
-        while parts.len() >= ctx.config.max_concurrent_requests {
-            match join_part(parts.join_next().await) {
-                Some(Ok(part)) => completed.push(part),
-                Some(Err(err)) => return Err(upload.fail(ctx, &mut parts, err).await),
-                None => {}
-            }
-        }
+        upload.wait_parts(ctx, &mut parts, &mut completed).await?;
         if eof && pending.is_empty() {
             break;
         }
@@ -345,6 +341,25 @@ impl MultipartUpload {
             .set_checksum_sha1(output.checksum_sha1().map(str::to_owned))
             .set_checksum_sha256(output.checksum_sha256().map(str::to_owned))
             .build())
+    }
+
+    /// Waits for the parts until the number of the parts in progress is less
+    /// than `max_concurrent_requests`, to keep the number of the tasks and the
+    /// buffered parts bounded. The upload is aborted if any of them failed.
+    pub async fn wait_parts(
+        &self,
+        ctx: &Context,
+        parts: &mut JoinSet<PartResult>,
+        completed: &mut Vec<CompletedPart>,
+    ) -> Result<(), String> {
+        while parts.len() >= ctx.config.max_concurrent_requests {
+            match join_part(parts.join_next().await) {
+                Some(Ok(part)) => completed.push(part),
+                Some(Err(err)) => return Err(self.fail(ctx, parts, err).await),
+                None => {}
+            }
+        }
+        Ok(())
     }
 
     /// Waits for the parts and completes the upload, or aborts the upload if
