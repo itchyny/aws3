@@ -11,6 +11,11 @@ use super::{Context, Outcome, TransferId};
 use crate::error::{Error, has_error_code};
 use crate::mime::guess_content_type;
 
+/// The size of the buffer to read files, which is the same as the default
+/// `io_chunksize` of the AWS CLI. The default of the SDK, 4 KiB, makes many
+/// small reads on the blocking threads, which takes much time in the kernel.
+const READ_BUFFER_SIZE: usize = 256 * 1024;
+
 /// The maximum number of parts of a multipart upload.
 const MAX_PARTS: u64 = 10_000;
 /// The minimum size of a part of a multipart upload.
@@ -36,6 +41,7 @@ pub async fn upload_file(
     let content_type = content_type(ctx, path);
     if size < ctx.config.multipart_threshold {
         let body = ByteStream::read_from()
+            .buffer_size(READ_BUFFER_SIZE)
             .path(path)
             .build()
             .await
@@ -55,6 +61,7 @@ pub async fn upload_file(
         let (ctx, upload, path) = (ctx.clone(), upload.clone(), path.to_owned());
         parts.spawn(async move {
             let body = ByteStream::read_from()
+                .buffer_size(READ_BUFFER_SIZE)
                 .path(path)
                 .offset(offset)
                 .length(Length::Exact(length))
