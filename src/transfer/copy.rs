@@ -6,6 +6,7 @@ use aws_sdk_s3::types::{
 };
 use tokio::task::JoinSet;
 
+use super::generator::ObjectProps;
 use super::params::{set_copy_source_sse_c, set_object_params, set_sse_c};
 use super::upload::{MultipartUpload, adjust_chunk_size};
 use super::{Context, Outcome, TransferId};
@@ -80,15 +81,17 @@ pub async fn copy_object(
     bucket: &str,
     key: &str,
     size: u64,
-    head: Option<&HeadObjectOutput>,
+    object: Option<&ObjectProps>,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
+    let head = object.and_then(|object| object.head.as_deref());
     if size < ctx.config.multipart_threshold {
         let outcome = copy_single(ctx, src_bucket, src_key, bucket, key, head).await?;
         ctx.progress(id, size);
         Ok(outcome)
     } else {
-        copy_multipart(ctx, id, src_bucket, src_key, bucket, key, size, head).await
+        let etag = object.and_then(|object| object.etag.as_deref());
+        copy_multipart(ctx, id, src_bucket, src_key, bucket, key, size, head, etag).await
     }
 }
 
@@ -179,6 +182,7 @@ async fn copy_multipart(
     key: &str,
     size: u64,
     head: Option<&HeadObjectOutput>,
+    etag: Option<&str>,
 ) -> Result<Outcome, String> {
     let params = &ctx.params;
     let copy_props = copy_props(ctx);
@@ -189,6 +193,15 @@ async fn copy_multipart(
             Some(head_source(ctx, src_bucket, src_key, head).await?)
         }
         _ => None,
+    };
+    // The ETag is retrieved when it is unavailable on listing, like the AWS CLI.
+    let etag = match (etag, &source) {
+        (Some(etag), _) => Some(etag.to_owned()),
+        (None, Some(head)) => head.e_tag().map(str::to_owned),
+        (None, None) => head_source(ctx, src_bucket, src_key, head)
+            .await?
+            .e_tag()
+            .map(str::to_owned),
     };
     let tags = match copy_props {
         Some(CopyProps::Default | CopyProps::All) => get_tags(ctx, src_bucket, src_key).await?,
@@ -230,9 +243,10 @@ async fn copy_multipart(
     let mut number = 1;
     while offset < size {
         let end = (offset + chunk_size).min(size) - 1;
-        let (ctx, upload, source) = (ctx.clone(), upload.clone(), source.clone());
+        let (ctx, upload, source, etag) =
+            (ctx.clone(), upload.clone(), source.clone(), etag.clone());
         parts.spawn(async move {
-            let part = upload_part_copy(&ctx, &upload, number, &source, offset, end).await?;
+            let part = upload_part_copy(&ctx, &upload, number, &source, etag, offset, end).await?;
             ctx.progress(id, end - offset + 1);
             Ok(part)
         });
@@ -275,6 +289,7 @@ async fn upload_part_copy(
     upload: &MultipartUpload,
     number: i32,
     source: &str,
+    etag: Option<String>,
     start: u64,
     end: u64,
 ) -> Result<CompletedPart, String> {
@@ -288,6 +303,7 @@ async fn upload_part_copy(
         .part_number(number)
         .copy_source(source)
         .copy_source_range(format!("bytes={start}-{end}"))
+        .set_copy_source_if_match(etag)
         .set_request_payer(params.request_payer.clone());
     let request = set_sse_c!(request, &params.sse_c);
     let request = set_copy_source_sse_c!(request, &params.sse_c_copy_source);

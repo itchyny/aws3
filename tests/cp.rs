@@ -494,6 +494,53 @@ fn cp_multipart_copy_and_stream() {
 }
 
 #[test]
+fn cp_multipart_etag() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let data = content(11 * 1024 * 1024);
+    env.object("bucket", "big.bin", &data);
+    let etag = env.head("bucket", "big.bin").e_tag().unwrap().to_owned();
+
+    // The ranged downloads and the part copies are requested with the ETag,
+    // so that the object modified during the transfer fails.
+    let cases: [(&[&str], &str); 3] = [
+        (&["cp", "s3://bucket/big.bin", "big.bin"], "if-match"),
+        (&["cp", "s3://bucket/", "dir/", "--recursive"], "if-match"),
+        (
+            &[
+                "cp",
+                "s3://bucket/big.bin",
+                "s3://bucket/copy.bin",
+                "--copy-props",
+                "metadata-directive",
+            ],
+            "x-amz-copy-source-if-match",
+        ),
+    ];
+    for (args, header) in cases {
+        let start = env.requests().len();
+        env.run_with_env(args, &envs).success();
+        let pinned: Vec<_> = env.requests()[start..]
+            .iter()
+            .filter(|request| {
+                request.headers.contains_key("range")
+                    || request.headers.contains_key("x-amz-copy-source-range")
+            })
+            .map(|request| request.headers[header].to_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(pinned, [etag.as_str(); 3], "{args:?}");
+    }
+    assert_eq!(env.read("big.bin"), data);
+    assert_eq!(env.read("dir/big.bin"), data);
+    assert_eq!(env.object_content("bucket", "copy.bin").unwrap(), data);
+}
+
+#[test]
 fn cp_no_overwrite_upload() {
     let env = Env::new();
     env.bucket("bucket");

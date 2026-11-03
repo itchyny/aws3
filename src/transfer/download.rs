@@ -10,11 +10,12 @@ use tokio::task::JoinSet;
 
 use super::params::set_sse_c;
 use super::{Context, Outcome, TransferId};
-use crate::error::Error;
+use crate::error::{Error, has_error_code};
 use crate::path::validate_bucket_name;
 
 /// Downloads the object to the local file, which is written to a temporary
 /// file in the same directory and renamed on completion.
+#[allow(clippy::too_many_arguments)]
 pub async fn download_file(
     ctx: &Arc<Context>,
     id: TransferId,
@@ -23,6 +24,7 @@ pub async fn download_file(
     path: &str,
     size: u64,
     last_modified: Option<SystemTime>,
+    etag: Option<&str>,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
     if let Some(parent) = std::path::Path::new(path).parent() {
@@ -36,7 +38,7 @@ pub async fn download_file(
     if size < ctx.config.multipart_threshold {
         download_whole(ctx, id, bucket, key, &temp_path).await?;
     } else {
-        download_ranges(ctx, id, bucket, key, &temp_path, size).await?;
+        download_ranges(ctx, id, bucket, key, &temp_path, size, etag).await?;
     }
     if let Some(time) = last_modified
         && let Err(err) = set_file_times(&temp_path, time)
@@ -80,7 +82,7 @@ pub async fn download_stdout(
     // The size of the object is unknown, which is retrieved first like the
     // AWS CLI, and the errors of missing objects are reported by HeadObject.
     head_object(ctx, bucket, key).await?;
-    let mut output = get_object(ctx, bucket, key, None).await?;
+    let mut output = get_object(ctx, bucket, key, None, None).await?;
     let mut stdout = tokio::io::stdout();
     while let Some(bytes) = output
         .body
@@ -106,7 +108,7 @@ async fn download_whole(
     key: &str,
     path: &str,
 ) -> Result<(), String> {
-    let mut output = get_object(ctx, bucket, key, None).await?;
+    let mut output = get_object(ctx, bucket, key, None, None).await?;
     let mut file = tokio::fs::File::create(path)
         .await
         .map_err(|err| err.to_string())?;
@@ -126,7 +128,8 @@ async fn download_whole(
 }
 
 /// Downloads the ranges of the object concurrently, and writes them at the
-/// offsets of the file.
+/// offsets of the file. The ranges are requested with the ETag, so that the
+/// object modified during the download fails instead of mixing the contents.
 async fn download_ranges(
     ctx: &Arc<Context>,
     id: TransferId,
@@ -134,7 +137,16 @@ async fn download_ranges(
     key: &str,
     path: &str,
     size: u64,
+    etag: Option<&str>,
 ) -> Result<(), String> {
+    // The ETag is retrieved when it is unavailable on listing, like the AWS CLI.
+    let etag = match etag {
+        Some(etag) => Some(etag.to_owned()),
+        None => head_object(ctx, bucket, key)
+            .await?
+            .e_tag()
+            .map(str::to_owned),
+    };
     let file = File::create(path).map_err(|err| err.to_string())?;
     file.set_len(size).map_err(|err| err.to_string())?;
     let file = Arc::new(file);
@@ -145,9 +157,10 @@ async fn download_ranges(
         let end = (offset + chunk_size).min(size) - 1;
         let (ctx, file) = (ctx.clone(), file.clone());
         let (bucket, key) = (bucket.to_owned(), key.to_owned());
+        let etag = etag.clone();
         ranges.spawn(async move {
             let range = format!("bytes={offset}-{end}");
-            let output = get_object(&ctx, &bucket, &key, Some(range)).await?;
+            let output = get_object(&ctx, &bucket, &key, Some(range), etag).await?;
             let bytes = read_body(&ctx, output.body).await?;
             let length = bytes.len() as u64;
             tokio::task::spawn_blocking(move || write_at(&file, &bytes, offset))
@@ -193,14 +206,17 @@ async fn get_object(
     bucket: &str,
     key: &str,
     range: Option<String>,
+    etag: Option<String>,
 ) -> Result<aws_sdk_s3::operation::get_object::GetObjectOutput, String> {
     let params = &ctx.params;
+    let pinned = etag.is_some();
     let request = ctx
         .source_client
         .get_object()
         .bucket(bucket)
         .key(key)
         .set_range(range)
+        .set_if_match(etag)
         .set_request_payer(params.request_payer.clone())
         .set_checksum_mode(params.checksum_mode.clone());
     let request = set_sse_c!(request, &params.sse_c);
@@ -209,13 +225,20 @@ async fn get_object(
         .acquire()
         .await
         .map_err(|err| err.to_string())?;
-    request
-        .send()
-        .await
-        .map_err(|err| Error::sdk("GetObject", err).to_string())
+    request.send().await.map_err(|err| {
+        if pinned && has_error_code(&err, "PreconditionFailed") {
+            format!("Contents of stored object \"{key}\" in bucket \"{bucket}\" did not match expected ETag.")
+        } else {
+            Error::sdk("GetObject", err).to_string()
+        }
+    })
 }
 
-async fn head_object(ctx: &Context, bucket: &str, key: &str) -> Result<(), String> {
+async fn head_object(
+    ctx: &Context,
+    bucket: &str,
+    key: &str,
+) -> Result<aws_sdk_s3::operation::head_object::HeadObjectOutput, String> {
     let params = &ctx.params;
     let request = ctx
         .source_client
@@ -232,8 +255,7 @@ async fn head_object(ctx: &Context, bucket: &str, key: &str) -> Result<(), Strin
     request
         .send()
         .await
-        .map_err(|err| Error::sdk("HeadObject", err).to_string())?;
-    Ok(())
+        .map_err(|err| Error::sdk("HeadObject", err).to_string())
 }
 
 #[cfg(unix)]

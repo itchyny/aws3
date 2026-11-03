@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::{Arc, Mutex};
 
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
@@ -23,7 +24,16 @@ pub struct Env {
     endpoint: String,
     storage: TempDir,
     work: TempDir,
+    requests: Arc<Mutex<Vec<Request>>>,
     _runtime: tokio::runtime::Runtime,
+}
+
+/// The request received by the server, to check the headers.
+#[derive(Debug, Clone)]
+pub struct Request {
+    pub method: http::Method,
+    pub uri: http::Uri,
+    pub headers: http::HeaderMap,
 }
 
 impl Env {
@@ -58,24 +68,34 @@ impl Env {
         // The request bodies are read before the requests are handled, since
         // the server may respond early, e.g. on precondition failures, and
         // close the connection while the client is writing the body.
-        let service = hyper::service::service_fn(move |request: http::Request<Incoming>| {
-            let s3 = s3.clone();
-            async move {
-                let (parts, body) = request.into_parts();
-                let body = body.collect().await.map_err(|err| err.to_string())?;
-                let encode = parts.uri.query().is_some_and(|query| {
-                    query.split('&').any(|param| param == "encoding-type=url")
-                });
-                let request = http::Request::from_parts(parts, s3s::Body::from(body.to_bytes()));
-                let response = s3.call(request).await.map_err(|err| format!("{err:?}"))?;
-                if !encode || !response.status().is_success() {
-                    return Ok(response);
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let service = hyper::service::service_fn({
+            let requests = requests.clone();
+            move |request: http::Request<Incoming>| {
+                let (s3, requests) = (s3.clone(), requests.clone());
+                async move {
+                    let (parts, body) = request.into_parts();
+                    requests.lock().unwrap().push(Request {
+                        method: parts.method.clone(),
+                        uri: parts.uri.clone(),
+                        headers: parts.headers.clone(),
+                    });
+                    let body = body.collect().await.map_err(|err| err.to_string())?;
+                    let encode = parts.uri.query().is_some_and(|query| {
+                        query.split('&').any(|param| param == "encoding-type=url")
+                    });
+                    let request =
+                        http::Request::from_parts(parts, s3s::Body::from(body.to_bytes()));
+                    let response = s3.call(request).await.map_err(|err| format!("{err:?}"))?;
+                    if !encode || !response.status().is_success() {
+                        return Ok(response);
+                    }
+                    let (mut parts, body) = response.into_parts();
+                    let body = body.collect().await.map_err(|err| err.to_string())?;
+                    let body = encode_keys(&String::from_utf8_lossy(&body.to_bytes()));
+                    parts.headers.remove(http::header::CONTENT_LENGTH);
+                    Ok::<_, String>(http::Response::from_parts(parts, s3s::Body::from(body)))
                 }
-                let (mut parts, body) = response.into_parts();
-                let body = body.collect().await.map_err(|err| err.to_string())?;
-                let body = encode_keys(&String::from_utf8_lossy(&body.to_bytes()));
-                parts.headers.remove(http::header::CONTENT_LENGTH);
-                Ok::<_, String>(http::Response::from_parts(parts, s3s::Body::from(body)))
             }
         });
         runtime.spawn(async move {
@@ -106,8 +126,14 @@ impl Env {
             endpoint,
             storage,
             work,
+            requests,
             _runtime: runtime,
         }
+    }
+
+    /// Returns the requests received by the server so far.
+    pub fn requests(&self) -> Vec<Request> {
+        self.requests.lock().unwrap().clone()
     }
 
     /// Returns the working directory.

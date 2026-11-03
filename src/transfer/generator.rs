@@ -30,6 +30,9 @@ pub struct FileStat {
 #[derive(Debug, Clone, Default)]
 pub struct ObjectProps {
     pub storage_class: Option<String>,
+    /// The ETag to ensure that the object is not modified during multipart
+    /// downloads and copies.
+    pub etag: Option<String>,
     /// The `Restore` header of HeadObject, which is unavailable on listing.
     pub restore: Option<String>,
     /// The response of HeadObject for a single object.
@@ -255,6 +258,7 @@ async fn try_list_s3(
                     storage_class: object
                         .storage_class()
                         .map(|class| class.as_str().to_owned()),
+                    etag: object.e_tag().map(str::to_owned),
                     ..ObjectProps::default()
                 }),
             };
@@ -309,6 +313,7 @@ async fn head_single_object(
             storage_class: output
                 .storage_class()
                 .map(|class| class.as_str().to_owned()),
+            etag: output.e_tag().map(str::to_owned),
             restore: output.restore().map(str::to_owned),
             head: Some(Box::new(output)),
         }),

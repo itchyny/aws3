@@ -954,18 +954,24 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
             if is_stream {
                 download::download_stdout(ctx, id, bucket, key).await?
             } else {
-                let size = task.size.unwrap_or(0);
-                download::download_file(ctx, id, bucket, key, &task.dest, size, task.last_modified)
-                    .await?
+                download::download_file(
+                    ctx,
+                    id,
+                    bucket,
+                    key,
+                    &task.dest,
+                    task.size.unwrap_or(0),
+                    task.last_modified,
+                    task.object
+                        .as_ref()
+                        .and_then(|object| object.etag.as_deref()),
+                )
+                .await?
             }
         }
         Operation::Copy => {
             let (src_bucket, src_key) = split_bucket_key(&task.src);
             let (bucket, key) = split_bucket_key(&task.dest);
-            let head = task
-                .object
-                .as_ref()
-                .and_then(|object| object.head.as_deref());
             copy::copy_object(
                 ctx,
                 id,
@@ -974,7 +980,7 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
                 bucket,
                 key,
                 task.size.unwrap_or(0),
-                head,
+                task.object.as_ref(),
             )
             .await?
         }
