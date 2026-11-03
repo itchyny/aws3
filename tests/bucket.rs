@@ -149,10 +149,20 @@ fn website_unsupported() {
 }
 
 #[test]
-fn presign_expires_in_limit() {
+fn presign_expires_in_out_of_range() {
     let env = Env::new();
-    let result = env.run(&["presign", "s3://bucket/key", "--expires-in", "604801"]);
-    assert_eq!(result.code, 252);
+    // The URLs are pre-signed like the AWS CLI, even though S3 rejects them.
+    for expires_in in ["604801", "-1"] {
+        let result = env
+            .run(&["presign", "s3://bucket/key", "--expires-in", expires_in])
+            .success();
+        let url = result.stdout.trim_end();
+        assert!(
+            url.contains(&format!("&X-Amz-Expires={expires_in}&")),
+            "{url}"
+        );
+        assert!(url.contains("&X-Amz-Signature="), "{url}");
+    }
 }
 
 #[test]

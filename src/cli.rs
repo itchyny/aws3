@@ -312,8 +312,13 @@ pub struct PresignArgs {
     pub path: String,
 
     /// Number of seconds until the pre-signed URL expires
-    #[arg(long, value_name = "SECONDS", default_value_t = 3600)]
-    pub expires_in: u64,
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        default_value_t = 3600,
+        allow_negative_numbers = true
+    )]
+    pub expires_in: i64,
 }
 
 #[derive(Debug, Args)]
