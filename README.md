@@ -40,6 +40,15 @@ CLI.
 Download the archive for your platform from the
 [releases page](https://github.com/itchyny/aws3/releases).
 
+### Using cargo-binstall
+
+With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), the
+prebuilt binary for your platform is installed from the releases page.
+
+```sh
+cargo binstall aws3
+```
+
 ### Build from source
 
 ```sh
