@@ -25,6 +25,28 @@ pub struct PartChecksum {
     pub length: u64,
 }
 
+/// The digest of a part being downloaded.
+pub struct PartDigest {
+    offset: u64,
+    digest: crc_fast::Digest,
+    length: u64,
+}
+
+impl PartDigest {
+    pub fn update(&mut self, data: &[u8]) {
+        self.digest.update(data);
+        self.length += data.len() as u64;
+    }
+
+    pub fn finish(self) -> PartChecksum {
+        PartChecksum {
+            offset: self.offset,
+            checksum: self.digest.finalize(),
+            length: self.length,
+        }
+    }
+}
+
 impl FullObjectChecksum {
     /// Returns the full object checksum of the object, in the same way as
     /// `resolve_full_object_checksum` of s3transfer.
@@ -71,24 +93,14 @@ impl FullObjectChecksum {
         })
     }
 
-    /// Returns the empty checksum of the part at the offset.
-    pub fn part(&self, offset: u64) -> PartChecksum {
-        PartChecksum {
+    /// Returns the digest of the part at the offset, which is updated with
+    /// the data of the part in order.
+    pub fn part(&self, offset: u64) -> PartDigest {
+        PartDigest {
             offset,
-            checksum: 0,
+            digest: crc_fast::Digest::new(self.algorithm),
             length: 0,
         }
-    }
-
-    /// Updates the checksum of the part with the following data.
-    pub fn update(&self, part: &mut PartChecksum, data: &[u8]) {
-        let checksum = crc_fast::checksum(self.algorithm, data);
-        part.checksum = if part.length == 0 {
-            checksum
-        } else {
-            crc_fast::checksum_combine(self.algorithm, part.checksum, checksum, data.len() as u64)
-        };
-        part.length += data.len() as u64;
     }
 
     /// Combines the checksums of the parts, and returns the error message if
@@ -140,10 +152,8 @@ mod tests {
                 .enumerate()
                 .map(|(i, chunk)| {
                     let mut part = checksum.part(i as u64 * 3000);
-                    chunk
-                        .chunks(700)
-                        .for_each(|piece| checksum.update(&mut part, piece));
-                    part
+                    chunk.chunks(700).for_each(|piece| part.update(piece));
+                    part.finish()
                 })
                 .rev()
                 .collect();

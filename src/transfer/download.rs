@@ -208,8 +208,8 @@ async fn download_ranges(
                     // task, so that the file is not written after it.
                     tokio::task::block_in_place(|| write_at(&file, &buffer, position))
                         .map_err(|err| err.to_string())?;
-                    if let (Some(checksum), Some(part)) = (&checksum, &mut part) {
-                        checksum.update(part, &buffer);
+                    if let Some(part) = &mut part {
+                        part.update(&buffer);
                     }
                     position += buffer.len() as u64;
                     ctx.progress(id, buffer.len() as u64);
@@ -224,7 +224,7 @@ async fn download_ranges(
                 parts
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .push(part);
+                    .push(part.finish());
             }
             Ok::<_, String>(())
         });
