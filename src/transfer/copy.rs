@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadOutput;
 use aws_sdk_s3::operation::head_object::HeadObjectOutput;
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{
     AnnotationDirective, CompletedPart, MetadataDirective, Tag, Tagging, TaggingDirective,
 };
@@ -211,6 +213,15 @@ async fn copy_multipart(
         Some(CopyProps::Default | CopyProps::All) => get_tags(ctx, src_bucket, src_key).await?,
         _ => Vec::new(),
     };
+    // Multipart copies do not copy the annotations, so they are taken from
+    // the source object, of the version of HeadObject for a single object.
+    let annotations = match copy_props {
+        Some(CopyProps::All) => {
+            let version_id = head.and_then(HeadObjectOutput::version_id);
+            get_annotations(ctx, src_bucket, src_key, version_id).await?
+        }
+        _ => Vec::new(),
+    };
     let tagging_header = serialize_tags(&tags);
     let put_tags_later = !tags.is_empty() && tagging_header.len() > MAX_TAGGING_HEADER_SIZE;
     let tagging = (!tags.is_empty() && !put_tags_later).then_some(tagging_header);
@@ -265,8 +276,10 @@ async fn copy_multipart(
         offset = end + 1;
         number += 1;
     }
-    let outcome = upload.finish(ctx, completed, parts).await?;
-    if put_tags_later && outcome == Outcome::Done {
+    let Some(output) = upload.complete(ctx, completed, parts).await? else {
+        return Ok(Outcome::Skipped);
+    };
+    if put_tags_later {
         let permit = ctx.permit().await?;
         let tagging = Tagging::builder()
             .set_tag_set(Some(tags))
@@ -301,7 +314,8 @@ async fn copy_multipart(
             return Err(Error::sdk("PutObjectTagging", err).to_string());
         }
     }
-    Ok(outcome)
+    put_annotations(ctx, bucket, key, annotations, &output).await?;
+    Ok(Outcome::Done)
 }
 
 /// The source object of the part copies, with the ETag to ensure that the
@@ -402,6 +416,132 @@ async fn get_tags(ctx: &Context, bucket: &str, key: &str) -> Result<Vec<Tag>, St
         .await
         .map_err(|err| Error::sdk("GetObjectTagging", err).to_string())?;
     Ok(output.tag_set().to_vec())
+}
+
+/// Returns the names and the payloads of the annotations of the object, like
+/// `SetAnnotationsSubscriber` of the AWS CLI.
+async fn get_annotations(
+    ctx: &Context,
+    bucket: &str,
+    key: &str,
+    version_id: Option<&str>,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut names = Vec::new();
+    let mut token = None;
+    loop {
+        let _permit = ctx.permit().await?;
+        let output = ctx
+            .redirector
+            .send(
+                &ctx.source_client,
+                bucket,
+                "ListObjectAnnotations",
+                |client| {
+                    client
+                        .list_object_annotations()
+                        .bucket(bucket)
+                        .key(key)
+                        .set_version_id(version_id.map(str::to_owned))
+                        .set_continuation_token(token.clone())
+                        .set_request_payer(ctx.params.request_payer.clone())
+                        .send()
+                },
+            )
+            .await
+            .map_err(|err| Error::sdk("ListObjectAnnotations", err).to_string())?;
+        names.extend(
+            output
+                .annotations()
+                .iter()
+                .map(|annotation| annotation.annotation_name().to_owned()),
+        );
+        token = output.next_continuation_token().map(str::to_owned);
+        if token.is_none() {
+            break;
+        }
+    }
+    let mut annotations = Vec::new();
+    for name in names {
+        let _permit = ctx.permit().await?;
+        let output = ctx
+            .redirector
+            .send(
+                &ctx.source_client,
+                bucket,
+                "GetObjectAnnotation",
+                |client| {
+                    client
+                        .get_object_annotation()
+                        .bucket(bucket)
+                        .key(key)
+                        .annotation_name(&name)
+                        .set_version_id(version_id.map(str::to_owned))
+                        .set_request_payer(ctx.params.request_payer.clone())
+                        .send()
+                },
+            )
+            .await
+            .map_err(|err| Error::sdk("GetObjectAnnotation", err).to_string())?;
+        let payload = output
+            .annotation_payload
+            .collect()
+            .await
+            .map_err(|err| err.to_string())?;
+        annotations.push((name, payload.to_vec()));
+    }
+    Ok(annotations)
+}
+
+/// Puts the annotations to the copied object, which is identified by the
+/// ETag and the version, and reports the failures without deleting it.
+async fn put_annotations(
+    ctx: &Context,
+    bucket: &str,
+    key: &str,
+    annotations: Vec<(String, Vec<u8>)>,
+    output: &CompleteMultipartUploadOutput,
+) -> Result<(), String> {
+    let mut succeeded = Vec::new();
+    let mut failed = Vec::new();
+    for (name, payload) in annotations {
+        let _permit = ctx.permit().await?;
+        let result = ctx
+            .redirector
+            .send(&ctx.client, bucket, "PutObjectAnnotation", |client| {
+                client
+                    .put_object_annotation()
+                    .bucket(bucket)
+                    .key(key)
+                    .annotation_name(&name)
+                    .annotation_payload(ByteStream::from(payload.clone()))
+                    .set_object_if_match(output.e_tag().map(str::to_owned))
+                    .set_version_id(output.version_id().map(str::to_owned))
+                    .set_request_payer(ctx.params.request_payer.clone())
+                    .send()
+            })
+            .await;
+        match result {
+            Ok(_) => succeeded.push(name),
+            Err(err) => {
+                let message = Error::sdk("PutObjectAnnotation", err).to_string();
+                failed.push(format!("{name}: {message}"));
+            }
+        }
+    }
+    if failed.is_empty() {
+        return Ok(());
+    }
+    let succeeded = if succeeded.is_empty() {
+        "(none)".to_owned()
+    } else {
+        succeeded.join(", ")
+    };
+    Err(format!(
+        "Failed to copy all annotations to s3://{bucket}/{key}. The object was copied \
+         successfully and was not deleted. Annotations written: {succeeded}. Annotations \
+         that failed: {}.",
+        failed.join("; ")
+    ))
 }
 
 /// Serializes the tags to the value of the tagging header.

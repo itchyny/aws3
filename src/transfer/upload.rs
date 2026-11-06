@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use aws_sdk_s3::config::RequestChecksumCalculation;
+use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadOutput;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
 use aws_smithy_checksums::ChecksumAlgorithm as Checksums;
@@ -469,9 +470,23 @@ impl MultipartUpload {
     pub async fn finish(
         &self,
         ctx: &Context,
+        completed: Vec<CompletedPart>,
+        parts: JoinSet<PartResult>,
+    ) -> Result<Outcome, String> {
+        Ok(match self.complete(ctx, completed, parts).await? {
+            Some(_) => Outcome::Done,
+            None => Outcome::Skipped,
+        })
+    }
+
+    /// Waits for the parts and completes the upload, and returns the output,
+    /// or `None` if the object exists with the no-overwrite option.
+    pub async fn complete(
+        &self,
+        ctx: &Context,
         mut completed: Vec<CompletedPart>,
         mut parts: JoinSet<PartResult>,
-    ) -> Result<Outcome, String> {
+    ) -> Result<Option<CompleteMultipartUploadOutput>, String> {
         while let Some(result) = join_part(parts.join_next().await) {
             match result {
                 Ok(part) => completed.push(part),
@@ -504,15 +519,15 @@ impl MultipartUpload {
             )
             .await;
         match result {
-            Ok(_) => {
+            Ok(output) => {
                 self.done.store(true, Ordering::Relaxed);
-                Ok(Outcome::Done)
+                Ok(Some(output))
             }
             Err(err) => {
                 drop(_permit);
                 self.abort(ctx).await;
                 if params.no_overwrite && has_error_code(&err, "PreconditionFailed") {
-                    Ok(Outcome::Skipped)
+                    Ok(None)
                 } else {
                     Err(Error::sdk("CompleteMultipartUpload", err).to_string())
                 }
