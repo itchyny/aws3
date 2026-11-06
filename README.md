@@ -31,7 +31,6 @@ CLI.
 - The error messages are prefixed with `aws3:` instead of `aws:`.
 - The root certificates of Mozilla are used for TLS, unless a CA bundle is
   specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
-- `--debug`, `--query` and `--output` are accepted but ignored.
 - The default of `max_concurrent_requests` in the `s3` section is 64 instead
   of 10, which makes the transfers of many small files faster. The parts of a
   multipart transfer are up to 10 by default, which use the bandwidth with

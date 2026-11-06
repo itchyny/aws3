@@ -71,6 +71,30 @@ fn ls_url_encoded_keys() {
 }
 
 #[test]
+fn ls_debug() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    let result = env.run(&["ls", "s3://bucket", "--debug"]).success();
+    assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+    // The logs are written in the same format as the AWS CLI, e.g.
+    // `2026-01-01 00:00:00,000 - main - aws3 - DEBUG - CLI version: ...`.
+    let first = result.stderr.lines().next().unwrap();
+    let (time, rest) = first.split_at(23);
+    assert!(time.chars().nth(19) == Some(','), "{first}");
+    assert!(
+        rest.starts_with(" - main - aws3 - DEBUG - CLI version: aws3/"),
+        "{first}"
+    );
+    assert!(
+        result.stderr.contains(" - TRACE - canonical_request=GET"),
+        "{}",
+        result.stderr
+    );
+    assert_eq!(env.run(&["ls", "s3://bucket"]).success().stderr, "");
+}
+
+#[test]
 fn ls_recursive_summarize() {
     let env = Env::new();
     env.bucket("bucket");

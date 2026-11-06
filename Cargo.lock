@@ -709,6 +709,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tracing",
  "webpki-root-certs",
 ]
 

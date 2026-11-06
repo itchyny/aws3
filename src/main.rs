@@ -2,6 +2,7 @@ mod bucket;
 mod cli;
 mod client;
 mod config;
+mod debug;
 mod east_asian_width;
 mod error;
 mod errorformat;
@@ -21,6 +22,9 @@ use cli::{Cli, Command};
 
 fn main() -> ExitCode {
     let cli = Cli::parse_args();
+    if cli.global.debug {
+        debug::init();
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
