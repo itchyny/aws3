@@ -30,7 +30,7 @@ use crate::client;
 use crate::config::S3Config;
 use crate::error::Error;
 use crate::filter::Filters;
-use crate::path::validate_bucket_name;
+use crate::path::{is_s3express_bucket, validate_bucket_name};
 use crate::redirect::Redirector;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
 use params::{Keys, RequestParams};
@@ -342,6 +342,15 @@ impl Plan {
                 "--sse-c-copy-source is only supported for copy operations.",
             ));
         }
+        let is_s3express = |path: &str| {
+            path.strip_prefix("s3://")
+                .is_some_and(|path| is_s3express_bucket(split_bucket_key(path).0))
+        };
+        if command == CommandName::Sync && (is_s3express(&src) || is_s3express(&dest)) {
+            return Err(Error::param_validation(
+                "Cannot use sync command with a directory bucket.",
+            ));
+        }
         Ok(Self {
             src,
             dest,
@@ -529,6 +538,33 @@ async fn run(
         let region = options.source_region.as_deref();
         let enabled = options.validate_same_s3_paths;
         samepath::validate(&sdk_config, global, region, &plan.src, &plan.dest, enabled).await?;
+    }
+    // The keys of directory buckets are not listed in order, where the case
+    // conflicts cannot be detected like the AWS CLI.
+    if matches!(options.command, CommandName::Cp | CommandName::Mv)
+        && plan.paths_type == PathsType::S3Local
+        && options.dir_op
+        && options.case_conflict != CaseConflict::Ignore
+        && is_s3express_bucket(split_bucket_key(&plan.src).0)
+    {
+        if options.case_conflict != CaseConflict::Warn {
+            let value = clap::ValueEnum::to_possible_value(&options.case_conflict)
+                .map(|value| value.get_name().to_owned())
+                .unwrap_or_default();
+            return Err(Error::param_validation(format!(
+                "`{value}` is not a valid value for `--case-conflict` when operating on S3 \
+                 Express directory buckets. Valid values: `warn`, `ignore`."
+            )));
+        }
+        // The warning does not end with a newline like the AWS CLI.
+        eprint!(
+            "warning: Recursive copies/moves from an S3 Express directory bucket to a \
+             case-insensitive local filesystem may result in undefined behavior if there are \
+             S3 object key names that differ only by case. To disable this warning, set the \
+             `--case-conflict` parameter to `ignore`. For more information, see \
+             https://docs.aws.amazon.com/cli/latest/topic/s3-case-insensitivity.html."
+        );
+        options.case_conflict = CaseConflict::Ignore;
     }
     let client = client::new_client(&sdk_config, None);
     let source_client = match &options.source_region {

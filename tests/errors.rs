@@ -139,6 +139,71 @@ fn cli_error_format() {
 }
 
 #[test]
+fn directory_buckets() {
+    let env = Env::new();
+    env.write("dir/a.txt", "a");
+    let bucket = "s3://bucket--use1-az4--x-s3";
+    let cases: [(&[&str], &str); 4] = [
+        (
+            &["mb", bucket],
+            "Cannot use mb command with a directory bucket.",
+        ),
+        (
+            &["sync", "dir", &format!("{bucket}/dir/")],
+            "Cannot use sync command with a directory bucket.",
+        ),
+        (
+            &["sync", &format!("{bucket}/dir/"), "dir", "--dryrun"],
+            "Cannot use sync command with a directory bucket.",
+        ),
+        (
+            &[
+                "cp",
+                &format!("{bucket}/dir/"),
+                "out",
+                "--recursive",
+                "--case-conflict",
+                "skip",
+            ],
+            "`skip` is not a valid value for `--case-conflict` when operating on S3 Express \
+             directory buckets. Valid values: `warn`, `ignore`.",
+        ),
+    ];
+    for (args, message) in cases {
+        let result = env.run(args);
+        assert_eq!(result.code, 252, "{args:?}");
+        assert_eq!(
+            result.stderr,
+            format!("\naws3: [ERROR]: An error occurred (ParamValidation): {message}\n"),
+        );
+    }
+    // The case conflicts are warned about without the newline, before the
+    // transfers fail on the fake server without S3 Express.
+    let source = format!("{bucket}/dir/");
+    let result = env.run(&[
+        "cp",
+        &source,
+        "out",
+        "--recursive",
+        "--case-conflict",
+        "warn",
+    ]);
+    assert!(
+        result.stderr.starts_with(
+            "warning: Recursive copies/moves from an S3 Express directory bucket to a \
+             case-insensitive local filesystem"
+        ),
+        "{}",
+        result.stderr
+    );
+    assert!(
+        !result.stderr.contains("s3-case-insensitivity.html.\n"),
+        "{}",
+        result.stderr
+    );
+}
+
+#[test]
 fn ca_bundle() {
     let env = Env::new();
     env.bucket("bucket");

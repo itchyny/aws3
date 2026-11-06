@@ -141,6 +141,12 @@ impl Cursor<'_> {
     }
 }
 
+/// Returns whether the bucket is a directory bucket of S3 Express One Zone,
+/// in the same way as `is_s3express_bucket` of the AWS CLI.
+pub fn is_s3express_bucket(bucket: &str) -> bool {
+    bucket.ends_with("--x-s3")
+}
+
 /// Decodes the URL-encoded key of a listing in the same way as
 /// `urllib.parse.unquote_plus` of Python, which the AWS CLI uses. The keys are
 /// requested to be encoded since XML cannot contain some characters.

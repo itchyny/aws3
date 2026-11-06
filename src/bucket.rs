@@ -10,7 +10,7 @@ use aws_sdk_s3::types::{
 use crate::cli::{GlobalArgs, MbArgs, RbArgs, WebsiteArgs};
 use crate::client;
 use crate::error::Error;
-use crate::path::{split_bucket_key, validate_bucket_name};
+use crate::path::{is_s3express_bucket, split_bucket_key, validate_bucket_name};
 use crate::redirect::Redirector;
 use crate::transfer;
 
@@ -21,6 +21,11 @@ pub async fn mb(args: &MbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
         ));
     };
     let (bucket, _) = split_bucket_key(path);
+    if is_s3express_bucket(bucket) {
+        return Err(Error::param_validation(
+            "Cannot use mb command with a directory bucket.",
+        ));
+    }
     if let Err(message) = validate_bucket_name(bucket) {
         eprintln!("make_bucket failed: {} {message}", args.path);
         return Ok(ExitCode::FAILURE);
