@@ -286,6 +286,7 @@ async fn put_object(
     let algorithm = checksum_algorithm(ctx);
     let has_content_type = content_type.is_some() || params.content_type.is_some();
     let content_type = content_type.or(params.content_type.clone());
+    params.validate_ascii_metadata()?;
     let _permit = ctx.permit().await?;
     let result = ctx
         .redirector
@@ -377,6 +378,7 @@ impl MultipartUpload {
     ) -> Result<Self, String> {
         let params = &ctx.params;
         let checksum_algorithm = checksum_algorithm(ctx);
+        params.validate_ascii_metadata()?;
         let _permit = ctx.permit().await?;
         let output = ctx
             .redirector

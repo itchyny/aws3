@@ -6,12 +6,15 @@ mod checksum;
 mod copy;
 mod download;
 mod generator;
+mod json;
 pub mod params;
 mod paths;
 mod printer;
 mod samepath;
+mod shorthand;
 mod sync;
 mod upload;
+mod value;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -33,7 +36,7 @@ use crate::filter::Filters;
 use crate::path::{is_s3express_bucket, validate_bucket_name};
 use crate::redirect::Redirector;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
-use params::{Keys, RequestParams};
+use params::{RequestParams, Unpacked};
 use paths::{Endpoint, relative_path, split_bucket_key};
 use printer::{PrintMode, Printer, TransferId};
 
@@ -173,8 +176,9 @@ pub async fn cp(args: &CpArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let mut options =
         Options::new(CommandName::Cp, paths, args.recursive).with_transfer_args(&args.transfer);
     options.expected_size = args.expected_size;
-    let keys = Keys::load(&args.transfer)?;
-    run(options, RequestParams::new(&args.transfer, &keys), global).await
+    let unpacked = Unpacked::load(&args.transfer)?;
+    let params = RequestParams::new(&args.transfer, &unpacked);
+    run(options, params, global).await
 }
 
 pub async fn mv(args: &MvArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
@@ -182,8 +186,9 @@ pub async fn mv(args: &MvArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let mut options =
         Options::new(CommandName::Mv, paths, args.recursive).with_transfer_args(&args.transfer);
     options.validate_same_s3_paths = args.validate_same_s3_paths || samepath::enabled_by_env();
-    let keys = Keys::load(&args.transfer)?;
-    run(options, RequestParams::new(&args.transfer, &keys), global).await
+    let unpacked = Unpacked::load(&args.transfer)?;
+    let params = RequestParams::new(&args.transfer, &unpacked);
+    run(options, params, global).await
 }
 
 pub async fn rm(args: &RmArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
@@ -214,8 +219,8 @@ pub async fn sync(args: &SyncArgs, global: &GlobalArgs) -> Result<ExitCode, Erro
     options.exact_timestamps = args.exact_timestamps;
     options.delete = args.delete;
     // The no-overwrite option is handled by comparing the files.
-    let keys = Keys::load(&args.transfer)?;
-    let params = RequestParams::new(&args.transfer, &keys).map(|params| RequestParams {
+    let unpacked = Unpacked::load(&args.transfer)?;
+    let params = RequestParams::new(&args.transfer, &unpacked).map(|params| RequestParams {
         no_overwrite: false,
         ..params
     });

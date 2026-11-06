@@ -2,7 +2,7 @@
 //! same way as `RequestParamsMapper` of the AWS CLI.
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
+use std::sync::LazyLock;
 
 use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::{
@@ -11,7 +11,11 @@ use aws_sdk_s3::types::{
 };
 use aws_smithy_types::base64;
 use md5::{Digest, Md5};
+use regex_lite::{Captures, Regex};
 
+use super::json;
+use super::shorthand::{self, ParseError};
+use super::value::{Value, is_space};
 use crate::cli::{self, TransferArgs};
 use crate::error::Error;
 
@@ -39,6 +43,9 @@ pub struct RequestParams {
     pub grant_read_acp: Option<String>,
     pub grant_write_acp: Option<String>,
     pub metadata: Option<HashMap<String, String>>,
+    /// The first pair of the metadata with non-ASCII characters, in the
+    /// order of the argument.
+    pub non_ascii_metadata: Option<(String, String)>,
     pub metadata_directive: Option<MetadataDirective>,
     pub sse: Option<ServerSideEncryption>,
     pub sse_kms_key_id: Option<String>,
@@ -53,7 +60,7 @@ pub struct RequestParams {
 impl RequestParams {
     /// Creates the request parameters, where errors are reported as fatal
     /// errors like the AWS CLI does on submitting transfers.
-    pub fn new(args: &TransferArgs, keys: &Keys) -> Result<Self, String> {
+    pub fn new(args: &TransferArgs, unpacked: &Unpacked) -> Result<Self, String> {
         let mut params = Self {
             acl: args
                 .acl
@@ -68,7 +75,16 @@ impl RequestParams {
             content_encoding: args.content_encoding.clone(),
             content_language: args.content_language.clone(),
             expires: args.expires.as_deref().map(parse_timestamp).transpose()?,
-            metadata: args.metadata.as_deref().map(parse_map).transpose()?,
+            metadata: unpacked
+                .metadata
+                .as_ref()
+                .map(|metadata| metadata.iter().cloned().collect()),
+            non_ascii_metadata: unpacked.metadata.as_ref().and_then(|metadata| {
+                metadata
+                    .iter()
+                    .find(|(key, value)| !key.is_ascii() || !value.is_ascii())
+                    .cloned()
+            }),
             metadata_directive: args
                 .metadata_directive
                 .map(|directive| MetadataDirective::from(value_name(directive).as_str())),
@@ -76,10 +92,10 @@ impl RequestParams {
                 .sse
                 .map(|sse| ServerSideEncryption::from(value_name(sse).as_str())),
             sse_kms_key_id: args.sse_kms_key_id.clone(),
-            sse_c: sse_customer_key(args.sse_c, keys.sse_c.as_deref()),
+            sse_c: sse_customer_key(args.sse_c, unpacked.sse_c.as_deref()),
             sse_c_copy_source: sse_customer_key(
                 args.sse_c_copy_source,
-                keys.sse_c_copy_source.as_deref(),
+                unpacked.sse_c_copy_source.as_deref(),
             ),
             request_payer: request_payer(args.request_payer.request_payer),
             checksum_algorithm: args
@@ -124,6 +140,20 @@ impl RequestParams {
             || self.content_type.is_some()
             || self.expires.is_some()
             || self.metadata.is_some()
+    }
+
+    /// Validates that the metadata contains only ASCII characters, like
+    /// `validate_ascii_metadata` of botocore on PutObject, CopyObject, and
+    /// CreateMultipartUpload.
+    pub fn validate_ascii_metadata(&self) -> Result<(), String> {
+        match &self.non_ascii_metadata {
+            Some((key, value)) => Err(format!(
+                "Parameter validation failed:\nNon ascii characters found in S3 metadata for \
+                 key \"{key}\", value: \"{value}\".  \nS3 metadata can only contain ASCII \
+                 characters. "
+            )),
+            None => Ok(()),
+        }
     }
 }
 
@@ -200,16 +230,17 @@ fn sse_customer_key(algorithm: Option<cli::SseC>, key: Option<&[u8]>) -> Option<
     })
 }
 
-/// The customer-provided keys of server-side encryption, which are loaded
-/// before the other arguments are validated, like the parameter files of the
-/// AWS CLI.
+/// The arguments unpacked before the other arguments are validated, like
+/// `unpack_argument` of the AWS CLI, which loads the parameter files and
+/// parses the maps in the order of the arguments.
 #[derive(Debug, Default)]
-pub struct Keys {
+pub struct Unpacked {
     sse_c: Option<Vec<u8>>,
     sse_c_copy_source: Option<Vec<u8>>,
+    metadata: Option<Vec<(String, String)>>,
 }
 
-impl Keys {
+impl Unpacked {
     pub fn load(args: &TransferArgs) -> Result<Self, Error> {
         Ok(Self {
             sse_c: load_key("--sse-c-key", args.sse_c_key.as_deref())?,
@@ -217,6 +248,7 @@ impl Keys {
                 "--sse-c-copy-source-key",
                 args.sse_c_copy_source_key.as_deref(),
             )?,
+            metadata: args.metadata.as_deref().map(parse_metadata).transpose()?,
         })
     }
 }
@@ -234,17 +266,81 @@ fn load_key(name: &str, value: Option<&str>) -> Result<Option<Vec<u8>>, Error> {
     else {
         return Ok(Some(value.as_bytes().to_vec()));
     };
-    std::fs::read(path).map(Some).map_err(|err| {
-        let err = match err.kind() {
-            ErrorKind::NotFound => format!("[Errno 2] No such file or directory: '{path}'"),
-            ErrorKind::PermissionDenied => format!("[Errno 13] Permission denied: '{path}'"),
-            ErrorKind::IsADirectory => format!("[Errno 21] Is a directory: '{path}'"),
-            _ => err.to_string(),
-        };
-        Error::param_validation(format!(
-            "Error parsing parameter '{name}': Unable to load paramfile {value}: {err}"
-        ))
+    read_paramfile(value, path)
+        .map(Some)
+        .map_err(|err| Error::param_validation(format!("Error parsing parameter '{name}': {err}")))
+}
+
+/// Reads the parameter file of the value with the prefix, whose path is
+/// expanded like `get_file` of the AWS CLI.
+fn read_paramfile(value: &str, path: &str) -> Result<Vec<u8>, String> {
+    std::fs::read(expand_path(path)).map_err(|err| {
+        let mut message = err.to_string();
+        if let Some(code) = err.raw_os_error() {
+            let suffix = format!(" (os error {code})");
+            message = format!(
+                "[Errno {code}] {}: '{}'",
+                message.strip_suffix(&suffix).unwrap_or(&message),
+                expand_path(path)
+            );
+        }
+        format!("Unable to load paramfile {value}: {message}")
     })
+}
+
+/// Reads the parameter file of the text, whose newlines are translated like
+/// the files opened in the text mode of Python.
+fn read_text_paramfile(value: &str, path: &str) -> Result<String, String> {
+    let contents = String::from_utf8(read_paramfile(value, path)?).map_err(|_| {
+        format!(
+            "Unable to load paramfile ({}), text contents could not be decoded.  If this is a \
+             binary file, please use the fileb:// prefix instead of the file:// prefix.",
+            expand_path(path)
+        )
+    })?;
+    Ok(contents.replace("\r\n", "\n").replace('\r', "\n"))
+}
+
+/// Expands the home directory and the environment variables of the path.
+fn expand_path(path: &str) -> String {
+    expand_vars(&expand_user(path))
+}
+
+/// Expands the home directory of `~`, like `os.path.expanduser` of Python.
+fn expand_user(path: &str) -> String {
+    let Some(rest) = path.strip_prefix('~') else {
+        return path.to_owned();
+    };
+    if !(rest.is_empty() || rest.starts_with('/')) {
+        return path.to_owned();
+    }
+    match std::env::var("HOME") {
+        Ok(home) => {
+            let path = format!("{}{rest}", home.trim_end_matches('/'));
+            if path.is_empty() {
+                "/".to_owned()
+            } else {
+                path
+            }
+        }
+        Err(_) => path.to_owned(),
+    }
+}
+
+/// Expands the environment variables of `$name` and `${name}`, which are left
+/// unchanged if not set, like `os.path.expandvars` of Python.
+fn expand_vars(path: &str) -> String {
+    static VARIABLE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\$(?:(\w+)|\{([^}]*)\})").expect("valid pattern"));
+    VARIABLE
+        .replace_all(path, |captures: &Captures| {
+            let name = captures
+                .get(1)
+                .or(captures.get(2))
+                .map_or("", |m| m.as_str());
+            std::env::var(name).unwrap_or_else(|_| captures[0].to_owned())
+        })
+        .into_owned()
 }
 
 /// Parses the timestamp argument, which is an ISO 8601 date time, an RFC 2822
@@ -280,78 +376,78 @@ fn parse_timestamp(value: &str) -> Result<DateTime, String> {
     Ok(DateTime::from_millis(date_time.timestamp_millis()))
 }
 
-/// Parses the map argument in the JSON syntax or the shorthand syntax, i.e.
-/// `KeyName1=string,KeyName2=string`.
-fn parse_map(value: &str) -> Result<HashMap<String, String>, String> {
-    if value.trim_start().starts_with('{') {
-        let map: serde_json::Map<String, serde_json::Value> = serde_json::from_str(value)
-            .map_err(|err| format!("Invalid JSON: {err}\nJSON received: {value}"))?;
-        return map
-            .into_iter()
-            .map(|(key, value)| match value {
-                serde_json::Value::String(value) => Ok((key, value)),
-                value => Ok((key, value.to_string())),
-            })
-            .collect();
-    }
-    let mut map = HashMap::new();
-    for pair in split_shorthand(value) {
-        let (key, value) = pair.split_once('=').ok_or_else(|| {
-            format!(
-                "Error parsing parameter '--metadata': Expected: '=', received: 'EOF' for input:\n{value}"
-            )
-        })?;
-        map.insert(key.trim().to_owned(), unquote(value.trim()));
-    }
-    Ok(map)
-}
-
-/// Splits the shorthand syntax by commas outside of quotes.
-fn split_shorthand(value: &str) -> Vec<String> {
-    let mut pairs = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    let mut chars = value.chars();
-    while let Some(c) = chars.next() {
-        match (c, quote) {
-            ('\\', _) => {
-                current.push(c);
-                current.extend(chars.next());
-            }
-            ('\'' | '"', None) => {
-                quote = Some(c);
-                current.push(c);
-            }
-            (c, Some(q)) if c == q => {
-                quote = None;
-                current.push(c);
-            }
-            (',', None) => pairs.push(std::mem::take(&mut current)),
-            _ => current.push(c),
-        }
-    }
-    if !current.is_empty() {
-        pairs.push(current);
-    }
-    pairs
-}
-
-fn unquote(value: &str) -> String {
-    let inner = ['\'', '"'].iter().find_map(|&q| {
-        value
-            .strip_prefix(q)
-            .and_then(|value| value.strip_suffix(q))
-    });
-    let mut result = String::new();
-    let mut chars = inner.unwrap_or(value).chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            result.extend(chars.next());
+/// Parses the `--metadata` argument in the JSON syntax or the shorthand
+/// syntax, i.e. `KeyName1=string,KeyName2=string`, and validates that the
+/// values are strings like `unpack_argument` of the AWS CLI, which reports
+/// the invalid values in the representations of Python instead of JSON.
+fn parse_metadata(value: &str) -> Result<Vec<(String, String)>, Error> {
+    let error = |message: String| {
+        Error::param_validation(format!("Error parsing parameter '--metadata': {message}"))
+    };
+    let contents;
+    let value = if let Some(path) = value.strip_prefix("file://") {
+        contents = read_text_paramfile(value, path).map_err(error)?;
+        &contents
+    } else if let Some(path) = value.strip_prefix("fileb://") {
+        // The binary contents are not supported by the shorthand parser.
+        let contents = read_paramfile(value, path).map_err(error)?;
+        return Err(Error::new(if contents.is_empty() {
+            "a bytes-like object is required, not 'str'"
         } else {
-            result.push(c);
+            "'in <string>' requires string as left operand, not int"
+        }));
+    } else {
+        value
+    };
+    let trimmed = value.trim_matches(is_space);
+    let pairs = if trimmed.starts_with('{') {
+        match json::decode(value)
+            .map_err(|err| error(format!("Invalid JSON: {err}\nJSON received: {value}")))?
+        {
+            Value::Map(pairs) => pairs,
+            _ => unreachable!("an object is decoded"),
+        }
+    } else if trimmed.starts_with('[') {
+        return Err(error(format!("Invalid JSON:\n{value}")));
+    } else {
+        shorthand::parse(value, resolve_paramfile).map_err(|err| match err {
+            ParseError::Syntax(message) => error(message),
+            ParseError::Paramfile(message) => Error::new(message),
+        })?
+    };
+    let mut metadata = Vec::new();
+    let mut errors = Vec::new();
+    for (key, value) in pairs {
+        match value {
+            Value::Str(value) => {
+                metadata.push((key, value));
+            }
+            value => errors.push(format!(
+                "Invalid type for parameter {key}, value: {}, type: {}, valid types: string",
+                value.to_json(),
+                value.type_name()
+            )),
         }
     }
-    result
+    if !errors.is_empty() {
+        return Err(Error::param_validation(format!(
+            "Parameter validation failed:\n{}",
+            errors.join("\n")
+        )));
+    }
+    Ok(metadata)
+}
+
+/// Resolves the parameter file of the value of the shorthand syntax, like
+/// `get_paramfile` of the AWS CLI.
+fn resolve_paramfile(value: String) -> Result<Value, String> {
+    if let Some(path) = value.strip_prefix("file://") {
+        read_text_paramfile(&value, path).map(Value::Str)
+    } else if let Some(path) = value.strip_prefix("fileb://") {
+        read_paramfile(&value, path).map(Value::Bytes)
+    } else {
+        Ok(Value::Str(value))
+    }
 }
 
 #[cfg(test)]
@@ -367,8 +463,8 @@ mod tests {
         let Command::Cp(cp) = &cli.command else {
             unreachable!()
         };
-        let keys = Keys::load(&cp.transfer).map_err(|err| err.to_string())?;
-        RequestParams::new(&cp.transfer, &keys)
+        let unpacked = Unpacked::load(&cp.transfer).map_err(|err| err.to_string())?;
+        RequestParams::new(&cp.transfer, &unpacked)
     }
 
     #[test]
@@ -473,14 +569,84 @@ mod tests {
     }
 
     #[test]
-    fn map() {
-        let map = parse_map("a=1,b='x,y',c=\"z\"").unwrap();
-        assert_eq!(map["a"], "1");
-        assert_eq!(map["b"], "x,y");
-        assert_eq!(map["c"], "z");
-        let map = parse_map(r#"{"k": "v"}"#).unwrap();
-        assert_eq!(map["k"], "v");
-        assert!(parse_map("novalue").is_err());
+    fn metadata() {
+        let pair = |key: &str, value: &str| (key.to_owned(), value.to_owned());
+        let metadata = parse_metadata("a=1,b='x,y',c=\"z\"").unwrap();
+        assert_eq!(metadata, [pair("a", "1"), pair("b", "x,y"), pair("c", "z")]);
+        let metadata = parse_metadata(r#" {"k": "v", "l": "x", "k": "w"} "#).unwrap();
+        assert_eq!(metadata, [pair("k", "w"), pair("l", "x")]);
+        let params = parse(&["--metadata", "a=x,b=\u{e9},c=\u{fc}"]).unwrap();
+        assert_eq!(
+            params.validate_ascii_metadata().unwrap_err(),
+            "Parameter validation failed:\nNon ascii characters found in S3 metadata for key \
+             \"b\", value: \"\u{e9}\".  \nS3 metadata can only contain ASCII characters. "
+        );
+        let params = parse(&["--metadata", "a=x"]).unwrap();
+        assert_eq!(params.validate_ascii_metadata(), Ok(()));
+        let errors = [
+            (
+                "a",
+                "Error parsing parameter '--metadata': Expected: '=', received: 'EOF' for input:\n a\n ^",
+            ),
+            (
+                "[1]",
+                "Error parsing parameter '--metadata': Invalid JSON:\n[1]",
+            ),
+            (
+                "{a:1}",
+                "Error parsing parameter '--metadata': Invalid JSON: Expecting property name \
+                 enclosed in double quotes: line 1 column 2 (char 1)\nJSON received: {a:1}",
+            ),
+            (
+                "a=b,c,d=[1,'2'],e={f=g}",
+                r#"Parameter validation failed:
+Invalid type for parameter a, value: ["b","c"], type: list, valid types: string
+Invalid type for parameter d, value: ["1","2"], type: list, valid types: string
+Invalid type for parameter e, value: {"f":"g"}, type: map, valid types: string"#,
+            ),
+            (
+                r#"{"a": true, "b": [1.5, null], "c": {}}"#,
+                r#"Parameter validation failed:
+Invalid type for parameter a, value: true, type: boolean, valid types: string
+Invalid type for parameter b, value: [1.5,null], type: list, valid types: string
+Invalid type for parameter c, value: {}, type: map, valid types: string"#,
+            ),
+            (
+                "file:///nonexistent",
+                "Error parsing parameter '--metadata': Unable to load paramfile \
+                 file:///nonexistent: [Errno 2] No such file or directory: '/nonexistent'",
+            ),
+            (
+                "a@=file:///nonexistent",
+                "Unable to load paramfile file:///nonexistent: \
+                 [Errno 2] No such file or directory: '/nonexistent'",
+            ),
+        ];
+        for (value, expected) in errors {
+            let message = parse_metadata(value).unwrap_err().to_string();
+            let message = message
+                .strip_prefix("An error occurred (ParamValidation): ")
+                .unwrap_or(&message);
+            assert_eq!(message, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn expand() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(expand_user("~"), home.trim_end_matches('/'));
+        assert_eq!(
+            expand_user("~/a"),
+            format!("{}/a", home.trim_end_matches('/'))
+        );
+        assert_eq!(expand_user("~user/a"), "~user/a");
+        assert_eq!(expand_user("a/~"), "a/~");
+        assert_eq!(expand_vars("$HOME/a"), format!("{home}/a"));
+        assert_eq!(expand_vars("${HOME}a"), format!("{home}a"));
+        assert_eq!(
+            expand_vars("$ $1x_UNSET ${} ${UNSET} ${HOME"),
+            "$ $1x_UNSET ${} ${UNSET} ${HOME"
+        );
     }
 
     #[test]

@@ -152,6 +152,7 @@ async fn copy_single(
         }
         None => {}
     }
+    params.validate_ascii_metadata()?;
     let _permit = ctx.permit().await?;
     let result = ctx
         .redirector
@@ -213,6 +214,7 @@ async fn copy_multipart(
     let tagging_header = serialize_tags(&tags);
     let put_tags_later = !tags.is_empty() && tagging_header.len() > MAX_TAGGING_HEADER_SIZE;
     let tagging = (!tags.is_empty() && !put_tags_later).then_some(tagging_header);
+    params.validate_ascii_metadata()?;
     let output = {
         let _permit = ctx.permit().await?;
         ctx.redirector
