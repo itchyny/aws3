@@ -393,6 +393,10 @@ pub struct TransferArgs {
     #[arg(long)]
     pub storage_class: Option<StorageClass>,
 
+    /// Tags to set on objects uploaded from local paths, can be specified multiple times
+    #[arg(long, num_args = 2, value_names = ["KEY", "VALUE"], action = clap::ArgAction::Append)]
+    pub tags: Vec<String>,
+
     /// Grant specific permissions to individual users or groups
     #[arg(long, num_args = 1.., value_name = "Permission=Grantee_Type=Grantee_ID")]
     pub grants: Vec<String>,

@@ -100,6 +100,7 @@ pub struct Options {
     pub delete: bool,
     has_checksum_algorithm: bool,
     has_checksum_mode: bool,
+    has_tags: bool,
     has_sse_c: bool,
     has_sse_c_key: bool,
     has_sse_c_copy_source: bool,
@@ -135,6 +136,7 @@ impl Options {
             delete: false,
             has_checksum_algorithm: false,
             has_checksum_mode: false,
+            has_tags: false,
             has_sse_c: false,
             has_sse_c_key: false,
             has_sse_c_copy_source: false,
@@ -162,6 +164,7 @@ impl Options {
             no_overwrite: args.no_overwrite,
             has_checksum_algorithm: args.checksum_algorithm.is_some(),
             has_checksum_mode: args.checksum_mode.is_some(),
+            has_tags: !args.tags.is_empty(),
             has_sse_c: args.sse_c.is_some(),
             has_sse_c_key: args.sse_c_key.is_some(),
             has_sse_c_copy_source: args.sse_c_copy_source.is_some(),
@@ -314,6 +317,9 @@ impl Plan {
         }
         if options.has_checksum_mode {
             check_paths_type("checksum-mode", paths_type, &[PathsType::S3Local])?;
+        }
+        if options.has_tags {
+            check_paths_type("tags", paths_type, &[PathsType::LocalS3])?;
         }
         if paths_type == PathsType::LocalS3 && !is_stream && !Path::new(&src).exists() {
             return Err(Error::new(format!(

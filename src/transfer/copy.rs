@@ -564,7 +564,7 @@ pub fn copy_source(bucket: &str, key: &str) -> String {
 }
 
 /// Encodes the string, keeping unreserved characters and optionally slashes.
-fn url_encode(value: &str, keep_slash: bool) -> String {
+pub fn url_encode(value: &str, keep_slash: bool) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
         match byte {

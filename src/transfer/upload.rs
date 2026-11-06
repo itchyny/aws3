@@ -300,6 +300,7 @@ async fn put_object(
                 .content_length(size as i64);
             let request = set_object_params!(request, params)
                 .set_checksum_algorithm(algorithm.clone())
+                .set_tagging(params.tagging.clone())
                 .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
             let request = set_checksum!(request, &algorithm, &checksum);
             let request = set_sse_c!(request, &params.sse_c).set_content_type(content_type.clone());
@@ -386,7 +387,8 @@ impl MultipartUpload {
             .send(&ctx.client, bucket, "CreateMultipartUpload", |client| {
                 let request = client.create_multipart_upload().bucket(bucket).key(key);
                 let request = set_object_params!(request, params)
-                    .set_checksum_algorithm(checksum_algorithm.clone());
+                    .set_checksum_algorithm(checksum_algorithm.clone())
+                    .set_tagging(params.tagging.clone());
                 let request = set_sse_c!(request, &params.sse_c);
                 match &content_type {
                     Some(content_type) => request.content_type(content_type),

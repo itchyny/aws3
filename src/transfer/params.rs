@@ -13,6 +13,7 @@ use aws_smithy_types::base64;
 use md5::{Digest, Md5};
 use regex_lite::{Captures, Regex};
 
+use super::copy::url_encode;
 use super::json;
 use super::shorthand::{self, ParseError};
 use super::value::{Value, is_space};
@@ -38,6 +39,9 @@ pub struct RequestParams {
     pub content_encoding: Option<String>,
     pub content_language: Option<String>,
     pub expires: Option<DateTime>,
+    /// The tags of the objects uploaded from local paths, in the format of
+    /// the tagging header.
+    pub tagging: Option<String>,
     pub grant_read: Option<String>,
     pub grant_full_control: Option<String>,
     pub grant_read_acp: Option<String>,
@@ -103,6 +107,20 @@ impl RequestParams {
                 .map(|algorithm| ChecksumAlgorithm::from(value_name(algorithm).as_str())),
             checksum_mode: args.checksum_mode.map(|_| ChecksumMode::Enabled),
             no_overwrite: args.no_overwrite,
+            tagging: (!args.tags.is_empty()).then(|| {
+                let tags: Vec<_> = args
+                    .tags
+                    .chunks(2)
+                    .map(|tag| {
+                        format!(
+                            "{}={}",
+                            url_encode(&tag[0], false),
+                            url_encode(&tag[1], false)
+                        )
+                    })
+                    .collect();
+                tags.join("&")
+            }),
             ..Self::default()
         };
         for grant in &args.grants {
@@ -465,6 +483,13 @@ mod tests {
         };
         let unpacked = Unpacked::load(&cp.transfer).map_err(|err| err.to_string())?;
         RequestParams::new(&cp.transfer, &unpacked)
+    }
+
+    #[test]
+    fn tags() {
+        let params = parse(&["--tags", "k1", "v 1", "--tags", "a&b=c", "\u{fc}/~"]).unwrap();
+        assert_eq!(params.tagging.as_deref(), Some("k1=v%201&a%26b%3Dc=%C3%BC%2F~"));
+        assert_eq!(parse(&[]).unwrap().tagging, None);
     }
 
     #[test]
