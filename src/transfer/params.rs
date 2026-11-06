@@ -488,7 +488,10 @@ mod tests {
     #[test]
     fn tags() {
         let params = parse(&["--tags", "k1", "v 1", "--tags", "a&b=c", "\u{fc}/~"]).unwrap();
-        assert_eq!(params.tagging.as_deref(), Some("k1=v%201&a%26b%3Dc=%C3%BC%2F~"));
+        assert_eq!(
+            params.tagging.as_deref(),
+            Some("k1=v%201&a%26b%3Dc=%C3%BC%2F~")
+        );
         assert_eq!(parse(&[]).unwrap().tagging, None);
     }
 
@@ -608,7 +611,7 @@ mod tests {
         );
         let params = parse(&["--metadata", "a=x"]).unwrap();
         assert_eq!(params.validate_ascii_metadata(), Ok(()));
-        let errors = [
+        let mut errors = vec![
             (
                 "a",
                 "Error parsing parameter '--metadata': Expected: '=', received: 'EOF' for input:\n a\n ^",
@@ -636,17 +639,22 @@ Invalid type for parameter a, value: true, type: boolean, valid types: string
 Invalid type for parameter b, value: [1.5,null], type: list, valid types: string
 Invalid type for parameter c, value: {}, type: map, valid types: string"#,
             ),
-            (
-                "file:///nonexistent",
-                "Error parsing parameter '--metadata': Unable to load paramfile \
-                 file:///nonexistent: [Errno 2] No such file or directory: '/nonexistent'",
-            ),
-            (
-                "a@=file:///nonexistent",
-                "Unable to load paramfile file:///nonexistent: \
-                 [Errno 2] No such file or directory: '/nonexistent'",
-            ),
         ];
+        // The messages of the errors of the operating system differ on Windows.
+        if cfg!(unix) {
+            errors.extend([
+                (
+                    "file:///nonexistent",
+                    "Error parsing parameter '--metadata': Unable to load paramfile \
+                     file:///nonexistent: [Errno 2] No such file or directory: '/nonexistent'",
+                ),
+                (
+                    "a@=file:///nonexistent",
+                    "Unable to load paramfile file:///nonexistent: \
+                     [Errno 2] No such file or directory: '/nonexistent'",
+                ),
+            ]);
+        }
         for (value, expected) in errors {
             let message = parse_metadata(value).unwrap_err().to_string();
             let message = message
