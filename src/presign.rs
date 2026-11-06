@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 
 use aws_credential_types::provider::ProvideCredentials;
 use aws_sdk_s3::presigning::PresigningConfig;
-use aws_sigv4::sign::v4::{calculate_signature, generate_signing_key};
+use aws_sigv4::sign::{v4, v4a};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{GlobalArgs, PresignArgs};
@@ -56,6 +56,11 @@ pub async fn run(args: &PresignArgs, global: &GlobalArgs) -> Result<ExitCode, Er
         .await
         .map_err(|err| Error::sdk("GetObject", err))?;
     let mut url = request.uri().to_owned();
+    // The AWS CLI fails without a message on the expiration not positive of
+    // the URLs of Signature Version 4A, e.g. of Multi-Region Access Points.
+    if args.expires_in <= 0 && url.contains(&format!("X-Amz-Algorithm={SIGV4A}&")) {
+        return Err(Error::new(""));
+    }
     if expires_in != args.expires_in {
         let provider = config.sdk.credentials_provider();
         let credentials = match provider {
@@ -63,31 +68,61 @@ pub async fn run(args: &PresignArgs, global: &GlobalArgs) -> Result<ExitCode, Er
             None => None,
         };
         url = credentials
-            .and_then(|credentials| resign(&url, args.expires_in, credentials.secret_access_key()))
+            .and_then(|credentials| {
+                let (access_key, secret) =
+                    (credentials.access_key_id(), credentials.secret_access_key());
+                resign(&url, args.expires_in, access_key, secret)
+            })
             .ok_or_else(|| {
                 Error::param_validation("`expires_in` must be no longer than one week")
             })?;
     }
-    println!("{}", signature_last(&url));
+    println!("{}", reorder_params(&url));
     Ok(ExitCode::SUCCESS)
 }
 
-/// Moves the signature to the end of the query like the AWS CLI, which the
-/// SDK places before the security token of temporary credentials.
-fn signature_last(url: &str) -> String {
+/// The algorithms of Signature Version 4 and 4A.
+const SIGV4: &str = "AWS4-HMAC-SHA256";
+const SIGV4A: &str = "AWS4-ECDSA-P256-SHA256";
+
+/// Reorders the parameters of the query like the AWS CLI, where the signature
+/// is at the end, which the SDK places before the security token. The order
+/// of the parameters is not covered by the signature.
+fn reorder_params(url: &str) -> String {
     let Some((base, query)) = url.split_once('?') else {
         return url.to_owned();
     };
-    let (signatures, mut params): (Vec<_>, Vec<_>) = query
-        .split('&')
-        .partition(|param| param.starts_with("X-Amz-Signature="));
-    params.extend(signatures);
+    let mut params: Vec<_> = query.split('&').collect();
+    // The order of the AWS CLI for Signature Version 4A, signed by CRT.
+    const SIGV4A_ORDER: [&str; 7] = [
+        "X-Amz-Algorithm",
+        "X-Amz-Credential",
+        "X-Amz-Date",
+        "X-Amz-SignedHeaders",
+        "X-Amz-Expires",
+        "X-Amz-Security-Token",
+        "X-Amz-Region-Set",
+    ];
+    let is_sigv4a = params.contains(&format!("X-Amz-Algorithm={SIGV4A}").as_str());
+    params.sort_by_key(|param| {
+        let name = param.split('=').next().unwrap_or_default();
+        if name == "X-Amz-Signature" {
+            usize::MAX
+        } else if is_sigv4a {
+            SIGV4A_ORDER
+                .iter()
+                .position(|order| *order == name)
+                .unwrap_or(SIGV4A_ORDER.len())
+        } else {
+            0
+        }
+    });
     format!("{base}?{}", params.join("&"))
 }
 
-/// Signs the pre-signed URL of Signature Version 4 again with the expiration,
-/// which keeps the other parameters.
-fn resign(url: &str, expires_in: i64, secret: &str) -> Option<String> {
+/// Signs the pre-signed URL of Signature Version 4 or 4A again with the
+/// expiration, which keeps the other parameters.
+fn resign(url: &str, expires_in: i64, access_key: &str, secret: &str) -> Option<String> {
     let (base, query) = url.split_once('?')?;
     let (scheme, rest) = base.split_once("://")?;
     let (host, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
@@ -96,14 +131,19 @@ fn resign(url: &str, expires_in: i64, secret: &str) -> Option<String> {
             .split('&')
             .find_map(|param| param.strip_prefix(name)?.strip_prefix('='))
     };
-    if param("X-Amz-Algorithm")? != "AWS4-HMAC-SHA256" || param("X-Amz-SignedHeaders")? != "host" {
+    let algorithm = param("X-Amz-Algorithm")?;
+    if !matches!(algorithm, SIGV4 | SIGV4A) || param("X-Amz-SignedHeaders")? != "host" {
         return None;
     }
     let date_time = param("X-Amz-Date")?;
     let credential = param("X-Amz-Credential")?.replace("%2F", "/");
     let (_, scope) = credential.split_once('/')?;
-    let [date, region, service, _] = scope.split('/').collect::<Vec<_>>()[..] else {
-        return None;
+    // The scope of Signature Version 4A has no region.
+    let parts: Vec<_> = scope.split('/').collect();
+    let (date, region, service) = match parts[..] {
+        [date, region, service, _] if algorithm == SIGV4 => (date, region, service),
+        [date, service, _] if algorithm == SIGV4A => (date, "", service),
+        _ => return None,
     };
     let params: Vec<_> = query
         .split('&')
@@ -124,13 +164,18 @@ fn resign(url: &str, expires_in: i64, secret: &str) -> Option<String> {
         sorted.join("&")
     );
     let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{date_time}\n{scope}\n{}",
+        "{algorithm}\n{date_time}\n{scope}\n{}",
         hex(&Sha256::digest(canonical_request))
     );
-    let time = chrono::NaiveDate::parse_from_str(date, "%Y%m%d").ok()?;
-    let time = SystemTime::from(time.and_hms_opt(0, 0, 0)?.and_utc());
-    let key = generate_signing_key(secret, time, region, service);
-    let signature = calculate_signature(key, string_to_sign.as_bytes());
+    let signature = if algorithm == SIGV4A {
+        let key = v4a::generate_signing_key(access_key, secret);
+        v4a::calculate_signature(key, string_to_sign.as_bytes())
+    } else {
+        let time = chrono::NaiveDate::parse_from_str(date, "%Y%m%d").ok()?;
+        let time = SystemTime::from(time.and_hms_opt(0, 0, 0)?.and_utc());
+        let key = v4::generate_signing_key(secret, time, region, service);
+        v4::calculate_signature(key, string_to_sign.as_bytes())
+    };
     let params: Vec<_> = params
         .into_iter()
         .filter(|param| !param.starts_with("X-Amz-Signature="))
@@ -151,7 +196,7 @@ mod tests {
     use super::*;
 
     /// Returns the URL pre-signed by the SDK without network, at the time.
-    async fn presign(key: &str, expires_in: u64, token: Option<&str>) -> String {
+    async fn presign(bucket: &str, key: &str, expires_in: u64, token: Option<&str>) -> String {
         let credentials = aws_credential_types::Credentials::new(
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFI/K7MDENG/bPxRfiCYEXAMPLEKEY",
@@ -171,7 +216,7 @@ mod tests {
             .unwrap();
         aws_sdk_s3::Client::from_conf(config)
             .get_object()
-            .bucket("bucket")
+            .bucket(bucket)
             .key(key)
             .presigned(presigning)
             .await
@@ -182,16 +227,35 @@ mod tests {
 
     #[tokio::test]
     async fn resign_url() {
-        let secret = "wJalrXUtnFI/K7MDENG/bPxRfiCYEXAMPLEKEY";
-        for (key, token) in [("a b/c+ü~*.txt", None), ("key", Some("TOKEN/+="))] {
+        let (access_key, secret) = (
+            "AKIAIOSFODNN7EXAMPLE",
+            "wJalrXUtnFI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        );
+        let resign = |url: &str, expires_in| {
+            resign(url, expires_in, access_key, secret).map(|url| reorder_params(&url))
+        };
+        // The signatures of both versions are deterministic, where the
+        // Multi-Region Access Points are signed with Signature Version 4A.
+        let mrap = "arn:aws:s3::123456789012:accesspoint/mfzwi23gnjvgw.mrap";
+        for (bucket, key, token) in [
+            ("bucket", "a b/c+ü~*.txt", None),
+            ("bucket", "key", Some("TOKEN/+=")),
+            (mrap, "a b/c+ü~*.txt", None),
+            (mrap, "key", Some("TOKEN/+=")),
+        ] {
             // Signing again with the same expiration results in the same URL,
-            // except for the position of the signature.
-            let url = signature_last(&presign(key, 3600, token).await);
-            assert_eq!(resign(&url, 3600, secret).as_deref(), Some(url.as_str()));
-            let url = resign(&presign(key, 60, token).await, 3600, secret).unwrap();
-            assert_eq!(url, signature_last(&presign(key, 3600, token).await));
+            // except for the order of the parameters.
+            let url = reorder_params(&presign(bucket, key, 3600, token).await);
+            assert_eq!(
+                resign(&url, 3600).as_deref(),
+                Some(url.as_str()),
+                "{bucket}"
+            );
+            let url = resign(&presign(bucket, key, 60, token).await, 3600).unwrap();
+            let expected = reorder_params(&presign(bucket, key, 3600, token).await);
+            assert_eq!(url, expected, "{bucket}");
         }
-        let url = resign(&presign("key", 3600, None).await, -1, secret).unwrap();
+        let url = resign(&presign("bucket", "key", 3600, None).await, -1).unwrap();
         assert!(url.contains("&X-Amz-Expires=-1&"), "{url}");
     }
 }

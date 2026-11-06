@@ -159,7 +159,14 @@ impl Error {
     /// Renders the error for the standard error in the format, in the same way
     /// as the error handlers of the AWS CLI.
     pub fn render(&self, format: ErrorFormat, colored: bool) -> String {
-        let plain = |message: &str| format!("\naws3: [ERROR]: {}\n", message.trim());
+        let plain = |message: &str| {
+            let message = message.trim();
+            if message.is_empty() {
+                "\naws3: [ERROR]:\n".to_owned()
+            } else {
+                format!("\naws3: [ERROR]: {message}\n")
+            }
+        };
         let Some(info) = &self.info else {
             return plain(&self.message);
         };
