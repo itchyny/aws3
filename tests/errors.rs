@@ -32,9 +32,9 @@ fn connection_refused() {
     );
     assert_eq!(result.code, 255);
     assert!(
-        result
-            .stderr
-            .contains("Could not connect to the endpoint URL"),
+        result.stderr.contains(&format!(
+            "Could not connect to the endpoint URL: \"{endpoint}/\""
+        )),
         "{}",
         result.stderr
     );
@@ -353,9 +353,7 @@ fn tls_verification() {
     let result = env.run(&["ls", "s3://bucket/", "--cli-connect-timeout", "5"]);
     assert_eq!(result.code, 255);
     assert!(
-        result
-            .stderr
-            .contains("Could not connect to the endpoint URL"),
+        result.stderr.contains("SSL validation failed for https://"),
         "{}",
         result.stderr
     );

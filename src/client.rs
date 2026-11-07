@@ -10,9 +10,15 @@ use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::timeout::TimeoutConfig;
 use aws_sdk_s3::config::{ConfigBag, Intercept, RuntimeComponents};
 use aws_smithy_runtime_api::box_error::BoxError;
+use aws_smithy_runtime_api::client::http::{
+    HttpClient, HttpConnector, HttpConnectorFuture, SharedHttpClient, SharedHttpConnector,
+    http_client_fn,
+};
 use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeTransmitInterceptorContextMut, FinalizerInterceptorContextMut, InterceptorContext,
 };
+use aws_smithy_runtime_api::client::orchestrator::HttpRequest;
+use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::retries::classifiers::{ClassifyRetry, RetryAction};
 use aws_smithy_types::retry::RetryConfig;
@@ -61,7 +67,7 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
         tls::http_client(ca_bundle.as_deref())?
     };
     let mut loader = aws_config::defaults(BehaviorVersion::latest())
-        .http_client(http_client)
+        .http_client(with_request_urls(http_client))
         .timeout_config(timeout_config);
     if let Some(profile) = &global.profile {
         loader = loader.profile_name(profile);
@@ -185,6 +191,89 @@ impl ClassifyRetry for Retry200Errors {
     }
 }
 
+/// The error of the connection of a request with its URL, which the AWS CLI
+/// reports, e.g. `Could not connect to the endpoint URL: "https://..."`.
+#[derive(Debug)]
+pub struct ConnectionError {
+    pub url: String,
+    source: BoxError,
+}
+
+impl std::fmt::Display for ConnectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(f)
+    }
+}
+
+impl std::error::Error for ConnectionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+/// Wraps the HTTP client to add the URLs of the requests to the errors of the
+/// connections, keeping the kinds of the errors for the retries.
+fn with_request_urls(inner: SharedHttpClient) -> SharedHttpClient {
+    http_client_fn(move |settings, components| {
+        SharedHttpConnector::new(RequestUrlConnector(
+            inner.http_connector(settings, components),
+        ))
+    })
+}
+
+/// Returns the URL of the request in the same way as the AWS CLI, which does
+/// not add the operation name to the query, nor the slash to the paths of the
+/// buckets.
+fn request_url(uri: &str) -> String {
+    let (url, query) = uri.split_once('?').unwrap_or((uri, ""));
+    let path_start = url.find("://").map_or(0, |i| i + 3);
+    let path = url[path_start..]
+        .find('/')
+        .map_or("", |i| &url[path_start + i..]);
+    let url = match path.strip_suffix('/') {
+        Some(bucket) if bucket.len() > 1 && !bucket[1..].contains('/') => &url[..url.len() - 1],
+        _ => url,
+    };
+    let query: Vec<_> = query
+        .split('&')
+        .filter(|param| !param.is_empty() && !param.starts_with("x-id="))
+        .collect();
+    if query.is_empty() {
+        url.to_owned()
+    } else {
+        format!("{url}?{}", query.join("&"))
+    }
+}
+
+#[derive(Debug)]
+struct RequestUrlConnector(SharedHttpConnector);
+
+impl HttpConnector for RequestUrlConnector {
+    fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
+        let url = request_url(request.uri());
+        let future = self.0.call(request);
+        HttpConnectorFuture::new(async move {
+            future.await.map_err(|err| {
+                let (timeout, io, user, kind) =
+                    (err.is_timeout(), err.is_io(), err.is_user(), err.as_other());
+                let source: BoxError = Box::new(ConnectionError {
+                    url,
+                    source: err.into_source(),
+                });
+                if timeout {
+                    ConnectorError::timeout(source)
+                } else if io {
+                    ConnectorError::io(source)
+                } else if user {
+                    ConnectorError::user(source)
+                } else {
+                    ConnectorError::other(source, kind)
+                }
+            })
+        })
+    }
+}
+
 /// Returns the endpoint URL specific to S3, i.e. `AWS_ENDPOINT_URL_S3` or the
 /// `s3` service in the `services` section of the config file.
 fn s3_endpoint_url(sdk: &SdkConfig) -> Option<String> {
@@ -302,6 +391,32 @@ mod tests {
         ));
         assert!(!is_s3_accelerate_url("https://s3-accelerate.example.com"));
         assert!(!is_s3_accelerate_url("ftp://s3-accelerate.amazonaws.com"));
+    }
+
+    #[test]
+    fn request_urls() {
+        let urls = [
+            (
+                "http://localhost:9000/b/?list-type=2&x-id=ListObjectsV2",
+                "http://localhost:9000/b?list-type=2",
+            ),
+            (
+                "http://localhost:9000/b/dir/",
+                "http://localhost:9000/b/dir/",
+            ),
+            (
+                "http://localhost:9000/b/a.txt?x-id=PutObject",
+                "http://localhost:9000/b/a.txt",
+            ),
+            (
+                "https://b.s3.amazonaws.com/?list-type=2",
+                "https://b.s3.amazonaws.com/?list-type=2",
+            ),
+            ("http://localhost:9000/", "http://localhost:9000/"),
+        ];
+        for (uri, expected) in urls {
+            assert_eq!(request_url(uri), expected, "{uri}");
+        }
     }
 
     #[test]

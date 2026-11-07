@@ -123,10 +123,22 @@ impl Error {
                 }),
             },
             SdkError::DispatchFailure(failure) if failure.is_io() || failure.is_timeout() => {
-                Self::new(format!(
-                    "Could not connect to the endpoint URL: {}",
-                    Chain(&err)
-                ))
+                match find_source::<client::ConnectionError>(&err) {
+                    Some(connection) => match find_source::<rustls::Error>(&err) {
+                        Some(tls) => Self::new(format!(
+                            "SSL validation failed for {} {tls}",
+                            connection.url
+                        )),
+                        None => Self::new(format!(
+                            "Could not connect to the endpoint URL: \"{}\"",
+                            connection.url
+                        )),
+                    },
+                    None => Self::new(format!(
+                        "Could not connect to the endpoint URL: {}",
+                        Chain(&err)
+                    )),
+                }
             }
             // The innermost error describes the cause, e.g. an invalid
             // combination of the configurations to resolve the endpoint.
@@ -367,6 +379,27 @@ fn endpoint_error(message: &str) -> Error {
         return Error::param_validation(format!("Parameter validation failed:\n{message}"));
     }
     Error::new(message)
+}
+
+/// Returns the error of the type in the sources of the error, including the
+/// errors wrapped by the I/O errors whose sources skip them.
+fn find_source<'a, T: std::error::Error + 'static>(
+    err: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    let mut source = Some(err);
+    while let Some(err) = source {
+        if let Some(err) = err.downcast_ref::<T>() {
+            return Some(err);
+        }
+        source = match err
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+        {
+            Some(inner) => Some(inner),
+            None => err.source(),
+        };
+    }
+    None
 }
 
 fn root_cause<'a>(
