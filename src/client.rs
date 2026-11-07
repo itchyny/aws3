@@ -163,15 +163,16 @@ impl Intercept for RecordRetries {
 
 /// Retries the errors of the responses with the 200 status code, e.g. the
 /// bodies which are not XML or are errors, like `_handle_200_error` of
-/// botocore which handles them as 500 errors.
+/// botocore which handles them as 500 errors except for the empty bodies.
 #[derive(Debug)]
 struct Retry200Errors;
 
 impl ClassifyRetry for Retry200Errors {
     fn classify_retry(&self, ctx: &InterceptorContext) -> RetryAction {
-        let is_200 = ctx
-            .response()
-            .is_some_and(|response| response.status().as_u16() == 200);
+        let is_200 = ctx.response().is_some_and(|response| {
+            response.status().as_u16() == 200
+                && !response.body().bytes().is_some_and(<[u8]>::is_empty)
+        });
         if is_200 && matches!(ctx.output_or_error(), Some(Err(_))) {
             RetryAction::server_error()
         } else {

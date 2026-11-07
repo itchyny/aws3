@@ -83,6 +83,15 @@ fn retried_errors() {
              (reached max retries: 2): Internal Server Error",
             3,
         ),
+        // The empty bodies are not retried, which botocore parses as empty.
+        (
+            "200 OK",
+            "",
+            "3",
+            "An error occurred (500) when calling the ListObjectsV2 operation: \
+             Internal Server Error",
+            1,
+        ),
         (
             "503 Service Unavailable",
             "<Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>",
