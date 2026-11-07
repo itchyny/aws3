@@ -35,8 +35,6 @@ CLI.
   of 10, which makes the transfers of many small files faster. The parts of a
   multipart transfer are up to 10 by default, which use the bandwidth with
   less CPU.
-- `payload_signing_enabled = true` in the `s3` section does not sign the
-  payloads of uploads over HTTPS.
 
 ## Benchmark
 
