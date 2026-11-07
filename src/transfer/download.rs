@@ -18,6 +18,36 @@ use crate::path::validate_bucket_name;
 
 /// The size of the pieces of the ranges written to the file.
 const WRITE_BUFFER_SIZE: usize = 1024 * 1024;
+/// The size of the chunks of the progress of the downloads, in which
+/// s3transfer reads the bodies, i.e. `io_chunksize`.
+const PROGRESS_CHUNK_SIZE: u64 = 256 * 1024;
+
+/// Reports the progress of the body as it is read, in the chunks like
+/// s3transfer, where the rest of the body is reported at the end.
+struct ChunkedProgress {
+    id: TransferId,
+    pending: u64,
+}
+
+impl ChunkedProgress {
+    fn new(id: TransferId) -> Self {
+        Self { id, pending: 0 }
+    }
+
+    fn add(&mut self, ctx: &Context, bytes: usize) {
+        self.pending += bytes as u64;
+        while self.pending >= PROGRESS_CHUNK_SIZE {
+            self.pending -= PROGRESS_CHUNK_SIZE;
+            ctx.progress(self.id, PROGRESS_CHUNK_SIZE);
+        }
+    }
+
+    fn finish(self, ctx: &Context) {
+        if self.pending > 0 {
+            ctx.progress(self.id, self.pending);
+        }
+    }
+}
 
 /// Downloads the object to the local file, which is written to a temporary
 /// file in the same directory and renamed on completion.
@@ -107,6 +137,7 @@ pub async fn download_stdout(
     head_object(ctx, bucket, key).await?;
     let (mut output, _permit) = get_object(ctx, bucket, key, None, None).await?;
     let mut stdout = tokio::io::stdout();
+    let mut progress = ChunkedProgress::new(id);
     while let Some(bytes) = output
         .body
         .try_next()
@@ -118,8 +149,9 @@ pub async fn download_stdout(
             .write_all(&bytes)
             .await
             .map_err(|err| err.to_string())?;
-        ctx.progress(id, bytes.len() as u64);
+        progress.add(ctx, bytes.len());
     }
+    progress.finish(ctx);
     stdout.flush().await.map_err(|err| err.to_string())?;
     Ok(Outcome::Done)
 }
@@ -135,6 +167,7 @@ async fn download_whole(
     let mut file = tokio::fs::File::create(path)
         .await
         .map_err(|err| err.to_string())?;
+    let mut progress = ChunkedProgress::new(id);
     while let Some(bytes) = output
         .body
         .try_next()
@@ -145,8 +178,9 @@ async fn download_whole(
         file.write_all(&bytes)
             .await
             .map_err(|err| err.to_string())?;
-        ctx.progress(id, bytes.len() as u64);
+        progress.add(ctx, bytes.len());
     }
+    progress.finish(ctx);
     file.flush().await.map_err(|err| err.to_string())
 }
 
@@ -193,6 +227,7 @@ async fn download_ranges(
             let mut part = checksum.as_ref().map(|checksum| checksum.part(offset));
             let mut position = offset;
             let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
+            let mut progress = ChunkedProgress::new(id);
             loop {
                 let bytes = output
                     .body
@@ -202,6 +237,7 @@ async fn download_ranges(
                 if let Some(bytes) = &bytes {
                     ctx.limit(bytes.len()).await;
                     buffer.extend_from_slice(bytes);
+                    progress.add(&ctx, bytes.len());
                 }
                 if buffer.len() >= WRITE_BUFFER_SIZE || bytes.is_none() && !buffer.is_empty() {
                     // The write is not interrupted by the cancellation of the
@@ -212,13 +248,13 @@ async fn download_ranges(
                         part.update(&buffer);
                     }
                     position += buffer.len() as u64;
-                    ctx.progress(id, buffer.len() as u64);
                     buffer.clear();
                 }
                 if bytes.is_none() {
                     break;
                 }
             }
+            progress.finish(&ctx);
             drop(permit);
             if let Some(part) = part {
                 parts

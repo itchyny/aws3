@@ -1,12 +1,16 @@
+use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::task::{Poll, ready};
 
 use aws_sdk_s3::config::RequestChecksumCalculation;
 use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadOutput;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
 use aws_smithy_checksums::ChecksumAlgorithm as Checksums;
-use aws_smithy_types::body::SdkBody;
+use aws_smithy_types::body::{Error as BoxError, SdkBody};
+use bytes::Bytes;
+use http_body::{Body, Frame, SizeHint};
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinSet;
 
@@ -50,10 +54,8 @@ pub async fn upload_file(
     let size = metadata.len();
     let content_type = content_type(ctx, path);
     if size < ctx.config.multipart_threshold {
-        let body = file_body(ctx, path, 0, size).await?;
-        let outcome = put_object(ctx, bucket, key, body, size, content_type).await?;
-        ctx.progress(id, size);
-        return Ok(outcome);
+        let body = file_body(ctx, id, path, 0, size).await?;
+        return put_object(ctx, bucket, key, body, size, content_type).await;
     }
     let chunk_size = adjust_chunk_size(ctx.config.multipart_chunksize, Some(size));
     let upload = MultipartUpload::create(ctx, bucket, key, content_type).await?;
@@ -70,10 +72,8 @@ pub async fn upload_file(
         let length = chunk_size.min(size - offset);
         let (ctx, upload, path) = (ctx.clone(), upload.clone(), path.to_owned());
         parts.spawn(async move {
-            let body = file_body(&ctx, &path, offset, length).await?;
-            let part = upload.upload_part(&ctx, number, body, length).await?;
-            ctx.progress(id, length);
-            Ok(part)
+            let body = file_body(&ctx, id, &path, offset, length).await?;
+            upload.upload_part(&ctx, number, body, length).await
         });
         offset += length;
         number += 1;
@@ -169,7 +169,8 @@ fn checksum(algorithm: &ChecksumAlgorithm, data: &[&[u8]]) -> Option<String> {
 /// Returns the body of the range of the file, which is read on sending
 /// within the bandwidth.
 async fn file_body(
-    ctx: &Context,
+    ctx: &Arc<Context>,
+    id: TransferId,
     path: &str,
     offset: u64,
     length: u64,
@@ -193,7 +194,64 @@ async fn file_body(
         Some(limiter) => limiter.stream(stream),
         None => stream,
     };
+    let stream = track_progress(ctx, id, stream);
     Ok(UploadBody { stream, checksum })
+}
+
+/// Reports the progress of the stream as it is sent, where the bytes sent
+/// again on retries are reported only beyond the bytes already reported.
+fn track_progress(ctx: &Arc<Context>, id: TransferId, stream: ByteStream) -> ByteStream {
+    let ctx = ctx.clone();
+    let reported = Arc::new(AtomicU64::new(0));
+    stream.map(move |body| {
+        SdkBody::from_body_1_x(ProgressBody {
+            inner: body,
+            ctx: ctx.clone(),
+            id,
+            sent: 0,
+            reported: reported.clone(),
+        })
+    })
+}
+
+/// The body which reports the progress of the data of the inner body.
+struct ProgressBody {
+    inner: SdkBody,
+    ctx: Arc<Context>,
+    id: TransferId,
+    /// The bytes sent in this attempt.
+    sent: u64,
+    /// The bytes reported in all the attempts.
+    reported: Arc<AtomicU64>,
+}
+
+impl Body for ProgressBody {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+        let this = self.get_mut();
+        let frame = ready!(Pin::new(&mut this.inner).poll_frame(cx));
+        if let Some(Ok(frame)) = &frame {
+            this.sent += frame.data_ref().map_or(0, |data| data.len() as u64);
+            let reported = this.reported.fetch_max(this.sent, Ordering::Relaxed);
+            if this.sent > reported {
+                this.ctx.progress(this.id, this.sent - reported);
+            }
+        }
+        Poll::Ready(frame)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        Body::size_hint(&self.inner)
+    }
 }
 
 /// Reads the range of the file, to compute the checksum before sending.
