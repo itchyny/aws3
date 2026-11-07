@@ -1,4 +1,18 @@
 # Changelog
+## [v0.2.0](https://github.com/itchyny/aws3/compare/v0.1.0..v0.2.0) (2026-11-07)
+* support `--tags` option to set tags on the objects uploaded from local paths
+* support `--debug` option to write the logs of the requests and the responses
+* parse `--metadata` option in the shorthand syntax with lists, maps, quotes, and parameter
+  files, and reject the values which are not strings and the metadata with non-ASCII
+  characters
+* copy annotations of the objects on multipart copies with `--copy-props all`
+* presign URLs of Multi-Region Access Points with any expirations
+* reject `mb`, `sync`, and case conflict detection on directory buckets
+* retry the responses of errors with the 200 status code, and report the retries and the
+  reason phrases of the status codes in the error messages
+* report the URLs of the requests on connection and TLS errors
+* report the progress of uploads and downloads more frequently
+
 ## [v0.1.0](https://github.com/itchyny/aws3/compare/b09d382..v0.1.0) (2026-11-04)
 * initial implementation of the command compatible with `aws s3`
 * implement all the subcommands of `aws s3`: `ls`, `cp`, `mv`, `rm`, `sync`, `mb`, `rb`,
