@@ -10,7 +10,12 @@ use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::timeout::TimeoutConfig;
 use aws_sdk_s3::config::{ConfigBag, Intercept, RuntimeComponents};
 use aws_smithy_runtime_api::box_error::BoxError;
-use aws_smithy_runtime_api::client::interceptors::context::BeforeTransmitInterceptorContextMut;
+use aws_smithy_runtime_api::client::interceptors::context::{
+    BeforeTransmitInterceptorContextMut, FinalizerInterceptorContextMut, InterceptorContext,
+};
+use aws_smithy_runtime_api::client::retries::RequestAttempts;
+use aws_smithy_runtime_api::client::retries::classifiers::{ClassifyRetry, RetryAction};
+use aws_smithy_types::retry::RetryConfig;
 
 use crate::cli::GlobalArgs;
 use aws_types::service_config::ServiceConfigKey;
@@ -121,6 +126,64 @@ impl Intercept for UnsignedPayload {
     }
 }
 
+/// The retries of a request, which is added to the extensions of the last
+/// response to report the errors like `(reached max retries: 2)`.
+#[derive(Debug, Clone, Copy)]
+pub struct Retries {
+    pub retries: u32,
+    pub max_attempts_reached: bool,
+}
+
+/// Records the retries of the requests to the responses.
+#[derive(Debug)]
+struct RecordRetries;
+
+impl Intercept for RecordRetries {
+    fn name(&self) -> &'static str {
+        "RecordRetries"
+    }
+
+    fn modify_before_attempt_completion(
+        &self,
+        context: &mut FinalizerInterceptorContextMut<'_>,
+        _components: &RuntimeComponents,
+        config: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        let attempts = config.load::<RequestAttempts>().map_or(1, |a| a.attempts());
+        let max_attempts = config.load::<RetryConfig>().map_or(1, |c| c.max_attempts());
+        if let Some(response) = context.response_mut() {
+            response.add_extension(Retries {
+                retries: attempts.saturating_sub(1),
+                max_attempts_reached: attempts >= max_attempts,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Retries the errors of the responses with the 200 status code, e.g. the
+/// bodies which are not XML or are errors, like `_handle_200_error` of
+/// botocore which handles them as 500 errors.
+#[derive(Debug)]
+struct Retry200Errors;
+
+impl ClassifyRetry for Retry200Errors {
+    fn classify_retry(&self, ctx: &InterceptorContext) -> RetryAction {
+        let is_200 = ctx
+            .response()
+            .is_some_and(|response| response.status().as_u16() == 200);
+        if is_200 && matches!(ctx.output_or_error(), Some(Err(_))) {
+            RetryAction::server_error()
+        } else {
+            RetryAction::NoActionIndicated
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "Retry200Errors"
+    }
+}
+
 /// Returns the endpoint URL specific to S3, i.e. `AWS_ENDPOINT_URL_S3` or the
 /// `s3` service in the `services` section of the config file.
 fn s3_endpoint_url(sdk: &SdkConfig) -> Option<String> {
@@ -139,7 +202,9 @@ pub fn new_client(config: &Config, region: Option<&str>) -> Client {
     let mut builder = aws_sdk_s3::config::Builder::from(&config.sdk)
         .force_path_style(force_path_style(config))
         .accelerate(config.s3.use_accelerate_endpoint)
-        .disable_multi_region_access_points(config.s3.disable_multiregion_access_points);
+        .disable_multi_region_access_points(config.s3.disable_multiregion_access_points)
+        .interceptor(RecordRetries)
+        .retry_classifier(Retry200Errors);
     builder.set_use_arn_region(config.s3.use_arn_region);
     if config.s3.payload_signing_enabled == Some(false) {
         builder = builder.interceptor(UnsignedPayload);

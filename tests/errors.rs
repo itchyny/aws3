@@ -40,6 +40,80 @@ fn connection_refused() {
     );
 }
 
+/// Starts the server responding to every request with the status and the body,
+/// and returns the endpoint and the counter of the requests.
+fn serve(
+    status: &'static str,
+    body: &'static str,
+) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = count.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut reader = BufReader::new(&stream);
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let _ = write!(
+                &stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    (endpoint, count)
+}
+
+#[test]
+fn retried_errors() {
+    let env = Env::new();
+    // The errors of the responses with the 200 status code are retried as 500
+    // errors, and reported with the retries and the reason phrase.
+    for (status, body, attempts, expected, requests) in [
+        (
+            "200 OK",
+            "not xml",
+            "3",
+            "An error occurred (500) when calling the ListObjectsV2 operation \
+             (reached max retries: 2): Internal Server Error",
+            3,
+        ),
+        (
+            "503 Service Unavailable",
+            "<Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>",
+            "2",
+            "An error occurred (SlowDown) when calling the ListObjectsV2 operation \
+             (reached max retries: 1): Please reduce your request rate.",
+            2,
+        ),
+        (
+            "404 Not Found",
+            "nope",
+            "3",
+            "An error occurred (404) when calling the ListObjectsV2 operation: Not Found",
+            1,
+        ),
+    ] {
+        let (endpoint, count) = serve(status, body);
+        let result = env.run_with_env(
+            &["ls", "s3://bucket/", "--endpoint-url", &endpoint],
+            &[("AWS_MAX_ATTEMPTS", attempts)],
+        );
+        assert_eq!(result.code, 254, "{status}");
+        assert!(result.stderr.contains(expected), "{}", result.stderr);
+        assert_eq!(
+            count.load(std::sync::atomic::Ordering::SeqCst),
+            requests,
+            "{status}"
+        );
+    }
+}
+
 #[test]
 fn no_credentials() {
     let env = Env::new();

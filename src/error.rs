@@ -5,6 +5,7 @@ use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 
 use crate::cli::ErrorFormat;
+use crate::client;
 use crate::errorformat;
 
 /// Exit code of the AWS CLI on parameter validation errors.
@@ -72,24 +73,34 @@ impl Error {
     {
         match &err {
             SdkError::ServiceError(service_err) => {
-                let status = service_err.raw().status().as_u16();
-                let inner = service_err.err();
-                // Responses of HEAD requests have no body, so the AWS CLI
-                // reports the status code and the reason phrase.
-                let (code, message) = if operation.starts_with("Head") {
-                    (status.to_string(), reason_phrase(status).to_owned())
-                } else {
-                    (
-                        inner
-                            .code()
-                            .map_or_else(|| status.to_string(), str::to_owned),
-                        inner.message().unwrap_or("Unknown").to_owned(),
-                    )
+                let raw = service_err.raw();
+                // The errors of the responses with the 200 status code are
+                // handled as 500 errors like botocore.
+                let status = match raw.status().as_u16() {
+                    200 => 500,
+                    status => status,
                 };
+                let inner = service_err.err();
+                // The responses without the error codes, e.g. of HEAD requests
+                // or whose bodies are not XML, are reported by the status code
+                // and the reason phrase like botocore.
+                let (code, message) = match inner.code() {
+                    Some(code) if !operation.starts_with("Head") => (
+                        code.to_owned(),
+                        inner.message().unwrap_or("Unknown").to_owned(),
+                    ),
+                    _ => (status.to_string(), reason_phrase(status).to_owned()),
+                };
+                let retries = raw
+                    .extension::<client::Retries>()
+                    .filter(|retries| retries.max_attempts_reached && retries.retries > 0)
+                    .filter(|_| is_retryable(status, &code))
+                    .map(|retries| format!(" (reached max retries: {})", retries.retries))
+                    .unwrap_or_default();
                 Self {
                     code: EXIT_SERVICE,
                     message: format!(
-                        "An error occurred ({code}) when calling the {operation} operation: {message}"
+                        "An error occurred ({code}) when calling the {operation} operation{retries}: {message}"
                     ),
                     info: Some(ErrorInfo {
                         kind: ErrorKind::Client,
@@ -218,22 +229,84 @@ pub fn has_status_code<E>(err: &SdkError<E, HttpResponse>, status: u16) -> bool 
     matches!(err, SdkError::ServiceError(err) if err.raw().status().as_u16() == status)
 }
 
+/// Returns whether the error is retried by the standard retry mode, like
+/// `TransientRetryableChecker` and `ThrottledRetryableChecker` of botocore.
+fn is_retryable(status: u16, code: &str) -> bool {
+    matches!(status, 500 | 502 | 503 | 504)
+        || matches!(
+            code,
+            "Throttling"
+                | "ThrottlingException"
+                | "ThrottledException"
+                | "RequestThrottledException"
+                | "TooManyRequestsException"
+                | "ProvisionedThroughputExceededException"
+                | "TransactionInProgressException"
+                | "RequestLimitExceeded"
+                | "BandwidthLimitExceeded"
+                | "LimitExceededException"
+                | "RequestThrottled"
+                | "SlowDown"
+                | "PriorRequestNotComplete"
+                | "EC2ThrottledException"
+                | "RequestTimeout"
+                | "RequestTimeoutException"
+        )
+}
+
+/// Returns the reason phrase of the status code, like `http.client.responses`
+/// of Python.
 fn reason_phrase(status: u16) -> &'static str {
     match status {
+        300 => "Multiple Choices",
         301 => "Moved Permanently",
+        302 => "Found",
+        303 => "See Other",
         304 => "Not Modified",
+        305 => "Use Proxy",
         307 => "Temporary Redirect",
+        308 => "Permanent Redirect",
         400 => "Bad Request",
+        401 => "Unauthorized",
+        402 => "Payment Required",
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        406 => "Not Acceptable",
+        407 => "Proxy Authentication Required",
+        408 => "Request Timeout",
         409 => "Conflict",
+        410 => "Gone",
+        411 => "Length Required",
         412 => "Precondition Failed",
-        416 => "Requested Range Not Satisfiable",
+        413 => "Content Too Large",
+        414 => "URI Too Long",
+        415 => "Unsupported Media Type",
+        416 => "Range Not Satisfiable",
+        417 => "Expectation Failed",
+        418 => "I'm a Teapot",
+        421 => "Misdirected Request",
+        422 => "Unprocessable Content",
+        423 => "Locked",
+        424 => "Failed Dependency",
+        425 => "Too Early",
+        426 => "Upgrade Required",
+        428 => "Precondition Required",
+        429 => "Too Many Requests",
+        431 => "Request Header Fields Too Large",
+        451 => "Unavailable For Legal Reasons",
         500 => "Internal Server Error",
         501 => "Not Implemented",
+        502 => "Bad Gateway",
         503 => "Service Unavailable",
-        _ => "Unknown",
+        504 => "Gateway Timeout",
+        505 => "HTTP Version Not Supported",
+        506 => "Variant Also Negotiates",
+        507 => "Insufficient Storage",
+        508 => "Loop Detected",
+        510 => "Not Extended",
+        511 => "Network Authentication Required",
+        _ => "",
     }
 }
 
