@@ -21,6 +21,28 @@ fn invalid_arguments() {
 }
 
 #[test]
+fn completion() {
+    let env = Env::new();
+    for shell in ["bash", "zsh", "fish", "elvish", "powershell"] {
+        let result = env.run(&["completion", shell]).success();
+        assert!(result.stdout.contains("recursive"), "{shell}");
+        // The completion subcommand is hidden from the completions.
+        assert!(
+            !result.stdout.contains("Generate the completion script"),
+            "{shell}"
+        );
+    }
+    let result = env.run(&["--help"]).success();
+    assert!(!result.stdout.contains("completion"));
+    let result = env
+        .run_with_closed_stdout(&["completion", "bash"])
+        .success();
+    assert_eq!(result.stderr, "");
+    let result = env.run(&["completion", "tcsh"]);
+    assert_eq!(result.code, 252);
+}
+
+#[test]
 fn connection_refused() {
     let env = Env::new();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

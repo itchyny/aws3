@@ -65,6 +65,9 @@ pub enum Command {
     Presign(PresignArgs),
     /// Set the website configuration for a bucket
     Website(WebsiteArgs),
+    /// Generate the completion script of the shell
+    #[command(hide = true)]
+    Completion(CompletionArgs),
 }
 
 impl Command {
@@ -333,6 +336,37 @@ pub struct WebsiteArgs {
     /// The object key name to use when a 4XX class error occurs
     #[arg(long, value_name = "DOCUMENT")]
     pub error_document: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CompletionArgs {
+    #[arg(value_name = "SHELL")]
+    pub shell: clap_complete::Shell,
+}
+
+impl CompletionArgs {
+    /// Prints the completion script, ignoring the errors of writing like the
+    /// other outputs of the commands.
+    pub fn run(&self) -> std::process::ExitCode {
+        use std::io::Write;
+        // The generators include the hidden subcommands, so the command is
+        // rebuilt without them.
+        let full = Cli::command();
+        let mut command = clap::Command::new(env!("CARGO_PKG_NAME"))
+            .version(env!("CARGO_PKG_VERSION"))
+            .propagate_version(true)
+            .args(full.get_arguments().cloned())
+            .subcommands(full.get_subcommands().filter(|c| !c.is_hide_set()).cloned());
+        let mut script = Vec::new();
+        clap_complete::generate(
+            self.shell,
+            &mut command,
+            env!("CARGO_PKG_NAME"),
+            &mut script,
+        );
+        let _ = std::io::stdout().write_all(&script);
+        std::process::ExitCode::SUCCESS
+    }
 }
 
 /// Arguments shared by cp, mv and sync.
