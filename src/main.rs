@@ -25,8 +25,11 @@ fn main() -> ExitCode {
     if cli.global.debug {
         debug::init();
     }
+    // The file operations of the transfers run on the blocking threads, which
+    // spawn up to 512 threads by default and waste CPU time and memory.
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .max_blocking_threads(16)
         .build()
         .expect("failed to build the runtime");
     let code = runtime.block_on(run(&cli));
