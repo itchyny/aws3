@@ -69,42 +69,46 @@ cargo install --git https://github.com/itchyny/aws3
 ## Benchmark
 
 The commands were run against S3 in `ap-northeast-1` over HTTPS from a home
-network, on Apple M4 (10 cores, 24 GiB) with macOS 27.2. The results are the
-means of five runs, or two or three runs for the files of 1 GiB, of AWS CLI
-2.39.3, s5cmd 2.3.0, s6cmd 0.0.6 and aws3, with the default settings.
+network, on Apple M4 (10 cores, 24 GiB) with macOS 27.2. The tools are AWS CLI
+2.39.6, s5cmd 2.3.0, s7cmd 1.8.6 and aws3 0.2.0, with the default settings of
+each tool, and with the same concurrency of 10 and 64. The results are the
+means of five runs, or three runs for the files of 256 MiB, where the tools run
+in turns so that the changes of the network affect every tool evenly.
 
-aws3 uploads and downloads many small files four to five times faster than
-`aws s3` with about half the memory. The transfers of large files are limited
-by the bandwidth of the network, where aws3 uses about a fifth of the memory
-of `aws s3`.
+By default, `aws s3` transfers with up to 10 connections and parts of 8 MiB,
+aws3 transfers up to 64 files at once and up to 10 parts of 8 MiB of each file,
+s5cmd transfers up to 256 files at once and up to 5 parts of 50 MiB of each
+file, and s7cmd transfers up to 16 files at once and up to 16 parts of 8 MiB of
+each file. The same concurrency is set by `max_concurrent_requests` in the `s3`
+section for `aws s3` and aws3, `--numworkers` and `--concurrency` for s5cmd, and
+`--worker-size` and `--max-parallel-uploads` for s7cmd, with the part size of
+8 MiB.
 
-<details>
-<summary>Results</summary>
+The listing of objects does not depend on the concurrency. aws3 lists 10000
+objects about 1.5 times faster than `aws s3`, as fast as the other tools, with
+the least CPU time and memory of all, which are a fifth of `aws s3`.
 
-| Operation | Tool | Wall time | CPU time | Memory |
-|---|---|--:|--:|--:|
-| `ls` 1000 objects | aws s3 | 0.52 s | 0.30 s | 82.9 MiB |
-| | aws3 | 0.27 s | 0.05 s | 14.6 MiB |
-| | s5cmd | 0.27 s | 0.08 s | 29.8 MiB |
-| | s6cmd | 0.24 s | 0.05 s | 26.4 MiB |
-| Upload 1000 files of 16 KiB | aws s3 | 6.97 s | 3.05 s | 92.0 MiB |
-| | aws3 | 1.35 s | 1.01 s | 47.9 MiB |
-| | s5cmd | 1.99 s | 0.94 s | 88.4 MiB |
-| | s6cmd | 2.57 s | 1.17 s | 132.6 MiB |
-| Download 1000 files of 16 KiB | aws s3 | 5.41 s | 2.89 s | 95.4 MiB |
-| | aws3 | 1.22 s | 1.39 s | 47.0 MiB |
-| | s5cmd | 2.79 s | 1.02 s | 93.3 MiB |
-| | s6cmd | 2.55 s | 1.13 s | 119.7 MiB |
-| Upload a file of 1 GiB | aws s3 | 17.80 s | 5.75 s | 242.6 MiB |
-| | aws3 | 17.68 s | 3.87 s | 46.5 MiB |
-| | s5cmd | 17.69 s | 4.50 s | 32.4 MiB |
-| | s6cmd | 17.49 s | 3.15 s | 31.9 MiB |
-| Download a file of 1 GiB | aws s3 | 9.57 s | 4.86 s | 248.9 MiB |
-| | aws3 | 9.78 s | 2.86 s | 58.2 MiB |
-| | s5cmd | 9.55 s | 2.90 s | 29.4 MiB |
-| | s6cmd | 9.01 s | 4.72 s | 29.6 MiB |
+With the default settings, aws3 transfers many small files four to five times
+faster than `aws s3`, as fast as s5cmd for downloads and a little slower for
+uploads, with about half the memory of `aws s3` and s5cmd. s7cmd is slower with
+its concurrency of 16, and uses about 200 MiB of memory. With the same
+concurrency of 10, the transfers of many small files take about the same time
+with every tool, where aws3 uses the least CPU time and memory, with a third of
+the CPU time of `aws s3` for uploads. With the concurrency of 64, aws3 and s5cmd
+transfer them four to five times faster than `aws s3`, which does not get
+faster.
 
-</details>
+The transfers of large files are limited by the bandwidth of the network, where
+aws3 uses the least CPU time with the default settings, and a fifth to a third
+of the memory of `aws s3`. aws3, s5cmd and s7cmd transfer large files slower
+with 64 concurrent parts than with 10 and use more memory, so aws3 transfers up
+to 64 files but up to 10 parts by default. s7cmd uses about 500 MiB of memory
+for a file of 256 MiB with the concurrency of 64.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wiki/itchyny/aws3/benchmark-dark.svg">
+  <img alt="Benchmark of aws s3, aws3, s5cmd and s7cmd" src="https://raw.githubusercontent.com/wiki/itchyny/aws3/benchmark-light.svg">
+</picture>
 
 ## Bug Tracker
 
