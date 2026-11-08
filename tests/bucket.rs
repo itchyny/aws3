@@ -149,6 +149,15 @@ fn website_unsupported() {
 }
 
 #[test]
+fn closed_stdout() {
+    let env = Env::new();
+    for args in [&["mb", "s3://bucket"][..], &["presign", "s3://bucket/key"]] {
+        let result = env.run_with_closed_stdout(args).success();
+        assert_eq!(result.stderr, "");
+    }
+}
+
+#[test]
 fn presign_expires_in_out_of_range() {
     let env = Env::new();
     // The URLs are pre-signed like the AWS CLI, even though S3 rejects them.

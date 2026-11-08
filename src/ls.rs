@@ -19,15 +19,25 @@ pub async fn run(args: &LsArgs, global: &GlobalArgs) -> Result<ExitCode, Error> 
         validate_bucket_name(bucket).map_err(Error::param_validation)?;
     }
     let mut lister = Lister::new(args.human_readable);
-    if bucket.is_empty() {
-        lister.list_buckets(&config, args).await?;
-    } else {
-        lister.list_objects(&config, bucket, key, args).await?;
+    let result: Result<(), Error> = async {
+        if bucket.is_empty() {
+            lister.list_buckets(&config, args).await?;
+        } else {
+            lister.list_objects(&config, bucket, key, args).await?;
+        }
+        if args.summarize {
+            lister.print_summary()?;
+        }
+        lister.out.flush()?;
+        Ok(())
     }
-    if args.summarize {
-        lister.print_summary()?;
+    .await;
+    // The listing stops without errors when the reader of the output has gone
+    // away, like piping to `head`.
+    if lister.out.get_ref().closed {
+        return Ok(ExitCode::SUCCESS);
     }
-    lister.out.flush()?;
+    result?;
     // Listing a key reports failure when nothing matches.
     Ok(if !key.is_empty() && !lister.found {
         ExitCode::FAILURE
@@ -37,7 +47,7 @@ pub async fn run(args: &LsArgs, global: &GlobalArgs) -> Result<ExitCode, Error> 
 }
 
 struct Lister {
-    out: BufWriter<Stdout>,
+    out: BufWriter<Output>,
     human_readable: bool,
     found: bool,
     total_objects: u64,
@@ -47,7 +57,10 @@ struct Lister {
 impl Lister {
     fn new(human_readable: bool) -> Self {
         Self {
-            out: BufWriter::new(io::stdout()),
+            out: BufWriter::new(Output {
+                stdout: io::stdout(),
+                closed: false,
+            }),
             human_readable,
             found: false,
             total_objects: 0,
@@ -158,6 +171,33 @@ impl Lister {
 }
 
 /// Formats the date time in the local time zone.
+/// The standard output which records whether the reader has gone away.
+struct Output {
+    stdout: Stdout,
+    closed: bool,
+}
+
+impl Output {
+    fn check<T>(&mut self, result: io::Result<T>) -> io::Result<T> {
+        if let Err(err) = &result {
+            self.closed |= err.kind() == io::ErrorKind::BrokenPipe;
+        }
+        result
+    }
+}
+
+impl Write for Output {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let result = self.stdout.write(buf);
+        self.check(result)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let result = self.stdout.flush();
+        self.check(result)
+    }
+}
+
 fn format_date_time(date_time: Option<&DateTime>) -> String {
     date_time
         .and_then(|date_time| chrono::DateTime::from_timestamp(date_time.secs(), 0))

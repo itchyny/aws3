@@ -39,6 +39,17 @@ fn ls_objects() {
 }
 
 #[test]
+fn ls_closed_stdout() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    for args in [&["ls"][..], &["ls", "s3://bucket", "--summarize"]] {
+        let result = env.run_with_closed_stdout(args).success();
+        assert_eq!(result.stderr, "");
+    }
+}
+
+#[test]
 fn ls_url_encoded_keys() {
     let env = Env::new();
     env.bucket("bucket");

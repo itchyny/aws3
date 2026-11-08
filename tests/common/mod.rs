@@ -322,6 +322,19 @@ s3 =
         Result::new(child.wait_with_output().unwrap())
     }
 
+    /// Runs aws3 with the arguments and the standard output closed by the
+    /// reader, like piping to `head`.
+    pub fn run_with_closed_stdout(&self, args: &[&str]) -> Result {
+        let mut child = self
+            .command(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take());
+        Result::new(child.wait_with_output().unwrap())
+    }
+
     /// Writes the config file of the transfer settings.
     pub fn config(&self, content: &str) -> PathBuf {
         let path = self.work.path().join(".aws-config");
