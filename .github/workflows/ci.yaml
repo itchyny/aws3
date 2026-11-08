@@ -49,14 +49,16 @@ jobs:
         run: sudo apt-get install gcc-aarch64-linux-gnu
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2.9.3
+      - name: Format
+        run: cargo fmt --check
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Test
-        run: cargo test
+        run: cargo test --locked
       - name: Build
         run: |
           read -ra targets <<< "$TARGETS"
-          cargo build --release "${targets[@]/#/--target=}"
+          cargo build --locked --release "${targets[@]/#/--target=}"
       - name: Build artifacts
         run: |
           name=${GITHUB_REPOSITORY#*/}
