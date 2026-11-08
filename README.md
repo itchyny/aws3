@@ -17,9 +17,10 @@ All the subcommands of `aws s3` are supported: `ls`, `cp`, `mv`, `rm`,
 and exit codes.
 
 ```sh
-aws3 ls s3://bucket/prefix/
+aws3 ls s3://bucket/prefix/ --recursive --summarize
 aws3 cp ./dir s3://bucket/prefix/ --recursive --exclude '*.tmp'
-aws3 sync s3://bucket/prefix/ ./dir --delete
+aws3 sync s3://bucket/prefix/ ./dir --delete --dryrun
+aws3 rm s3://bucket/prefix/ --recursive
 ```
 
 The credentials, the region and the transfer settings in the `s3` section are
@@ -28,6 +29,7 @@ CLI.
 
 ### Differences from the AWS CLI
 
+- Only the commands of `aws s3` are supported, not `aws s3api`.
 - The error messages are prefixed with `aws3:` instead of `aws:`.
 - The root certificates of Mozilla are used for TLS, unless a CA bundle is
   specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
@@ -36,12 +38,48 @@ CLI.
   multipart transfer are up to 10 by default, which use the bandwidth with
   less CPU.
 
+## Installation
+
+### Prebuilt binaries
+
+Download the archive for your platform from the
+[releases page](https://github.com/itchyny/aws3/releases).
+
+### Using cargo-binstall
+
+With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), the
+prebuilt binary for your platform is installed from the releases page.
+
+```sh
+cargo binstall aws3
+```
+
+### Build from source
+
+```sh
+cargo install aws3
+```
+
+To install the latest development version:
+
+```sh
+cargo install --git https://github.com/itchyny/aws3
+```
+
 ## Benchmark
 
 The commands were run against S3 in `ap-northeast-1` over HTTPS from a home
 network, on Apple M4 (10 cores, 24 GiB) with macOS 27.2. The results are the
 means of five runs, or two or three runs for the files of 1 GiB, of AWS CLI
 2.39.3, s5cmd 2.3.0, s6cmd 0.0.6 and aws3, with the default settings.
+
+aws3 uploads and downloads many small files four to five times faster than
+`aws s3` with about half the memory. The transfers of large files are limited
+by the bandwidth of the network, where aws3 uses about a fifth of the memory
+of `aws s3`.
+
+<details>
+<summary>Results</summary>
 
 | Operation | Tool | Wall time | CPU time | Memory |
 |---|---|--:|--:|--:|
@@ -66,30 +104,7 @@ means of five runs, or two or three runs for the files of 1 GiB, of AWS CLI
 | | s5cmd | 9.55 s | 2.90 s | 29.4 MiB |
 | | s6cmd | 9.01 s | 4.72 s | 29.6 MiB |
 
-The transfers of the files of 1 GiB are limited by the bandwidth of the
-network, where the tools take about the same time.
-
-## Installation
-
-### Prebuilt binaries
-
-Download the archive for your platform from the
-[releases page](https://github.com/itchyny/aws3/releases).
-
-### Using cargo-binstall
-
-With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), the
-prebuilt binary for your platform is installed from the releases page.
-
-```sh
-cargo binstall aws3
-```
-
-### Build from source
-
-```sh
-cargo install --git https://github.com/itchyny/aws3
-```
+</details>
 
 ## Bug Tracker
 
