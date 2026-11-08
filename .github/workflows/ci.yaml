@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  NAME: ${{ github.event.repository.name }}
+
 defaults:
   run:
     shell: bash --noprofile --norc -euxo pipefail {0}
@@ -61,18 +64,27 @@ jobs:
         run: |
           read -ra targets <<< "$TARGETS"
           cargo build --locked --release "${targets[@]/#/--target=}"
+      - name: Generate completions
+        run: |
+          read -ra targets <<< "$TARGETS"
+          completion="target/${targets[0]}/release/$NAME completion"
+          mkdir completions
+          $completion zsh > "completions/_$NAME"
+          $completion bash > "completions/$NAME.bash"
+          $completion fish > "completions/$NAME.fish"
+          $completion powershell > "completions/_$NAME.ps1"
+          $completion elvish > "completions/$NAME.elv"
       - name: Build artifacts
         run: |
-          name=${GITHUB_REPOSITORY#*/}
           read -ra targets <<< "$TARGETS"
           for target in "${targets[@]}"; do
-            executable=target/$target/release/$name
+            executable=target/$target/release/$NAME
             if [[ $OS != windows || $target == x86_64-* ]]; then
               "$executable" --version
             fi
-            artifact=$name-$VERSION-$target
+            artifact=$NAME-$VERSION-$target
             mkdir "$artifact"
-            cp README.md CHANGELOG.md LICENSE "$executable" "$artifact"
+            cp -R README.md CHANGELOG.md LICENSE completions "$executable" "$artifact"
             if [[ $OS == windows ]]; then
               powershell Compress-Archive -Path "$artifact" -DestinationPath "$artifact.zip"
             else
@@ -82,7 +94,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: ${{ github.event.repository.name }}_${{ matrix.os }}
+          name: ${{ env.NAME }}_${{ matrix.os }}
           path: '*.zip'
 
   release:
@@ -103,7 +115,7 @@ jobs:
       - name: Create checksums
         run: |
           cd artifacts
-          sha256sum -- *.zip > "${GITHUB_REPOSITORY#*/}-$GITHUB_REF_NAME-checksums.txt"
+          sha256sum -- *.zip > "$NAME-$GITHUB_REF_NAME-checksums.txt"
       - name: Create release
         run: |
           sed -n '/\['"${GITHUB_REF_NAME//./[.]}"']/,/^$/{//!p;}' CHANGELOG.md |
