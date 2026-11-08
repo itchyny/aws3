@@ -1,3 +1,4 @@
+use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime};
 
@@ -77,7 +78,7 @@ pub async fn run(args: &PresignArgs, global: &GlobalArgs) -> Result<ExitCode, Er
                 Error::param_validation("`expires_in` must be no longer than one week")
             })?;
     }
-    println!("{}", reorder_params(&url));
+    let _ = writeln!(io::stdout(), "{}", reorder_params(&url));
     Ok(ExitCode::SUCCESS)
 }
 

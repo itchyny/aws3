@@ -1,5 +1,6 @@
 //! The bucket commands, i.e. mb, rb and website.
 
+use std::io::{self, Write};
 use std::process::ExitCode;
 
 use aws_sdk_s3::types::{
@@ -71,7 +72,7 @@ pub async fn mb(args: &MbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
         .await;
     match result {
         Ok(_) => {
-            println!("make_bucket: {bucket}");
+            let _ = writeln!(io::stdout(), "make_bucket: {bucket}");
             Ok(ExitCode::SUCCESS)
         }
         Err(err) => {
@@ -115,7 +116,7 @@ pub async fn rb(args: &RbArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
         .await;
     match result {
         Ok(_) => {
-            println!("remove_bucket: {bucket}");
+            let _ = writeln!(io::stdout(), "remove_bucket: {bucket}");
             Ok(ExitCode::SUCCESS)
         }
         Err(err) => {
