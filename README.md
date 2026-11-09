@@ -25,7 +25,10 @@ aws3 rm s3://bucket/prefix/ --recursive
 
 The credentials, the region and the transfer settings in the `s3` section are
 loaded from the same environment variables and configuration files as the AWS
-CLI.
+CLI. The requests are sent through the proxies of `HTTP_PROXY` and
+`HTTPS_PROXY` except for the hosts of `NO_PROXY`, also in lowercase, with the
+credentials in the URLs of the proxies. The certificates of the proxies of
+HTTPS are verified with the same CA bundle as the endpoints.
 
 ### Differences from the AWS CLI
 
