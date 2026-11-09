@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use aws_config::{BehaviorVersion, SdkConfig};
@@ -22,6 +23,7 @@ use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::retries::classifiers::{ClassifyRetry, RetryAction};
 use aws_smithy_types::retry::RetryConfig;
+use hyper_util::client::proxy::matcher::Matcher;
 
 use crate::cli::GlobalArgs;
 use aws_types::service_config::ServiceConfigKey;
@@ -192,10 +194,13 @@ impl ClassifyRetry for Retry200Errors {
 }
 
 /// The error of the connection of a request with its URL, which the AWS CLI
-/// reports, e.g. `Could not connect to the endpoint URL: "https://..."`.
+/// reports, e.g. `Could not connect to the endpoint URL: "https://..."`, and
+/// the URL of the proxy of the request, e.g. `Failed to connect to proxy URL:
+/// "http://..."`.
 #[derive(Debug)]
 pub struct ConnectionError {
     pub url: String,
+    pub proxy_url: Option<String>,
     source: BoxError,
 }
 
@@ -219,6 +224,26 @@ fn with_request_urls(inner: SharedHttpClient) -> SharedHttpClient {
             inner.http_connector(settings, components),
         ))
     })
+}
+
+/// The proxies of the environment variables, which the HTTP clients also use.
+static PROXIES: LazyLock<Matcher> = LazyLock::new(Matcher::from_env);
+
+/// Returns the URL of the proxy of the request in the same way as the AWS CLI,
+/// which masks the credentials.
+fn proxy_url(uri: &str) -> Option<String> {
+    let intercept = PROXIES.intercept(&uri.parse().ok()?)?;
+    let proxy = intercept.uri();
+    let credentials = if intercept.basic_auth().is_some() {
+        "***:***@"
+    } else {
+        ""
+    };
+    Some(format!(
+        "{}://{credentials}{}",
+        proxy.scheme_str().unwrap_or("http"),
+        proxy.authority()?
+    ))
 }
 
 /// Returns the URL of the request in the same way as the AWS CLI, which does
@@ -251,6 +276,7 @@ struct RequestUrlConnector(SharedHttpConnector);
 impl HttpConnector for RequestUrlConnector {
     fn call(&self, request: HttpRequest) -> HttpConnectorFuture {
         let url = request_url(request.uri());
+        let proxy_url = proxy_url(request.uri());
         let future = self.0.call(request);
         HttpConnectorFuture::new(async move {
             future.await.map_err(|err| {
@@ -258,6 +284,7 @@ impl HttpConnector for RequestUrlConnector {
                     (err.is_timeout(), err.is_io(), err.is_user(), err.as_other());
                 let source: BoxError = Box::new(ConnectionError {
                     url,
+                    proxy_url,
                     source: err.into_source(),
                 });
                 if timeout {

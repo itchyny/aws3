@@ -129,10 +129,17 @@ impl Error {
                             "SSL validation failed for {} {tls}",
                             connection.url
                         )),
-                        None => Self::new(format!(
-                            "Could not connect to the endpoint URL: \"{}\"",
-                            connection.url
-                        )),
+                        None => match &connection.proxy_url {
+                            // The connections to the servers are made through
+                            // the proxy, which the AWS CLI reports on the failures.
+                            Some(proxy_url) if is_connect(&err) => Self::new(format!(
+                                "Failed to connect to proxy URL: \"{proxy_url}\""
+                            )),
+                            _ => Self::new(format!(
+                                "Could not connect to the endpoint URL: \"{}\"",
+                                connection.url
+                            )),
+                        },
                     },
                     None => Self::new(format!(
                         "Could not connect to the endpoint URL: {}",
@@ -379,6 +386,12 @@ fn endpoint_error(message: &str) -> Error {
         return Error::param_validation(format!("Parameter validation failed:\n{message}"));
     }
     Error::new(message)
+}
+
+/// Returns whether the error occurred on connecting, not on reading the
+/// response.
+fn is_connect(err: &(dyn std::error::Error + 'static)) -> bool {
+    find_source::<hyper_util::client::legacy::Error>(err).is_some_and(|err| err.is_connect())
 }
 
 /// Returns the error of the type in the sources of the error, including the

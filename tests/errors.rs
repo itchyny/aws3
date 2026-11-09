@@ -473,12 +473,39 @@ fn proxy() {
     assert_eq!(requests[2].line, format!("CONNECT {host} HTTP/1.1"));
     assert_eq!(requests[2].auth.as_deref(), Some("Basic dXNlcjpwYXNz"));
 
-    // The requests fail when the proxy is unreachable.
-    let result = env.run_with_env(
-        &["ls", "s3://bucket/"],
-        &[("HTTP_PROXY", "http://127.0.0.1:9")],
-    );
+    // The failures of the connections to the proxy are reported with the URL
+    // of the proxy, whose credentials are masked like the AWS CLI.
+    for args in [
+        &["ls", "s3://bucket/"][..],
+        &["ls", "s3://bucket/", "--no-verify-ssl"],
+    ] {
+        let result = env.run_with_env(args, &[("HTTP_PROXY", "http://user:pass@127.0.0.1:9")]);
+        assert_eq!(result.code, 255, "{}", result.stderr);
+        assert_eq!(
+            result.stderr,
+            "\naws3: [ERROR]: Failed to connect to proxy URL: \"http://***:***@127.0.0.1:9\"\n"
+        );
+    }
+
+    // The timeouts of reading the responses through the proxy are not the
+    // failures of the connections to the proxy.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let envs = [
+        ("AWS_ENDPOINT_URL", endpoint.as_str()),
+        ("HTTP_PROXY", &url),
+    ];
+    let args = ["ls", "s3://bucket/", "--cli-read-timeout", "1"];
+    let result = env.run_with_env(&args, &envs);
     assert_eq!(result.code, 255, "{}", result.stderr);
+    assert!(
+        result
+            .stderr
+            .contains("Could not connect to the endpoint URL"),
+        "{}",
+        result.stderr
+    );
+    drop(listener);
 }
 
 #[test]
