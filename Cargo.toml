@@ -9,7 +9,7 @@ license = "MIT"
 readme = "README.md"
 keywords = ["aws", "s3", "cli"]
 categories = ["command-line-utilities"]
-rust-version = "1.94.1"
+rust-version = "1.95.0"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
