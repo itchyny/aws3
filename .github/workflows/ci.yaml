@@ -51,9 +51,11 @@ jobs:
           rustup target add "${targets[@]}"
       - name: Install musl tools on Linux
         if: startsWith(matrix.os, 'linux')
-        run: sudo apt-get install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format
         run: cargo fmt --check
       - name: Clippy
@@ -92,6 +94,7 @@ jobs:
         with:
           name: ${{ env.NAME }}_${{ matrix.os }}
           path: '*.zip'
+          if-no-files-found: error
 
   release:
     name: Release
