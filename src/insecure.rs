@@ -15,7 +15,7 @@ use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
 use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_types::body::SdkBody;
 use http::Uri;
-use hyper_rustls::HttpsConnector;
+use hyper_rustls::{HttpsConnector, MaybeHttpsStream};
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector as TcpConnector;
 use hyper_util::client::legacy::connect::proxy::Tunnel;
@@ -46,6 +46,13 @@ pub fn http_client(
     let mut tcp = TcpConnector::new();
     tcp.enforce_http(false);
     tcp.set_connect_timeout(connect_timeout);
+    // The connections to the proxies of HTTPS are also not verified, and use
+    // HTTP/1.1 for the CONNECT requests.
+    let proxy = hyper_rustls::HttpsConnectorBuilder::new()
+        .with_tls_config(config.clone())
+        .https_or_http()
+        .enable_http1()
+        .wrap_connector(tcp.clone());
     let https = hyper_rustls::HttpsConnectorBuilder::new()
         .with_tls_config(config)
         .https_or_http()
@@ -53,6 +60,7 @@ pub fn http_client(
         .enable_http2()
         .wrap_connector(ProxyConnector {
             tcp,
+            proxy,
             matcher: Arc::new(Matcher::from_env()),
         });
     // The connector is shared to reuse the connections across the requests.
@@ -102,13 +110,14 @@ impl HttpConnector for Connector {
 #[derive(Clone, Debug)]
 struct ProxyConnector {
     tcp: TcpConnector,
+    proxy: HttpsConnector<TcpConnector>,
     matcher: Arc<Matcher>,
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 impl Service<Uri> for ProxyConnector {
-    type Response = TokioIo<TcpStream>;
+    type Response = MaybeHttpsStream<TokioIo<TcpStream>>;
     type Error = BoxError;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -119,7 +128,7 @@ impl Service<Uri> for ProxyConnector {
     fn call(&mut self, dst: Uri) -> Self::Future {
         match self.matcher.intercept(&dst) {
             Some(intercept) => {
-                let mut tunnel = Tunnel::new(intercept.uri().clone(), self.tcp.clone());
+                let mut tunnel = Tunnel::new(intercept.uri().clone(), self.proxy.clone());
                 if let Some(auth) = intercept.basic_auth() {
                     tunnel = tunnel.with_auth(auth.clone());
                 }
@@ -127,7 +136,7 @@ impl Service<Uri> for ProxyConnector {
             }
             None => {
                 let connecting = self.tcp.call(dst);
-                Box::pin(async move { Ok(connecting.await?) })
+                Box::pin(async move { Ok(MaybeHttpsStream::Http(connecting.await?)) })
             }
         }
     }

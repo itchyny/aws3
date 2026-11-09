@@ -79,7 +79,8 @@ impl Env {
             .unwrap();
         let scheme = if tls { "https" } else { "http" };
         let endpoint = format!("{scheme}://{}", listener.local_addr().unwrap());
-        let acceptor = tls.then(|| tls_acceptor(&work.path().join("ca.pem")));
+        let acceptor =
+            tls.then(|| tls_acceptor(&work.path().join("ca.pem"), &[b"h2", b"http/1.1"]));
         let s3 = {
             let mut builder = S3ServiceBuilder::new(FileSystem::new(storage.path()).unwrap());
             builder.set_auth(SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
@@ -186,7 +187,21 @@ impl Env {
     /// Starts an HTTP proxy, which tunnels the CONNECT requests and forwards
     /// the other requests to the server of the request line.
     pub fn proxy(&self) -> Proxy {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        self.start_proxy(None)
+    }
+
+    /// Starts an HTTPS proxy, whose certificate is signed by a CA in
+    /// `proxy-ca.pem` of the working directory.
+    pub fn tls_proxy(&self) -> Proxy {
+        let acceptor = tls_acceptor(&self.work.path().join("proxy-ca.pem"), &[b"http/1.1"]);
+        self.start_proxy(Some(acceptor))
+    }
+
+    fn start_proxy(&self, acceptor: Option<tokio_rustls::TlsAcceptor>) -> Proxy {
+        use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+        trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
+        impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
+        let scheme = if acceptor.is_some() { "https" } else { "http" };
         let listener = self
             ._runtime
             .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
@@ -200,8 +215,16 @@ impl Env {
                     let Ok((socket, _)) = listener.accept().await else {
                         continue;
                     };
-                    let requests = requests.clone();
+                    let (requests, acceptor) = (requests.clone(), acceptor.clone());
                     tokio::spawn(async move {
+                        let socket: Box<dyn Stream> = match acceptor {
+                            // The handshake fails when the client rejects the certificate.
+                            Some(acceptor) => match acceptor.accept(socket).await {
+                                Ok(socket) => Box::new(socket),
+                                Err(_) => return,
+                            },
+                            None => Box::new(socket),
+                        };
                         let mut client = BufReader::new(socket);
                         let mut head = String::new();
                         loop {
@@ -246,7 +269,11 @@ impl Env {
                 }
             }
         });
-        Proxy { address, requests }
+        Proxy {
+            scheme,
+            address,
+            requests,
+        }
     }
 
     /// Returns the working directory.
@@ -469,7 +496,7 @@ fn encode_keys(xml: &str) -> String {
 
 /// Creates the acceptor of TLS connections with a certificate signed by a new
 /// CA, which is written to the path.
-fn tls_acceptor(ca_path: &Path) -> tokio_rustls::TlsAcceptor {
+fn tls_acceptor(ca_path: &Path, alpn: &[&[u8]]) -> tokio_rustls::TlsAcceptor {
     use rcgen::{BasicConstraints, CertificateParams, CertifiedIssuer, IsCa, KeyPair};
     let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -489,7 +516,7 @@ fn tls_acceptor(ca_path: &Path) -> tokio_rustls::TlsAcceptor {
             rustls::pki_types::PrivateKeyDer::Pkcs8(key.serialize_der().into()),
         )
         .unwrap();
-    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    config.alpn_protocols = alpn.iter().map(|protocol| protocol.to_vec()).collect();
     tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config))
 }
 
@@ -570,8 +597,9 @@ pub fn content(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i * 7 + i / 251) as u8).collect()
 }
 
-/// An HTTP proxy started by [`Env::proxy`].
+/// An HTTP proxy started by [`Env::proxy`] or [`Env::tls_proxy`].
 pub struct Proxy {
+    scheme: &'static str,
     address: String,
     requests: Arc<Mutex<Vec<ProxyRequest>>>,
 }
@@ -587,8 +615,8 @@ impl Proxy {
     /// Returns the URL of the proxy, with the credentials if specified.
     pub fn url(&self, credentials: Option<&str>) -> String {
         match credentials {
-            Some(credentials) => format!("http://{credentials}@{}", self.address),
-            None => format!("http://{}", self.address),
+            Some(credentials) => format!("{}://{credentials}@{}", self.scheme, self.address),
+            None => format!("{}://{}", self.scheme, self.address),
         }
     }
 

@@ -540,6 +540,78 @@ fn proxy_tls() {
 }
 
 #[test]
+fn https_proxy() {
+    let env = Env::new_tls();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    let proxy = env.tls_proxy();
+    let url = proxy.url(None);
+    let host = env.endpoint().trim_start_matches("https://").to_owned();
+    let cas = [env.read("ca.pem"), env.read("proxy-ca.pem")].concat();
+    env.write("cas.pem", cas);
+    let envs = [("HTTPS_PROXY", url.as_str())];
+
+    // The certificate of the proxy is verified with the CA bundle, or not
+    // with --no-verify-ssl.
+    let options: [&[&str]; 2] = [&["--ca-bundle", "cas.pem"], &["--no-verify-ssl"]];
+    for (i, option) in options.iter().enumerate() {
+        let args = [&["ls", "s3://bucket/"], *option].concat();
+        let result = env.run_with_env(&args, &envs).success();
+        assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+        let requests = proxy.requests();
+        assert_eq!(requests.len(), i + 1, "{requests:?}");
+        assert_eq!(requests[i].line, format!("CONNECT {host} HTTP/1.1"));
+    }
+
+    // The failures of verifying the certificate of the proxy are reported
+    // with the URL of the proxy, and those of the server with the URL of the
+    // request.
+    let result = env.run_with_env(&["ls", "s3://bucket/", "--ca-bundle", "ca.pem"], &envs);
+    assert_eq!(result.code, 255, "{}", result.stderr);
+    assert_eq!(
+        result.stderr,
+        format!("\naws3: [ERROR]: Failed to connect to proxy URL: \"{url}\"\n")
+    );
+    let args = ["ls", "s3://bucket/", "--ca-bundle", "proxy-ca.pem"];
+    let result = env.run_with_env(&args, &envs);
+    assert_eq!(result.code, 255, "{}", result.stderr);
+    assert!(
+        result.stderr.contains(&format!(
+            "SSL validation failed for {}/bucket",
+            env.endpoint()
+        )),
+        "{}",
+        result.stderr
+    );
+
+    // The requests to the HTTP endpoint are forwarded over the TLS connection
+    // to the proxy, or tunneled with --no-verify-ssl.
+    let env = Env::new();
+    env.bucket("bucket");
+    let proxy = env.tls_proxy();
+    let url = proxy.url(None);
+    let envs = [("HTTP_PROXY", url.as_str())];
+    env.run_with_env(
+        &["ls", "s3://bucket/", "--ca-bundle", "proxy-ca.pem"],
+        &envs,
+    )
+    .success();
+    env.run_with_env(&["ls", "s3://bucket/", "--no-verify-ssl"], &envs)
+        .success();
+    let requests = proxy.requests();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    let prefix = format!("GET {}/bucket", env.endpoint());
+    assert!(requests[0].line.starts_with(&prefix), "{requests:?}");
+    let host = env.endpoint().trim_start_matches("http://");
+    assert_eq!(requests[1].line, format!("CONNECT {host} HTTP/1.1"));
+    let result = env.run_with_env(&["ls", "s3://bucket/"], &envs);
+    assert_eq!(
+        result.stderr,
+        format!("\naws3: [ERROR]: Failed to connect to proxy URL: \"{url}\"\n")
+    );
+}
+
+#[test]
 fn invalid_bucket_name() {
     let env = Env::new();
     env.write("a.txt", "a");

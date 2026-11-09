@@ -124,23 +124,28 @@ impl Error {
             },
             SdkError::DispatchFailure(failure) if failure.is_io() || failure.is_timeout() => {
                 match find_source::<client::ConnectionError>(&err) {
-                    Some(connection) => match find_source::<rustls::Error>(&err) {
-                        Some(tls) => Self::new(format!(
-                            "SSL validation failed for {} {tls}",
-                            connection.url
-                        )),
-                        None => match &connection.proxy_url {
+                    Some(connection) => {
+                        let tls = find_source::<rustls::Error>(&err);
+                        match (&connection.proxy_url, tls) {
                             // The connections to the servers are made through
                             // the proxy, which the AWS CLI reports on the failures.
-                            Some(proxy_url) if is_connect(&err) => Self::new(format!(
-                                "Failed to connect to proxy URL: \"{proxy_url}\""
+                            (Some(proxy_url), _)
+                                if is_proxy_failure(&err, &connection.url, tls.is_some()) =>
+                            {
+                                Self::new(format!(
+                                    "Failed to connect to proxy URL: \"{proxy_url}\""
+                                ))
+                            }
+                            (_, Some(tls)) => Self::new(format!(
+                                "SSL validation failed for {} {tls}",
+                                connection.url
                             )),
                             _ => Self::new(format!(
                                 "Could not connect to the endpoint URL: \"{}\"",
                                 connection.url
                             )),
-                        },
-                    },
+                        }
+                    }
                     None => Self::new(format!(
                         "Could not connect to the endpoint URL: {}",
                         Chain(&err)
@@ -388,9 +393,20 @@ fn endpoint_error(message: &str) -> Error {
     Error::new(message)
 }
 
-/// Returns whether the error occurred on connecting, not on reading the
-/// response.
-fn is_connect(err: &(dyn std::error::Error + 'static)) -> bool {
+/// Returns whether the error of the request to the URL through a proxy is
+/// the failure of the connection to the proxy, including the TLS handshake
+/// with the proxy, but not with the server through the tunnel, nor the failure
+/// of reading the response.
+fn is_proxy_failure(err: &(dyn std::error::Error + 'static), url: &str, tls: bool) -> bool {
+    if tls {
+        // The TLS handshake of the request of HTTP is only with the proxy, and
+        // the tunnel reports the failures of the connections to the proxy as
+        // `TunnelError::ConnectFailed`, whose type is not exported.
+        return url.starts_with("http://")
+            || sources(err).any(|err| {
+                err.to_string() == "tunnel error: failed to create underlying connection"
+            });
+    }
     find_source::<hyper_util::client::legacy::Error>(err).is_some_and(|err| err.is_connect())
 }
 
@@ -399,20 +415,23 @@ fn is_connect(err: &(dyn std::error::Error + 'static)) -> bool {
 fn find_source<'a, T: std::error::Error + 'static>(
     err: &'a (dyn std::error::Error + 'static),
 ) -> Option<&'a T> {
-    let mut source = Some(err);
-    while let Some(err) = source {
-        if let Some(err) = err.downcast_ref::<T>() {
-            return Some(err);
-        }
-        source = match err
+    sources(err).find_map(|err| err.downcast_ref::<T>())
+}
+
+/// Returns the error and its sources, including the errors wrapped by the I/O
+/// errors whose sources skip them.
+fn sources<'a>(
+    err: &'a (dyn std::error::Error + 'static),
+) -> impl Iterator<Item = &'a (dyn std::error::Error + 'static)> {
+    std::iter::successors(Some(err), |err| {
+        match err
             .downcast_ref::<std::io::Error>()
             .and_then(std::io::Error::get_ref)
         {
             Some(inner) => Some(inner),
             None => err.source(),
-        };
-    }
-    None
+        }
+    })
 }
 
 fn root_cause<'a>(
