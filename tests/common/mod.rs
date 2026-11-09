@@ -183,6 +183,72 @@ impl Env {
         self.requests.lock().unwrap().clone()
     }
 
+    /// Starts an HTTP proxy, which tunnels the CONNECT requests and forwards
+    /// the other requests to the server of the request line.
+    pub fn proxy(&self) -> Proxy {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let listener = self
+            ._runtime
+            .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
+            .unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        self._runtime.spawn({
+            let requests = requests.clone();
+            async move {
+                loop {
+                    let Ok((socket, _)) = listener.accept().await else {
+                        continue;
+                    };
+                    let requests = requests.clone();
+                    tokio::spawn(async move {
+                        let mut client = BufReader::new(socket);
+                        let mut head = String::new();
+                        loop {
+                            let mut line = String::new();
+                            if client.read_line(&mut line).await.unwrap_or(0) == 0 {
+                                return;
+                            }
+                            head.push_str(&line);
+                            if line == "\r\n" {
+                                break;
+                            }
+                        }
+                        let request_line = head.lines().next().unwrap_or_default().to_owned();
+                        let auth = head.lines().find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("proxy-authorization")
+                                .then(|| value.trim().to_owned())
+                        });
+                        requests.lock().unwrap().push(ProxyRequest {
+                            line: request_line.clone(),
+                            auth,
+                        });
+                        let mut parts = request_line.split(' ');
+                        let (method, target) = (parts.next().unwrap(), parts.next().unwrap());
+                        let host = if method == "CONNECT" {
+                            target.to_owned()
+                        } else {
+                            let uri: http::Uri = target.parse().unwrap();
+                            uri.authority().unwrap().to_string()
+                        };
+                        let Ok(mut server) = tokio::net::TcpStream::connect(host).await else {
+                            return;
+                        };
+                        if method == "CONNECT" {
+                            let response = b"HTTP/1.1 200 Connection established\r\n\r\n";
+                            let _ = client.get_mut().write_all(response).await;
+                        } else {
+                            let _ = server.write_all(head.as_bytes()).await;
+                        }
+                        let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+                    });
+                }
+            }
+        });
+        Proxy { address, requests }
+    }
+
     /// Returns the working directory.
     pub fn work(&self) -> &Path {
         self.work.path()
@@ -502,4 +568,32 @@ pub fn wait_child(mut child: std::process::Child) -> Output {
 /// Returns the content of the size, which is not repetitive in short ranges.
 pub fn content(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i * 7 + i / 251) as u8).collect()
+}
+
+/// An HTTP proxy started by [`Env::proxy`].
+pub struct Proxy {
+    address: String,
+    requests: Arc<Mutex<Vec<ProxyRequest>>>,
+}
+
+/// The first request of a connection to the proxy.
+#[derive(Debug, Clone)]
+pub struct ProxyRequest {
+    pub line: String,
+    pub auth: Option<String>,
+}
+
+impl Proxy {
+    /// Returns the URL of the proxy, with the credentials if specified.
+    pub fn url(&self, credentials: Option<&str>) -> String {
+        match credentials {
+            Some(credentials) => format!("http://{credentials}@{}", self.address),
+            None => format!("http://{}", self.address),
+        }
+    }
+
+    /// Returns the first requests of the connections so far.
+    pub fn requests(&self) -> Vec<ProxyRequest> {
+        self.requests.lock().unwrap().clone()
+    }
 }

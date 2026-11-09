@@ -37,7 +37,7 @@ crc-fast = "1.10.0"
 http = "1.5.0"
 http-body = "1.1.0"
 hyper-rustls = { version = "0.27.10", default-features = false, features = ["http1", "http2", "tls12"] }
-hyper-util = { version = "0.1.21", features = ["client-legacy", "http1", "http2", "tokio"] }
+hyper-util = { version = "0.1.21", features = ["client-legacy", "client-proxy", "http1", "http2", "tokio"] }
 md-5 = "0.11.0"
 regex-lite = "0.1.9"
 rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
@@ -45,7 +45,8 @@ rustls-pki-types = "1.15.1"
 rustls-webpki = "0.103.16"
 serde_json = "1.0.154"
 sha2 = "0.11.1"
-tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "fs", "io-std", "io-util", "signal", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "fs", "io-std", "io-util", "net", "signal", "sync", "time"] }
+tower-service = "0.3.3"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 webpki-root-certs = "1.0.11"
 

@@ -430,6 +430,89 @@ fn tls_verification() {
 }
 
 #[test]
+fn proxy() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    let proxy = env.proxy();
+    let url = proxy.url(Some("user:pass"));
+
+    // The requests to the HTTP endpoint are forwarded by HTTP_PROXY, with the
+    // credentials of the proxy.
+    let result = env
+        .run_with_env(&["ls", "s3://bucket/"], &[("HTTP_PROXY", &url)])
+        .success();
+    assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+    let requests = proxy.requests();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    let prefix = format!("GET {}/bucket", env.endpoint());
+    assert!(requests[0].line.starts_with(&prefix), "{requests:?}");
+    assert_eq!(requests[0].auth.as_deref(), Some("Basic dXNlcjpwYXNz"));
+
+    // The lowercase name is also read.
+    env.run_with_env(&["ls", "s3://bucket/"], &[("http_proxy", &url)])
+        .success();
+    assert_eq!(proxy.requests().len(), 2);
+
+    // HTTPS_PROXY is not used for the HTTP endpoint, and NO_PROXY bypasses the
+    // proxy.
+    env.run_with_env(&["ls", "s3://bucket/"], &[("HTTPS_PROXY", &url)])
+        .success();
+    let envs = [("HTTP_PROXY", url.as_str()), ("NO_PROXY", "127.0.0.1")];
+    env.run_with_env(&["ls", "s3://bucket/"], &envs).success();
+    assert_eq!(proxy.requests().len(), 2);
+
+    // The client of --no-verify-ssl tunnels the requests.
+    env.run_with_env(
+        &["ls", "s3://bucket/", "--no-verify-ssl"],
+        &[("HTTP_PROXY", &url)],
+    )
+    .success();
+    let requests = proxy.requests();
+    let host = env.endpoint().trim_start_matches("http://");
+    assert_eq!(requests[2].line, format!("CONNECT {host} HTTP/1.1"));
+    assert_eq!(requests[2].auth.as_deref(), Some("Basic dXNlcjpwYXNz"));
+
+    // The requests fail when the proxy is unreachable.
+    let result = env.run_with_env(
+        &["ls", "s3://bucket/"],
+        &[("HTTP_PROXY", "http://127.0.0.1:9")],
+    );
+    assert_eq!(result.code, 255, "{}", result.stderr);
+}
+
+#[test]
+fn proxy_tls() {
+    let env = Env::new_tls();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    let proxy = env.proxy();
+    let url = proxy.url(None);
+    let host = env.endpoint().trim_start_matches("https://").to_owned();
+
+    // The requests to the HTTPS endpoint are tunneled by HTTPS_PROXY, with or
+    // without the verification of the certificate.
+    let options: [&[&str]; 2] = [&["--ca-bundle", "ca.pem"], &["--no-verify-ssl"]];
+    for (i, option) in options.iter().enumerate() {
+        let args = [&["ls", "s3://bucket/"], *option].concat();
+        let result = env.run_with_env(&args, &[("HTTPS_PROXY", &url)]).success();
+        assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+        let requests = proxy.requests();
+        assert_eq!(requests.len(), i + 1, "{requests:?}");
+        assert_eq!(requests[i].line, format!("CONNECT {host} HTTP/1.1"));
+        assert_eq!(requests[i].auth, None);
+    }
+
+    // HTTP_PROXY is not used for the HTTPS endpoint.
+    env.run_with_env(
+        &["ls", "s3://bucket/", "--no-verify-ssl"],
+        &[("HTTP_PROXY", &url)],
+    )
+    .success();
+    assert_eq!(proxy.requests().len(), 2);
+}
+
+#[test]
 fn invalid_bucket_name() {
     let env = Env::new();
     env.write("a.txt", "a");

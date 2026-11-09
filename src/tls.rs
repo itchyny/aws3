@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use aws_sdk_s3::config::SharedHttpClient;
-use aws_smithy_http_client::Builder;
+use aws_smithy_http_client::proxy::ProxyConfig;
 use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
 use aws_smithy_http_client::tls::{Provider, TlsContext, TrustStore};
+use aws_smithy_http_client::{Builder, Connector};
 use aws_smithy_types::base64;
 use rustls_pki_types::CertificateDer;
 use rustls_pki_types::pem::PemObject;
@@ -12,7 +13,9 @@ use crate::error::Error;
 
 /// Creates an HTTP client trusting the certificates in the CA bundle, or the
 /// Mozilla root certificates like the AWS CLI. Loading the certificates of the
-/// platform is avoided, since it takes tens of milliseconds on macOS.
+/// platform is avoided, since it takes tens of milliseconds on macOS. The
+/// requests are sent through the proxies of the environment variables like the
+/// AWS CLI, which the client of the SDK does not by default.
 pub fn http_client(ca_bundle: Option<&Path>) -> Result<SharedHttpClient, Error> {
     let certs = match ca_bundle {
         Some(path) => load_ca_bundle(path)?,
@@ -23,10 +26,19 @@ pub fn http_client(ca_bundle: Option<&Path>) -> Result<SharedHttpClient, Error> 
         .with_trust_store(trust_store)
         .build()
         .map_err(|err| Error::new(err.to_string()))?;
-    Ok(Builder::new()
-        .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
-        .tls_context(tls_context)
-        .build_https())
+    // The connectors are built like the client of the SDK with the timeouts
+    // and the sleep of the runtime, which the client caches by the settings.
+    Ok(
+        Builder::new().build_with_connector_fn(move |settings, components| {
+            let mut builder = Connector::builder()
+                .tls_provider(Provider::Rustls(CryptoMode::AwsLc))
+                .tls_context(tls_context.clone())
+                .proxy_config(ProxyConfig::from_env());
+            builder.set_connector_settings(settings.cloned());
+            builder.set_sleep_impl(components.and_then(|components| components.sleep_impl()));
+            builder.build()
+        }),
+    )
 }
 
 /// Loads the certificates in the CA bundle, which are validated here because

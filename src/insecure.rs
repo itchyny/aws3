@@ -1,7 +1,10 @@
 //! An HTTP client which does not verify the certificates of the servers, for
 //! `--no-verify-ssl`. The HTTP client of the SDK always verifies them.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use aws_sdk_s3::config::SharedHttpClient;
@@ -11,18 +14,24 @@ use aws_smithy_runtime_api::client::http::{
 use aws_smithy_runtime_api::client::orchestrator::{HttpRequest, HttpResponse};
 use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_types::body::SdkBody;
+use http::Uri;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector as TcpConnector;
-use hyper_util::rt::TokioExecutor;
+use hyper_util::client::legacy::connect::proxy::Tunnel;
+use hyper_util::client::proxy::matcher::Matcher;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, aws_lc_rs};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
+use tokio::net::TcpStream;
+use tower_service::Service;
 
 use crate::error::Error;
 
-/// Creates an HTTP client which accepts any certificates of the servers.
+/// Creates an HTTP client which accepts any certificates of the servers, and
+/// sends the requests through the proxies of the environment variables.
 pub fn http_client(
     connect_timeout: Option<Duration>,
     read_timeout: Option<Duration>,
@@ -42,7 +51,10 @@ pub fn http_client(
         .https_or_http()
         .enable_http1()
         .enable_http2()
-        .wrap_connector(tcp);
+        .wrap_connector(ProxyConnector {
+            tcp,
+            matcher: Arc::new(Matcher::from_env()),
+        });
     // The connector is shared to reuse the connections across the requests.
     let connector = SharedHttpConnector::new(Connector {
         client: Client::builder(TokioExecutor::new()).build(https),
@@ -53,7 +65,7 @@ pub fn http_client(
 
 #[derive(Debug)]
 struct Connector {
-    client: Client<HttpsConnector<TcpConnector>, SdkBody>,
+    client: Client<HttpsConnector<ProxyConnector>, SdkBody>,
     read_timeout: Option<Duration>,
 }
 
@@ -82,6 +94,42 @@ impl HttpConnector for Connector {
             HttpResponse::try_from(response.map(SdkBody::from_body_1_x))
                 .map_err(|err| ConnectorError::other(err.into(), None))
         })
+    }
+}
+
+/// Connects to the servers directly or through the CONNECT tunnels of the
+/// proxies, over which the TLS connections are established.
+#[derive(Clone, Debug)]
+struct ProxyConnector {
+    tcp: TcpConnector,
+    matcher: Arc<Matcher>,
+}
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+impl Service<Uri> for ProxyConnector {
+    type Response = TokioIo<TcpStream>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.tcp.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, dst: Uri) -> Self::Future {
+        match self.matcher.intercept(&dst) {
+            Some(intercept) => {
+                let mut tunnel = Tunnel::new(intercept.uri().clone(), self.tcp.clone());
+                if let Some(auth) = intercept.basic_auth() {
+                    tunnel = tunnel.with_auth(auth.clone());
+                }
+                Box::pin(async move { Ok(tunnel.call(dst).await?) })
+            }
+            None => {
+                let connecting = self.tcp.call(dst);
+                Box::pin(async move { Ok(connecting.await?) })
+            }
+        }
     }
 }
 
