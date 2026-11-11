@@ -1,0 +1,121 @@
+//! The api command, which calls the operations of the S3 API in the same way
+//! as `aws s3api`, and prints the responses in the same format.
+
+mod head_object;
+mod output;
+
+use std::io::{self, Write};
+use std::process::ExitCode;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use aws_sdk_s3::config::{ConfigBag, Intercept, RuntimeComponents};
+use aws_sdk_s3::primitives::DateTime;
+use aws_smithy_runtime_api::box_error::BoxError;
+use aws_smithy_runtime_api::client::interceptors::context::BeforeDeserializationInterceptorContextRef;
+use clap::ValueEnum;
+
+use crate::cli::{ApiArgs, ApiOperation, GlobalArgs, Output};
+use crate::client;
+use crate::error::Error;
+use crate::transfer::params;
+use crate::value::{Value, insert};
+
+pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
+    if let Some(output) = global.output.filter(|output| *output != Output::Json) {
+        let name = output
+            .to_possible_value()
+            .map(|value| value.get_name().to_owned());
+        return Err(Error::new(format!(
+            "--output {} is not supported by the api command",
+            name.unwrap_or_default()
+        )));
+    }
+    if global.query.is_some() {
+        return Err(Error::new("--query is not supported by the api command"));
+    }
+    let config = client::load_config(global).await?;
+    let client = client::new_client(&config, None);
+    let response = match &args.operation {
+        ApiOperation::HeadObject(args) => head_object::run(&client, args).await?,
+    };
+    print(&response);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Prints the response in JSON, except for the empty responses, ignoring the
+/// errors of writing like the other outputs of the commands.
+fn print(response: &Value) {
+    if !matches!(response, Value::Map(pairs) if pairs.is_empty()) {
+        let _ = writeln!(io::stdout(), "{}", response.to_json_pretty());
+    }
+}
+
+/// Parses the integer argument, failing with the same message as `int` of
+/// Python.
+fn parse_int(value: Option<&str>) -> Result<Option<i32>, Error> {
+    value
+        .map(|value| {
+            value.trim().parse().map_err(|_| {
+                Error::new(format!("invalid literal for int() with base 10: '{value}'"))
+            })
+        })
+        .transpose()
+}
+
+/// Parses the timestamp argument of the member, failing with the same message
+/// as the parameter validation of botocore.
+fn parse_timestamp(member: &str, value: Option<&str>) -> Result<Option<DateTime>, Error> {
+    value
+        .map(|value| {
+            params::parse_timestamp(value).map_err(|_| {
+                Error::param_validation(format!(
+                    "Parameter validation failed:\nInvalid type for parameter {member}, \
+                     value: {value}, type: <class 'str'>, \
+                     valid types: <class 'datetime.datetime'>, timestamp-string"
+                ))
+            })
+        })
+        .transpose()
+}
+
+/// The interceptor to keep the headers of the response, whose order of the
+/// metadata is lost in the outputs of the SDK.
+#[derive(Debug, Clone, Default)]
+struct ResponseHeaders(Arc<Mutex<Vec<(String, String)>>>);
+
+impl ResponseHeaders {
+    /// Returns the metadata in the order of the headers, whose names are
+    /// stripped of the prefix like botocore.
+    fn metadata(&self) -> Value {
+        let headers = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut pairs = Vec::new();
+        for (name, value) in headers.iter() {
+            if let Some(name) = name.to_lowercase().strip_prefix("x-amz-meta-") {
+                insert(&mut pairs, name.to_owned(), Value::Str(value.clone()));
+            }
+        }
+        Value::Map(pairs)
+    }
+}
+
+impl Intercept for ResponseHeaders {
+    fn name(&self) -> &'static str {
+        "ResponseHeaders"
+    }
+
+    fn read_before_deserialization(
+        &self,
+        context: &BeforeDeserializationInterceptorContextRef<'_>,
+        _components: &RuntimeComponents,
+        _config: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        let headers = context
+            .response()
+            .headers()
+            .iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect();
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = headers;
+        Ok(())
+    }
+}

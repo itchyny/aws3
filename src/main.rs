@@ -1,3 +1,4 @@
+mod api;
 mod bucket;
 mod cli;
 mod client;
@@ -15,6 +16,7 @@ mod presign;
 mod redirect;
 mod tls;
 mod transfer;
+mod value;
 
 use std::process::ExitCode;
 
@@ -89,7 +91,7 @@ fn check_resources(command: &Command) -> Result<(), error::Error> {
         Command::Rb(args) => path::check_supported_resource(&args.path),
         Command::Website(args) => path::check_supported_resource(&args.path),
         Command::Presign(args) => path::check_supported_resource(&args.path),
-        Command::Completion(_) => Ok(()),
+        Command::Api(_) | Command::Completion(_) => Ok(()),
     }
     .map_err(error::Error::param_validation)
 }
@@ -105,6 +107,7 @@ async fn run_command(cli: &Cli) -> Result<ExitCode, error::Error> {
         Command::Rb(args) => bucket::rb(args, &cli.global).await,
         Command::Website(args) => bucket::website(args, &cli.global).await,
         Command::Presign(args) => presign::run(args, &cli.global).await,
+        Command::Api(args) => api::run(args, &cli.global).await,
         Command::Completion(args) => Ok(args.run()),
     }
 }

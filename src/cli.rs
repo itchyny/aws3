@@ -65,6 +65,8 @@ pub enum Command {
     Presign(PresignArgs),
     /// Set the website configuration for a bucket
     Website(WebsiteArgs),
+    /// Call an operation of the S3 API
+    Api(ApiArgs),
     /// Generate the completion script of the shell
     #[command(hide = true)]
     Completion(CompletionArgs),
@@ -336,6 +338,105 @@ pub struct WebsiteArgs {
     /// The object key name to use when a 4XX class error occurs
     #[arg(long, value_name = "DOCUMENT")]
     pub error_document: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ApiArgs {
+    #[command(subcommand)]
+    pub operation: ApiOperation,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ApiOperation {
+    /// Retrieve the metadata of an object without returning the object itself
+    HeadObject(HeadObjectArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct HeadObjectArgs {
+    /// The name of the bucket that contains the object
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The object key
+    #[arg(long)]
+    pub key: String,
+
+    /// Return the object only if its entity tag (ETag) is the same as the one specified
+    #[arg(long, value_name = "ETAG")]
+    pub if_match: Option<String>,
+
+    /// Return the object only if it has been modified since the specified time
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub if_modified_since: Option<String>,
+
+    /// Return the object only if its entity tag (ETag) is different from the one specified
+    #[arg(long, value_name = "ETAG")]
+    pub if_none_match: Option<String>,
+
+    /// Return the object only if it has not been modified since the specified time
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub if_unmodified_since: Option<String>,
+
+    /// The range of bytes of the object, e.g. bytes=0-9
+    #[arg(long)]
+    pub range: Option<String>,
+
+    /// Sets the Cache-Control header of the response
+    #[arg(long, value_name = "STRING")]
+    pub response_cache_control: Option<String>,
+
+    /// Sets the Content-Disposition header of the response
+    #[arg(long, value_name = "STRING")]
+    pub response_content_disposition: Option<String>,
+
+    /// Sets the Content-Encoding header of the response
+    #[arg(long, value_name = "STRING")]
+    pub response_content_encoding: Option<String>,
+
+    /// Sets the Content-Language header of the response
+    #[arg(long, value_name = "STRING")]
+    pub response_content_language: Option<String>,
+
+    /// Sets the Content-Type header of the response
+    #[arg(long, value_name = "STRING")]
+    pub response_content_type: Option<String>,
+
+    /// Sets the Expires header of the response
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub response_expires: Option<String>,
+
+    /// The version ID of the object
+    #[arg(long)]
+    pub version_id: Option<String>,
+
+    /// The algorithm of the server-side encryption with the customer-provided key, e.g. AES256
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_algorithm: Option<String>,
+
+    /// The customer-provided key of the server-side encryption
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_key: Option<String>,
+
+    /// The base64-encoded MD5 digest of the customer-provided key
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_key_md5: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    /// The part number of the object being read
+    #[arg(long, value_name = "INTEGER", allow_negative_numbers = true)]
+    pub part_number: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// Enables the checksums in the response, i.e. ENABLED
+    #[arg(long, value_name = "STRING")]
+    pub checksum_mode: Option<String>,
 }
 
 #[derive(Debug, Args)]

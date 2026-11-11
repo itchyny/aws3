@@ -1,5 +1,6 @@
 //! The values of the arguments parsed in the shorthand syntax or the JSON
-//! syntax, which are not only strings but also lists and maps.
+//! syntax, and of the responses of the api commands, which are not only
+//! strings but also lists and maps.
 
 /// The value of an argument.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,6 +62,50 @@ impl Value {
             }
         }
     }
+
+    /// Returns the value in the JSON syntax indented by 4 spaces, like
+    /// `json.dumps` of Python with `indent=4` and `ensure_ascii=False`.
+    pub fn to_json_pretty(&self) -> String {
+        let mut buf = String::new();
+        self.write_json_pretty(&mut buf, 0);
+        buf
+    }
+
+    fn write_json_pretty(&self, buf: &mut String, depth: usize) {
+        let indent = |buf: &mut String, depth: usize| {
+            buf.push('\n');
+            buf.push_str(&" ".repeat(4 * depth));
+        };
+        match self {
+            Self::List(values) if !values.is_empty() => {
+                buf.push('[');
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        buf.push(',');
+                    }
+                    indent(buf, depth + 1);
+                    value.write_json_pretty(buf, depth + 1);
+                }
+                indent(buf, depth);
+                buf.push(']');
+            }
+            Self::Map(pairs) if !pairs.is_empty() => {
+                buf.push('{');
+                for (i, (key, value)) in pairs.iter().enumerate() {
+                    if i > 0 {
+                        buf.push(',');
+                    }
+                    indent(buf, depth + 1);
+                    buf.push_str(&serde_json::to_string(key).unwrap_or_default());
+                    buf.push_str(": ");
+                    value.write_json_pretty(buf, depth + 1);
+                }
+                indent(buf, depth);
+                buf.push('}');
+            }
+            _ => buf.push_str(&self.to_json()),
+        }
+    }
 }
 
 /// Inserts the pair into the pairs of a map, where the value of the same key
@@ -103,6 +148,36 @@ mod tests {
         assert_eq!(
             value.to_json(),
             r#"{"a":["x\"\n","y",1,1.5,1e16,-Infinity,true,null],"b":{}}"#
+        );
+    }
+
+    #[test]
+    fn to_json_pretty() {
+        let value = Value::Map(vec![
+            ("a".to_owned(), Value::Str("日本\u{1}".to_owned())),
+            (
+                "b".to_owned(),
+                Value::List(vec![
+                    Value::Int("1".to_owned()),
+                    Value::Map(vec![("c".to_owned(), Value::Bool(false))]),
+                ]),
+            ),
+            ("d".to_owned(), Value::Map(Vec::new())),
+            ("e".to_owned(), Value::List(Vec::new())),
+        ]);
+        assert_eq!(
+            value.to_json_pretty(),
+            r#"{
+    "a": "日本\u0001",
+    "b": [
+        1,
+        {
+            "c": false
+        }
+    ],
+    "d": {},
+    "e": []
+}"#
         );
     }
 }

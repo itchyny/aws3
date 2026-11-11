@@ -16,9 +16,9 @@ use regex_lite::{Captures, Regex};
 use super::copy::url_encode;
 use super::json;
 use super::shorthand::{self, ParseError};
-use super::value::{Value, is_space};
 use crate::cli::{self, TransferArgs};
 use crate::error::Error;
+use crate::value::{Value, is_space};
 
 /// The customer-provided key of server-side encryption.
 #[derive(Debug, Clone)]
@@ -274,7 +274,7 @@ impl Unpacked {
 /// Loads the customer-provided key, which is not base64 encoded regardless
 /// of the binary format unlike the blobs of the API commands, or the content
 /// of a `fileb://` or `file://` file.
-fn load_key(name: &str, value: Option<&str>) -> Result<Option<Vec<u8>>, Error> {
+pub fn load_key(name: &str, value: Option<&str>) -> Result<Option<Vec<u8>>, Error> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -363,7 +363,7 @@ fn expand_vars(path: &str) -> String {
 
 /// Parses the timestamp argument, which is an ISO 8601 date time, an RFC 2822
 /// date time or the epoch seconds. Date times without offsets are in UTC.
-fn parse_timestamp(value: &str) -> Result<DateTime, String> {
+pub fn parse_timestamp(value: &str) -> Result<DateTime, String> {
     let date_time = chrono::DateTime::parse_from_rfc3339(value)
         .or_else(|_| chrono::DateTime::parse_from_rfc2822(value))
         .map(|date_time| date_time.to_utc())

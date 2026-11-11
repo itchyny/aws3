@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use regex_lite::Regex;
 
-use super::value::{Value, insert, is_space};
+use crate::value::{Value, insert, is_space};
 
 /// The whitespaces of `\s` of Python, which are not ASCII-only.
 const WHITESPACE: &str = r"\t\n\x0B\x0C\r\x1C-\x1F \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}";

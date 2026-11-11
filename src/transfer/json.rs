@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use regex_lite::Regex;
 
-use super::value::{Value, insert};
+use crate::value::{Value, insert};
 
 static NUMBER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^-?(?:0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?").expect("valid pattern")

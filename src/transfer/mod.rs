@@ -14,7 +14,6 @@ mod samepath;
 mod shorthand;
 mod sync;
 mod upload;
-mod value;
 
 use std::path::Path;
 use std::process::ExitCode;
