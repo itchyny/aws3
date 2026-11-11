@@ -43,6 +43,12 @@ HTTPS are verified with the same CA bundle as the endpoints.
 
 ## Installation
 
+### Homebrew
+
+```sh
+brew install itchyny/tap/aws3
+```
+
 ### Prebuilt binaries
 
 Download the archive for your platform from the
