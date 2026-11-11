@@ -1,4 +1,17 @@
 # Changelog
+## [v0.3.0](https://github.com/itchyny/aws3/compare/v0.2.0..v0.3.0) (2026-11-11)
+* send the requests through the proxies of `HTTP_PROXY` and `HTTPS_PROXY` except for the
+  hosts of `NO_PROXY`, including the proxies of HTTPS and with `--no-verify-ssl`, and report
+  the failures of the connections to the proxies in the same way as the AWS CLI
+* support `completion` subcommand to generate the shell completion scripts, and include the
+  scripts for bash, zsh, fish, PowerShell, and elvish in the release archives
+* release the statically linked binaries for Linux with musl
+* attest the build provenance of the release archives, and include the attestation bundle
+  in the releases
+* stop `ls` and `presign` without errors when the reader of the output has gone away, e.g.
+  on piping to `head`
+* reduce CPU time and memory of the transfers of many small files
+
 ## [v0.2.0](https://github.com/itchyny/aws3/compare/v0.1.0..v0.2.0) (2026-11-07)
 * support `--tags` option to set tags on the objects uploaded from local paths
 * support `--debug` option to write the logs of the requests and the responses
