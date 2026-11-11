@@ -73,7 +73,7 @@ cargo install --git https://github.com/itchyny/aws3
 
 The commands were run against S3 in `ap-northeast-1` over HTTPS from a home
 network, on Apple M4 (10 cores, 24 GiB) with macOS 27.2. The tools are AWS CLI
-2.39.6, s5cmd 2.3.0, s7cmd 1.8.6 and aws3 0.2.0, with the default settings of
+2.39.6, s5cmd 2.3.0, s7cmd 1.8.6 and aws3 0.3.0, with the default settings of
 each tool, and with the same concurrency of 10 and 64. The results are the
 means of five runs, or three runs for the files of 256 MiB, where the tools run
 in turns so that the changes of the network affect every tool evenly.
@@ -111,6 +111,21 @@ for a file of 256 MiB with the concurrency of 64.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wiki/itchyny/aws3/benchmark-dark.svg">
   <img alt="Benchmark of aws s3, aws3, s5cmd and s7cmd" src="https://raw.githubusercontent.com/wiki/itchyny/aws3/benchmark-light.svg">
+</picture>
+
+## Binary size
+
+aws3 is a single binary of about 10 MiB on Linux, while the installer of the
+AWS CLI bundles the Python runtime and the models of all the AWS services in a
+directory of about 250 MiB. The archive of aws3 is about 15 times smaller to
+download than the AWS CLI, and the installed size is 24 to 26 times smaller.
+aws3 is also the smallest of the single binaries, about 60% of s5cmd and 40% of
+s7cmd. The sizes are of the releases for Linux of AWS CLI 2.39.6, s5cmd 2.3.0,
+s7cmd 1.8.6 (glibc) and aws3 0.3.0.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wiki/itchyny/aws3/size-dark.svg">
+  <img alt="Binary size of AWS CLI, aws3, s5cmd and s7cmd" src="https://raw.githubusercontent.com/wiki/itchyny/aws3/size-light.svg">
 </picture>
 
 ## Bug Tracker
