@@ -30,12 +30,13 @@ pub struct Env {
     _runtime: tokio::runtime::Runtime,
 }
 
-/// The request received by the server, to check the headers.
+/// The request received by the server, to check the headers and the body.
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: http::Method,
     pub uri: http::Uri,
     pub headers: http::HeaderMap,
+    pub body: bytes::Bytes,
 }
 
 impl Request {
@@ -97,11 +98,16 @@ impl Env {
                 let (s3, requests, regions) = (s3.clone(), requests.clone(), regions.clone());
                 async move {
                     let (parts, body) = request.into_parts();
-                    let body = body.collect().await.map_err(|err| err.to_string())?;
+                    let body = body
+                        .collect()
+                        .await
+                        .map_err(|err| err.to_string())?
+                        .to_bytes();
                     let request = Request {
                         method: parts.method.clone(),
                         uri: parts.uri.clone(),
                         headers: parts.headers.clone(),
+                        body: body.clone(),
                     };
                     requests.lock().unwrap().push(request.clone());
                     // The requests to the bucket in another region are
@@ -115,8 +121,7 @@ impl Env {
                     let encode = parts.uri.query().is_some_and(|query| {
                         query.split('&').any(|param| param == "encoding-type=url")
                     });
-                    let request =
-                        http::Request::from_parts(parts, s3s::Body::from(body.to_bytes()));
+                    let request = http::Request::from_parts(parts, s3s::Body::from(body));
                     let mut response = s3.call(request).await.map_err(|err| format!("{err:?}"))?;
                     // The checksums of CRC64NVME are of the full objects on S3,
                     // whose type is not responded by the fake server.

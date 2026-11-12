@@ -17,6 +17,7 @@ mod list_objects_v2;
 mod members;
 mod output;
 mod paginate;
+mod put_bucket_versioning;
 mod put_object;
 mod shape;
 
@@ -27,6 +28,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use aws_sdk_s3::config::{ConfigBag, Intercept, RuntimeComponents};
 use aws_sdk_s3::primitives::DateTime;
+use aws_sdk_s3::types::ChecksumAlgorithm;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::BeforeDeserializationInterceptorContextRef;
 use aws_smithy_types::base64;
@@ -77,6 +79,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::GetBucketLocation(args) => get_bucket_location::run(&client, args).await?,
         ApiOperation::CreateBucket(args) => create_bucket::run(&client, args).await?,
         ApiOperation::DeleteBucket(args) => delete_bucket::run(&client, args).await?,
+        ApiOperation::PutBucketVersioning(args) => {
+            put_bucket_versioning::run(&client, args).await?
+        }
     };
     let response = match query {
         Some(query) => query
@@ -106,6 +111,12 @@ fn parse_int(value: Option<&str>) -> Result<Option<i32>, Error> {
             })
         })
         .transpose()
+}
+
+/// Returns the checksum algorithm of the requests whose checksums are
+/// required, which defaults to CRC64NVME like the AWS CLI.
+fn required_checksum_algorithm(value: Option<&str>) -> ChecksumAlgorithm {
+    value.map_or(ChecksumAlgorithm::Crc64Nvme, ChecksumAlgorithm::from)
 }
 
 /// Parses the timestamp argument of the member, failing with the same message
