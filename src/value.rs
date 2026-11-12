@@ -31,6 +31,14 @@ impl Value {
         }
     }
 
+    /// Returns the value of the key of the map.
+    pub fn get(&self, key: &str) -> Option<&Self> {
+        match self {
+            Self::Map(pairs) => pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
     /// Returns the value in the JSON syntax, where the bytes are formatted
     /// as a string.
     pub fn to_json(&self) -> String {

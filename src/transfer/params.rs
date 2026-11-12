@@ -394,13 +394,14 @@ pub fn parse_timestamp(value: &str) -> Result<DateTime, String> {
     Ok(DateTime::from_millis(date_time.timestamp_millis()))
 }
 
-/// Parses the `--metadata` argument in the JSON syntax or the shorthand
-/// syntax, i.e. `KeyName1=string,KeyName2=string`, and validates that the
-/// values are strings like `unpack_argument` of the AWS CLI, which reports
-/// the invalid values in the representations of Python instead of JSON.
-fn parse_metadata(value: &str) -> Result<Vec<(String, String)>, Error> {
+/// Parses the argument of a structure or a map in the JSON syntax or the
+/// shorthand syntax, loading the parameter file of the argument like
+/// `unpack_argument` of the AWS CLI. Returns the pairs of the map, and
+/// whether they are parsed in the shorthand syntax, whose values are not
+/// converted to the types of the members yet.
+pub fn parse_map_argument(name: &str, value: &str) -> Result<(Vec<(String, Value)>, bool), Error> {
     let error = |message: String| {
-        Error::param_validation(format!("Error parsing parameter '--metadata': {message}"))
+        Error::param_validation(format!("Error parsing parameter '{name}': {message}"))
     };
     let contents;
     let value = if let Some(path) = value.strip_prefix("file://") {
@@ -418,21 +419,30 @@ fn parse_metadata(value: &str) -> Result<Vec<(String, String)>, Error> {
         value
     };
     let trimmed = value.trim_matches(is_space);
-    let pairs = if trimmed.starts_with('{') {
+    if trimmed.starts_with('{') {
         match json::decode(value)
             .map_err(|err| error(format!("Invalid JSON: {err}\nJSON received: {value}")))?
         {
-            Value::Map(pairs) => pairs,
+            Value::Map(pairs) => Ok((pairs, false)),
             _ => unreachable!("an object is decoded"),
         }
     } else if trimmed.starts_with('[') {
-        return Err(error(format!("Invalid JSON:\n{value}")));
+        Err(error(format!("Invalid JSON:\n{value}")))
     } else {
-        shorthand::parse(value, resolve_paramfile).map_err(|err| match err {
+        let pairs = shorthand::parse(value, resolve_paramfile).map_err(|err| match err {
             ParseError::Syntax(message) => error(message),
             ParseError::Paramfile(message) => Error::new(message),
-        })?
-    };
+        })?;
+        Ok((pairs, true))
+    }
+}
+
+/// Parses the `--metadata` argument in the JSON syntax or the shorthand
+/// syntax, i.e. `KeyName1=string,KeyName2=string`, and validates that the
+/// values are strings like `unpack_argument` of the AWS CLI, which reports
+/// the invalid values in the representations of Python instead of JSON.
+fn parse_metadata(value: &str) -> Result<Vec<(String, String)>, Error> {
+    let (pairs, _) = parse_map_argument("--metadata", value)?;
     let mut metadata = Vec::new();
     let mut errors = Vec::new();
     for (key, value) in pairs {

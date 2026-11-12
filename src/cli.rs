@@ -346,10 +346,16 @@ pub struct ApiArgs {
     pub operation: ApiOperation,
 }
 
+// The arguments are parsed only once, whose size does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 pub enum ApiOperation {
     /// Retrieve the metadata of an object without returning the object itself
     HeadObject(HeadObjectArgs),
+    /// Remove an object or a version of an object
+    DeleteObject(DeleteObjectArgs),
+    /// Remove multiple objects from a bucket in a single request
+    DeleteObjects(DeleteObjectsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -437,6 +443,104 @@ pub struct HeadObjectArgs {
     /// Enables the checksums in the response, i.e. ENABLED
     #[arg(long, value_name = "STRING")]
     pub checksum_mode: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DeleteObjectArgs {
+    /// The name of the bucket that contains the object
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The key of the object to delete
+    #[arg(long)]
+    pub key: String,
+
+    /// The serial number and the value of the MFA device, separated by a space
+    #[arg(long, value_name = "STRING")]
+    pub mfa: Option<String>,
+
+    /// The version ID of the object to delete
+    #[arg(long)]
+    pub version_id: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    #[command(flatten)]
+    pub bypass_governance_retention: BypassGovernanceRetentionArgs,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// Delete the object only if its entity tag (ETag) is the same as the one specified
+    #[arg(long, value_name = "ETAG")]
+    pub if_match: Option<String>,
+
+    /// Delete the object only if its last modified time is the same as the one specified
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub if_match_last_modified_time: Option<String>,
+
+    /// Delete the object only if its size is the same as the one specified
+    #[arg(long, value_name = "LONG", allow_negative_numbers = true)]
+    pub if_match_size: Option<i64>,
+}
+
+#[derive(Debug, Args)]
+pub struct DeleteObjectsArgs {
+    /// The name of the bucket that contains the objects
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The objects to delete
+    #[arg(
+        long,
+        value_name = "Objects=[{Key=string,VersionId=string},...],Quiet=boolean"
+    )]
+    pub delete: String,
+
+    /// The serial number and the value of the MFA device, separated by a space
+    #[arg(long, value_name = "STRING")]
+    pub mfa: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    #[command(flatten)]
+    pub bypass_governance_retention: BypassGovernanceRetentionArgs,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct BypassGovernanceRetentionArgs {
+    /// Bypass the restrictions of the governance-mode Object Lock
+    #[arg(long, overrides_with = "no_bypass_governance_retention")]
+    bypass_governance_retention: bool,
+
+    /// Do not bypass the restrictions of the governance-mode Object Lock
+    #[arg(long, overrides_with = "bypass_governance_retention")]
+    no_bypass_governance_retention: bool,
+}
+
+impl BypassGovernanceRetentionArgs {
+    pub fn value(&self) -> Option<bool> {
+        if self.bypass_governance_retention {
+            Some(true)
+        } else if self.no_bypass_governance_retention {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Args)]

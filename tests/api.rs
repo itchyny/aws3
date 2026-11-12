@@ -180,3 +180,153 @@ fn head_object_errors() {
         );
     }
 }
+
+#[test]
+fn delete_object() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    let result = env
+        .run(&[
+            "api",
+            "delete-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            "a.txt",
+            "--bypass-governance-retention",
+            "--if-match-size",
+            "5",
+            "--if-match-last-modified-time",
+            "2030-01-01T00:00:00Z",
+        ])
+        .success();
+    // The empty response is not printed.
+    assert_eq!(result.stdout, "");
+    assert_eq!(env.object_content("bucket", "a.txt"), None);
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(request.method, http::Method::DELETE);
+    assert_eq!(request.uri.path(), "/bucket/a.txt");
+    let header = |name: &str| request.headers.get(name).unwrap().to_str().unwrap();
+    assert_eq!(header("x-amz-bypass-governance-retention"), "true");
+    assert_eq!(header("x-amz-if-match-size"), "5");
+    assert_eq!(
+        header("x-amz-if-match-last-modified-time"),
+        "Tue, 01 Jan 2030 00:00:00 GMT"
+    );
+
+    let result = env.run(&[
+        "api",
+        "delete-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "a.txt",
+        "--if-match-last-modified-time",
+        "x",
+    ]);
+    assert_eq!(result.code, 252);
+    assert!(
+        result
+            .stderr
+            .contains("Invalid type for parameter IfMatchLastModifiedTime, value: x,")
+    );
+}
+
+#[test]
+fn delete_objects() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    env.object("bucket", "b.txt", "b");
+    env.object("bucket", "c.txt", "c");
+    let result = env
+        .run(&[
+            "api",
+            "delete-objects",
+            "--bucket",
+            "bucket",
+            "--delete",
+            "Objects=[{Key=a.txt},{Key=b.txt,Size=1}],Quiet=false",
+        ])
+        .success();
+    assert_eq!(
+        result.stdout,
+        r#"{
+    "Deleted": [
+        {
+            "Key": "a.txt"
+        },
+        {
+            "Key": "b.txt"
+        }
+    ]
+}
+"#
+    );
+    assert_eq!(env.object_content("bucket", "a.txt"), None);
+    assert_eq!(env.object_content("bucket", "b.txt"), None);
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(request.method, http::Method::POST);
+    assert_eq!(request.uri.query(), Some("delete"));
+    assert!(request.headers.contains_key("x-amz-checksum-crc32"));
+
+    env.write("delete.json", r#"{"Objects": [{"Key": "c.txt"}]}"#);
+    let result = env
+        .run(&[
+            "api",
+            "delete-objects",
+            "--bucket",
+            "bucket",
+            "--delete",
+            "file://delete.json",
+            "--checksum-algorithm",
+            "SHA256",
+        ])
+        .success();
+    assert!(result.stdout.contains("\"Key\": \"c.txt\""));
+    assert_eq!(env.object_content("bucket", "c.txt"), None);
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert!(request.headers.contains_key("x-amz-checksum-sha256"));
+}
+
+#[test]
+fn delete_objects_errors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for (delete, code, message) in [
+        (
+            r#"{"Objects":[{"Key":"a","Size":"3","Foo":null}],"Bar":1}"#,
+            252,
+            "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+             Unknown parameter in Delete: \"Bar\", must be one of: Objects, Quiet\n\
+             Unknown parameter in Delete.Objects[0]: \"Foo\", must be one of: Key, VersionId, ETag, LastModifiedTime, Size\n\
+             Invalid type for parameter Delete.Objects[0].Size, value: 3, type: <class 'str'>, valid types: <class 'int'>\n",
+        ),
+        (
+            "Objects=[{Key=a,Size=x}]",
+            255,
+            "\naws3: [ERROR]: invalid literal for int() with base 10: 'x'\n",
+        ),
+        (
+            "Objects=[{Key=a}",
+            252,
+            "\naws3: [ERROR]: An error occurred (ParamValidation): Error parsing parameter '--delete': \
+             Expected: ',', received: 'EOF' for input:\n Objects=[{Key=a}\n                ^\n",
+        ),
+    ] {
+        let result = env.run(&[
+            "api",
+            "delete-objects",
+            "--bucket",
+            "bucket",
+            "--delete",
+            delete,
+        ]);
+        assert_eq!(result.code, code, "{delete}");
+        assert_eq!(result.stderr, message, "{delete}");
+    }
+}

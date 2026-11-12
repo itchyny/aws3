@@ -1,8 +1,11 @@
 //! The api command, which calls the operations of the S3 API in the same way
 //! as `aws s3api`, and prints the responses in the same format.
 
+mod delete_object;
+mod delete_objects;
 mod head_object;
 mod output;
+mod shape;
 
 use std::io::{self, Write};
 use std::process::ExitCode;
@@ -37,6 +40,8 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
     let client = client::new_client(&config, None);
     let response = match &args.operation {
         ApiOperation::HeadObject(args) => head_object::run(&client, args).await?,
+        ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?,
+        ApiOperation::DeleteObjects(args) => delete_objects::run(&client, args).await?,
     };
     print(&response);
     Ok(ExitCode::SUCCESS)
@@ -55,7 +60,7 @@ fn print(response: &Value) {
 fn parse_int(value: Option<&str>) -> Result<Option<i32>, Error> {
     value
         .map(|value| {
-            value.trim().parse().map_err(|_| {
+            i32::try_from(shape::python_int(value)?).map_err(|_| {
                 Error::new(format!("invalid literal for int() with base 10: '{value}'"))
             })
         })
