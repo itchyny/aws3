@@ -6,6 +6,7 @@ use aws_sdk_s3::types::{
     CreateBucketConfiguration, DataRedundancy, LocationInfo, LocationType, ObjectOwnership, Tag,
 };
 
+use super::members;
 use super::output::Response;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::CreateBucketArgs;
@@ -90,47 +91,48 @@ pub async fn run(client: &Client, args: &CreateBucketArgs) -> Result<Value, Erro
 
 /// Builds the configuration from the validated argument.
 fn configuration(value: &Value) -> Result<CreateBucketConfiguration, Error> {
-    let str = |value: Option<&Value>, key| match value.and_then(|value| value.get(key)) {
-        Some(Value::Str(value)) => Some(value.clone()),
-        _ => None,
-    };
-    let tags = match value.get("Tags") {
-        Some(Value::List(tags)) => Some(
-            tags.iter()
+    let tags = value
+        .get("Tags")
+        .map(|_| {
+            members::list(value, "Tags")
+                .iter()
                 .map(|tag| {
                     Tag::builder()
-                        .set_key(str(Some(tag), "Key"))
-                        .set_value(str(Some(tag), "Value"))
+                        .set_key(members::str(tag, "Key"))
+                        .set_value(members::str(tag, "Value"))
                         .build()
                         .map_err(|err| Error::new(err.to_string()))
                 })
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-        _ => None,
-    };
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
     let location = value.get("Location").map(|location| {
         LocationInfo::builder()
             .set_type(
-                str(Some(location), "Type")
+                members::str(location, "Type")
                     .as_deref()
                     .map(LocationType::from),
             )
-            .set_name(str(Some(location), "Name"))
+            .set_name(members::str(location, "Name"))
             .build()
     });
     let bucket = value.get("Bucket").map(|bucket| {
         BucketInfo::builder()
             .set_data_redundancy(
-                str(Some(bucket), "DataRedundancy")
+                members::str(bucket, "DataRedundancy")
                     .as_deref()
                     .map(DataRedundancy::from),
             )
-            .set_type(str(Some(bucket), "Type").as_deref().map(BucketType::from))
+            .set_type(
+                members::str(bucket, "Type")
+                    .as_deref()
+                    .map(BucketType::from),
+            )
             .build()
     });
     Ok(CreateBucketConfiguration::builder()
         .set_location_constraint(
-            str(Some(value), "LocationConstraint")
+            members::str(value, "LocationConstraint")
                 .as_deref()
                 .map(BucketLocationConstraint::from),
         )

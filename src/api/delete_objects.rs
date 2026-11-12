@@ -1,15 +1,14 @@
 //! The delete-objects operation.
 
 use aws_sdk_s3::Client;
-use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::{ChecksumAlgorithm, Delete, ObjectIdentifier, RequestPayer};
 
+use super::members;
 use super::output::Response;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::DeleteObjectsArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;
-use crate::transfer::params::parse_timestamp;
 use crate::value::Value;
 
 static OBJECT_IDENTIFIER: Structure = Structure {
@@ -90,46 +89,22 @@ pub async fn run(client: &Client, args: &DeleteObjectsArgs) -> Result<Value, Err
 
 /// Builds the request from the validated argument.
 fn delete(value: &Value) -> Result<Delete, Error> {
-    let str = |value: &Value, key| match value.get(key) {
-        Some(Value::Str(value)) => Some(value.clone()),
-        _ => None,
-    };
-    let objects = match value.get("Objects") {
-        Some(Value::List(objects)) => objects.as_slice(),
-        _ => &[],
-    };
-    let objects = objects
+    let objects = members::list(value, "Objects")
         .iter()
         .map(|object| {
             ObjectIdentifier::builder()
-                .set_key(str(object, "Key"))
-                .set_version_id(str(object, "VersionId"))
-                .set_e_tag(str(object, "ETag"))
-                .set_last_modified_time(object.get("LastModifiedTime").and_then(timestamp))
-                .set_size(match object.get("Size") {
-                    Some(Value::Int(size)) => size.parse().ok(),
-                    _ => None,
-                })
+                .set_key(members::str(object, "Key"))
+                .set_version_id(members::str(object, "VersionId"))
+                .set_e_tag(members::str(object, "ETag"))
+                .set_last_modified_time(members::timestamp(object, "LastModifiedTime"))
+                .set_size(members::long(object, "Size"))
                 .build()
                 .map_err(|err| Error::new(err.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     Delete::builder()
         .set_objects(Some(objects))
-        .set_quiet(match value.get("Quiet") {
-            Some(Value::Bool(quiet)) => Some(*quiet),
-            _ => None,
-        })
+        .set_quiet(members::bool(value, "Quiet"))
         .build()
         .map_err(|err| Error::new(err.to_string()))
-}
-
-/// Returns the timestamp of the string or the epoch seconds.
-fn timestamp(value: &Value) -> Option<DateTime> {
-    match value {
-        Value::Str(value) => parse_timestamp(value).ok(),
-        Value::Int(value) => value.parse().ok().map(DateTime::from_secs),
-        Value::Float(value) => Some(DateTime::from_secs_f64(*value)),
-        _ => None,
-    }
 }

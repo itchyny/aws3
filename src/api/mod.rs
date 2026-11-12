@@ -14,6 +14,7 @@ mod jmespath;
 mod list_buckets;
 mod list_object_versions;
 mod list_objects_v2;
+mod members;
 mod output;
 mod paginate;
 mod put_object;
