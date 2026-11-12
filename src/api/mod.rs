@@ -2,6 +2,8 @@
 //! as `aws s3api`, and prints the responses in the same format.
 
 mod copy_object;
+mod create_bucket;
+mod delete_bucket;
 mod delete_object;
 mod delete_objects;
 mod get_bucket_location;
@@ -64,6 +66,8 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::ListBuckets(args) => list_buckets::run(&client, args, global).await?,
         ApiOperation::HeadBucket(args) => head_bucket::run(&client, args).await?,
         ApiOperation::GetBucketLocation(args) => get_bucket_location::run(&client, args).await?,
+        ApiOperation::CreateBucket(args) => create_bucket::run(&client, args).await?,
+        ApiOperation::DeleteBucket(args) => delete_bucket::run(&client, args).await?,
     };
     print(&response);
     Ok(ExitCode::SUCCESS)

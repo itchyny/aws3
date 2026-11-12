@@ -992,3 +992,67 @@ fn list_object_versions() {
          along with pagination arguments: --page-size\n"
     );
 }
+
+#[test]
+fn create_bucket_and_delete_bucket() {
+    let env = Env::new();
+    let result = env
+        .run(&[
+            "api",
+            "create-bucket",
+            "--bucket",
+            "new-bucket",
+            "--create-bucket-configuration",
+            "LocationConstraint=us-west-2,Tags=[{Key=a,Value=b}]",
+            "--object-ownership",
+            "BucketOwnerEnforced",
+        ])
+        .success();
+    assert_eq!(result.stdout, "");
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(request.method, http::Method::PUT);
+    assert_eq!(request.uri.path(), "/new-bucket/");
+    assert_eq!(
+        request.headers.get("x-amz-object-ownership").unwrap(),
+        "BucketOwnerEnforced"
+    );
+
+    let result = env.run(&["api", "create-bucket", "--bucket", "new-bucket"]);
+    assert_eq!(result.code, 254);
+    assert!(
+        result.stderr.starts_with(
+            "\naws3: [ERROR]: An error occurred (BucketAlreadyExists) when calling the CreateBucket operation: "
+        ),
+        "{}",
+        result.stderr
+    );
+
+    let result = env
+        .run(&["api", "delete-bucket", "--bucket", "new-bucket"])
+        .success();
+    assert_eq!(result.stdout, "");
+    let result = env.run(&["api", "delete-bucket", "--bucket", "new-bucket"]);
+    assert_eq!(result.code, 254);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (NoSuchBucket) when calling the DeleteBucket operation: Unknown\n"
+    );
+
+    let result = env.run(&[
+        "api",
+        "create-bucket",
+        "--bucket",
+        "new-bucket",
+        "--create-bucket-configuration",
+        "Tags=[{Key=a}],Foo=x",
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+         Unknown parameter in CreateBucketConfiguration: \"Foo\", must be one of: \
+         LocationConstraint, Location, Bucket, Tags\n\
+         Missing required parameter in CreateBucketConfiguration.Tags[0]: \"Value\"\n"
+    );
+}

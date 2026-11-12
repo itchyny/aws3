@@ -372,6 +372,82 @@ pub enum ApiOperation {
     HeadBucket(BucketArgs),
     /// Return the region the bucket resides in
     GetBucketLocation(BucketArgs),
+    /// Create a bucket
+    CreateBucket(CreateBucketArgs),
+    /// Delete an empty bucket
+    DeleteBucket(BucketArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CreateBucketArgs {
+    /// The canned ACL to apply to the bucket
+    #[arg(long, value_name = "STRING")]
+    pub acl: Option<String>,
+
+    /// The name of the bucket to create
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The configuration of the bucket, e.g. the location constraint and the tags
+    #[arg(
+        long,
+        value_name = "LocationConstraint=string,Tags=[{Key=string,Value=string},...]"
+    )]
+    pub create_bucket_configuration: Option<String>,
+
+    /// Allows the grantee the read, write, read ACP, and write ACP permissions on the bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_full_control: Option<String>,
+
+    /// Allows the grantee to list the objects in the bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_read: Option<String>,
+
+    /// Allows the grantee to read the bucket ACL
+    #[arg(long, value_name = "STRING")]
+    pub grant_read_acp: Option<String>,
+
+    /// Allows the grantee to create new objects in the bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_write: Option<String>,
+
+    /// Allows the grantee to write the ACL for the applicable bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_write_acp: Option<String>,
+
+    #[command(flatten)]
+    pub object_lock_enabled_for_bucket: ObjectLockEnabledForBucketArgs,
+
+    /// The ownership controls of the objects, e.g. BucketOwnerEnforced
+    #[arg(long, value_name = "STRING")]
+    pub object_ownership: Option<String>,
+
+    /// The namespace of the bucket, i.e. account-regional or global
+    #[arg(long, value_name = "STRING")]
+    pub bucket_namespace: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ObjectLockEnabledForBucketArgs {
+    /// Enable the Object Lock of the bucket
+    #[arg(long, overrides_with = "no_object_lock_enabled_for_bucket")]
+    object_lock_enabled_for_bucket: bool,
+
+    /// Do not enable the Object Lock of the bucket
+    #[arg(long, overrides_with = "object_lock_enabled_for_bucket")]
+    no_object_lock_enabled_for_bucket: bool,
+}
+
+impl ObjectLockEnabledForBucketArgs {
+    pub fn value(&self) -> Option<bool> {
+        if self.object_lock_enabled_for_bucket {
+            Some(true)
+        } else if self.no_object_lock_enabled_for_bucket {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Args)]
