@@ -17,6 +17,7 @@ mod list_objects_v2;
 mod members;
 mod output;
 mod paginate;
+mod put_bucket_encryption;
 mod put_bucket_policy;
 mod put_bucket_versioning;
 mod put_object;
@@ -88,6 +89,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
             put_public_access_block::run(&client, args).await?
         }
         ApiOperation::PutBucketPolicy(args) => put_bucket_policy::run(&client, args).await?,
+        ApiOperation::PutBucketEncryption(args) => {
+            put_bucket_encryption::run(&client, args).await?
+        }
     };
     let response = match query {
         Some(query) => query

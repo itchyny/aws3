@@ -382,6 +382,34 @@ pub enum ApiOperation {
     PutPublicAccessBlock(PutPublicAccessBlockArgs),
     /// Apply a policy to a bucket
     PutBucketPolicy(PutBucketPolicyArgs),
+    /// Set the default encryption of a bucket
+    PutBucketEncryption(PutBucketEncryptionArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketEncryptionArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// The configuration of the default encryption
+    #[arg(
+        long,
+        value_name = "Rules=[{ApplyServerSideEncryptionByDefault={SSEAlgorithm=string,KMSMasterKeyID=string},BucketKeyEnabled=boolean},...]"
+    )]
+    pub server_side_encryption_configuration: String,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
 }
 
 #[derive(Debug, Args)]

@@ -1274,3 +1274,47 @@ fn put_bucket_policy() {
         result.stderr
     );
 }
+
+#[test]
+fn put_bucket_encryption() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.run(&[
+        "api",
+        "put-bucket-encryption",
+        "--bucket",
+        "bucket",
+        "--server-side-encryption-configuration",
+        "Rules=[{ApplyServerSideEncryptionByDefault={SSEAlgorithm=aws:kms,KMSMasterKeyID=key},\
+         BucketKeyEnabled=true,BlockedEncryptionTypes={EncryptionType=SSE-C}}]",
+    ]);
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<ServerSideEncryptionConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+             <Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm>\
+             <KMSMasterKeyID>key</KMSMasterKeyID></ApplyServerSideEncryptionByDefault>\
+             <BucketKeyEnabled>true</BucketKeyEnabled><BlockedEncryptionTypes>\
+             <EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule>\
+             </ServerSideEncryptionConfiguration>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+
+    let result = env.run(&[
+        "api",
+        "put-bucket-encryption",
+        "--bucket",
+        "bucket",
+        "--server-side-encryption-configuration",
+        "Rules=[{ApplyServerSideEncryptionByDefault={KMSMasterKeyID=key}}]",
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+         Missing required parameter in ServerSideEncryptionConfiguration.Rules[0]\
+         .ApplyServerSideEncryptionByDefault: \"SSEAlgorithm\"\n"
+    );
+}
