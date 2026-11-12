@@ -40,7 +40,7 @@ for the others.
 
 | Target | Operations |
 | --- | --- |
-| Objects | `head-object`, `get-object`, `put-object`, `copy-object`, `delete-object`, `delete-objects` |
+| Objects | `head-object`, `get-object`, `put-object`, `copy-object`, `delete-object`, `delete-objects`, `restore-object` |
 | Object listing | `list-objects-v2`, `list-object-versions` |
 | Buckets | `list-buckets`, `head-bucket`, `get-bucket-location`, `create-bucket`, `delete-bucket` |
 | Versioning | `get-bucket-versioning`, `put-bucket-versioning` |

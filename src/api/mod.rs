@@ -41,6 +41,7 @@ mod put_bucket_versioning;
 mod put_object;
 mod put_object_tagging;
 mod put_public_access_block;
+mod restore_object;
 pub mod shape;
 mod text;
 
@@ -89,6 +90,7 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::CopyObject(args) => copy_object::run(&client, args).await?.into(),
         ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?.into(),
         ApiOperation::DeleteObjects(args) => delete_objects::run(&client, args).await?.into(),
+        ApiOperation::RestoreObject(args) => restore_object::run(&client, args).await?.into(),
         ApiOperation::ListObjectsV2(args) => list_objects_v2::run(&client, args, global).await?,
         ApiOperation::ListObjectVersions(args) => {
             list_object_versions::run(&client, args, global).await?

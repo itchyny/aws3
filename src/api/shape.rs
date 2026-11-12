@@ -8,12 +8,17 @@ use crate::value::{Value, python_float};
 /// The shape of a member, a subset of the types of the models of botocore.
 #[derive(Debug)]
 pub enum Shape {
-    String { min: usize },
+    String {
+        min: usize,
+    },
     Boolean,
     Long,
     Timestamp,
     List(&'static Shape),
     Structure(&'static Structure),
+    /// Any value, which is neither converted nor validated, for the members
+    /// whose shapes are not modeled.
+    Any,
 }
 
 #[derive(Debug)]
@@ -159,6 +164,7 @@ fn validate(value: &Value, shape: &Shape, name: &str, errors: &mut Vec<String>) 
             }
         }
         (Shape::Structure(_), _) => invalid_type("<class 'dict'>"),
+        (Shape::Any, _) => {}
     }
 }
 

@@ -1949,9 +1949,13 @@ fn delete_bucket_tagging() {
     assert_eq!(query, "tagging");
 }
 
-/// Runs an operation of the tags of an object, which the fake server does not
-/// implement, and returns the method, the path and the query of the request.
-fn object_tagging(env: &Env, args: &[&str], name: &str) -> (http::Method, String, String) {
+/// Runs an operation on an object, which the fake server does not implement,
+/// and returns the method, the path and the query of the request.
+fn unimplemented_object_operation(
+    env: &Env,
+    args: &[&str],
+    name: &str,
+) -> (http::Method, String, String) {
     let mut command = vec!["api"];
     command.extend(args);
     let result = env.run(&command);
@@ -1977,7 +1981,7 @@ fn get_object_tagging() {
     let env = Env::new();
     env.bucket("bucket");
     env.object("bucket", "dir/a b.txt", "hello");
-    let (method, path, query) = object_tagging(
+    let (method, path, query) = unimplemented_object_operation(
         &env,
         &[
             "get-object-tagging",
@@ -2000,7 +2004,7 @@ fn put_object_tagging() {
     let env = Env::new();
     env.bucket("bucket");
     env.object("bucket", "a.txt", "hello");
-    let (method, path, query) = object_tagging(
+    let (method, path, query) = unimplemented_object_operation(
         &env,
         &[
             "put-object-tagging",
@@ -2032,7 +2036,7 @@ fn delete_object_tagging() {
     let env = Env::new();
     env.bucket("bucket");
     env.object("bucket", "a.txt", "hello");
-    let (method, path, query) = object_tagging(
+    let (method, path, query) = unimplemented_object_operation(
         &env,
         &[
             "delete-object-tagging",
@@ -2050,4 +2054,69 @@ fn delete_object_tagging() {
     assert_eq!(query, "tagging&versionId=v1");
     // The object is not deleted.
     assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"hello");
+}
+
+#[test]
+fn restore_object() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    let (method, path, query) = unimplemented_object_operation(
+        &env,
+        &[
+            "restore-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            "a.txt",
+            "--restore-request",
+            "Days=7,GlacierJobParameters={Tier=Standard},Description=test",
+        ],
+        "RestoreObject",
+    );
+    assert_eq!(method, http::Method::POST);
+    assert_eq!(path, "/bucket/a.txt");
+    assert_eq!(query, "restore");
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<RestoreRequest xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Days>7</Days>\
+             <GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters>\
+             <Description>test</Description></RestoreRequest>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+
+    // The objects in the archive tiers of Intelligent-Tiering are restored
+    // without the request, whose empty body has the checksum.
+    unimplemented_object_operation(
+        &env,
+        &["restore-object", "--bucket", "bucket", "--key", "a.txt"],
+        "RestoreObject",
+    );
+    let (body, headers) = last_request_body(&env);
+    assert_eq!(body, "");
+    assert!(
+        headers.contains(&"x-amz-checksum-crc64nvme: AAAAAAAAAAA=".to_owned()),
+        "{headers:?}"
+    );
+
+    // The restores of S3 Select are not supported.
+    let result = env.run(&[
+        "api",
+        "restore-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "a.txt",
+        "--restore-request",
+        "Type=SELECT",
+    ]);
+    assert_eq!(result.code, 255);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: RestoreRequest.Type of the restores of S3 Select is not supported by \
+         the api command, use aws s3api restore-object instead\n"
+    );
 }

@@ -362,6 +362,8 @@ pub enum ApiOperation {
     DeleteObject(DeleteObjectArgs),
     /// Remove multiple objects from a bucket in a single request
     DeleteObjects(DeleteObjectsArgs),
+    /// Restore a temporary copy of an archived object
+    RestoreObject(RestoreObjectArgs),
     /// List the objects in a bucket
     ListObjectsV2(ListObjectsV2Args),
     /// List the versions of the objects in a bucket
@@ -1588,6 +1590,40 @@ pub struct DeleteObjectTaggingArgs {
     /// The version ID of the object
     #[arg(long)]
     pub version_id: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RestoreObjectArgs {
+    /// The name of the bucket that contains the object
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The key of the object to restore
+    #[arg(long)]
+    pub key: String,
+
+    /// The version ID of the object to restore
+    #[arg(long)]
+    pub version_id: Option<String>,
+
+    /// The parameters of the restoration
+    #[arg(
+        long,
+        value_name = "Days=integer,GlacierJobParameters={Tier=string},Description=string"
+    )]
+    pub restore_request: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
 
     /// The account ID of the expected bucket owner
     #[arg(long, value_name = "STRING")]
