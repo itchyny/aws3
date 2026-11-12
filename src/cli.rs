@@ -406,6 +406,8 @@ pub enum ApiOperation {
     DeleteBucketLifecycle(BucketArgs),
     /// Return the CORS configuration of a bucket
     GetBucketCors(BucketArgs),
+    /// Set the CORS configuration of a bucket
+    PutBucketCors(PutBucketCorsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1450,6 +1452,32 @@ impl BypassGovernanceRetentionArgs {
             None
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketCorsArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The CORS configuration, e.g. file://cors.json
+    #[arg(
+        long,
+        value_name = "CORSRules=[{AllowedMethods=[string,...],AllowedOrigins=[string,...]},...]"
+    )]
+    pub cors_configuration: String,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
 }
 
 #[derive(Debug, Args)]

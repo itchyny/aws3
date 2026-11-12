@@ -1640,3 +1640,43 @@ fn get_bucket_cors() {
     let query = get_bucket_configuration(&env, "get-bucket-cors", "GetBucketCors");
     assert_eq!(query, "cors");
 }
+
+#[test]
+fn put_bucket_cors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.run(&[
+        "api",
+        "put-bucket-cors",
+        "--bucket",
+        "bucket",
+        "--cors-configuration",
+        "CORSRules=[{ID=web,AllowedMethods=[GET,PUT],AllowedOrigins=*,MaxAgeSeconds=60}]",
+    ]);
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<CORSConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><CORSRule>\
+             <ID>web</ID><AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod>\
+             <AllowedOrigin>*</AllowedOrigin><MaxAgeSeconds>60</MaxAgeSeconds></CORSRule>\
+             </CORSConfiguration>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+
+    let result = env.run(&[
+        "api",
+        "put-bucket-cors",
+        "--bucket",
+        "bucket",
+        "--cors-configuration",
+        "CORSRules=[{AllowedMethods=[GET]}]",
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+         Missing required parameter in CORSConfiguration.CORSRules[0]: \"AllowedOrigins\"\n"
+    );
+}

@@ -27,6 +27,7 @@ mod list_objects_v2;
 mod members;
 mod output;
 mod paginate;
+mod put_bucket_cors;
 mod put_bucket_encryption;
 mod put_bucket_lifecycle_configuration;
 mod put_bucket_policy;
@@ -133,6 +134,7 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
             delete_bucket_lifecycle::run(&client, args).await?.into()
         }
         ApiOperation::GetBucketCors(args) => get_bucket_cors::run(&client, args).await?.into(),
+        ApiOperation::PutBucketCors(args) => put_bucket_cors::run(&client, args).await?.into(),
     };
     print(responses, format, query.as_ref())?;
     Ok(ExitCode::SUCCESS)
