@@ -18,6 +18,7 @@ mod table;
 mod tls;
 mod transfer;
 mod value;
+mod yaml;
 
 use std::process::ExitCode;
 
