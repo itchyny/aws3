@@ -1948,3 +1948,49 @@ fn delete_bucket_tagging() {
     let query = delete_bucket_configuration(&env, "delete-bucket-tagging", "DeleteBucketTagging");
     assert_eq!(query, "tagging");
 }
+
+/// Runs an operation of the tags of an object, which the fake server does not
+/// implement, and returns the method, the path and the query of the request.
+fn object_tagging(env: &Env, args: &[&str], name: &str) -> (http::Method, String, String) {
+    let mut command = vec!["api"];
+    command.extend(args);
+    let result = env.run(&command);
+    assert_eq!(result.code, 254);
+    assert_eq!(
+        result.stderr,
+        format!(
+            "\naws3: [ERROR]: An error occurred (NotImplemented) when calling the {name} \
+             operation: {name} is not implemented yet\n"
+        )
+    );
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    (
+        request.method.clone(),
+        request.uri.path().to_owned(),
+        request.uri.query().unwrap().to_owned(),
+    )
+}
+
+#[test]
+fn get_object_tagging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "dir/a b.txt", "hello");
+    let (method, path, query) = object_tagging(
+        &env,
+        &[
+            "get-object-tagging",
+            "--bucket",
+            "bucket",
+            "--key",
+            "dir/a b.txt",
+            "--version-id",
+            "v1",
+        ],
+        "GetObjectTagging",
+    );
+    assert_eq!(method, http::Method::GET);
+    assert_eq!(path, "/bucket/dir/a%20b.txt");
+    assert_eq!(query, "tagging&versionId=v1");
+}

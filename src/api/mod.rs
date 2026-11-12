@@ -20,6 +20,7 @@ mod get_bucket_policy;
 mod get_bucket_tagging;
 mod get_bucket_versioning;
 mod get_object;
+mod get_object_tagging;
 mod get_public_access_block;
 mod head_bucket;
 mod head_object;
@@ -152,6 +153,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::DeleteBucketTagging(args) => {
             delete_bucket_tagging::run(&client, args).await?.into()
+        }
+        ApiOperation::GetObjectTagging(args) => {
+            get_object_tagging::run(&client, args).await?.into()
         }
     };
     let colored = match global.color {
