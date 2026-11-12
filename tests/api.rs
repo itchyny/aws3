@@ -1318,3 +1318,78 @@ fn put_bucket_encryption() {
          .ApplyServerSideEncryptionByDefault: \"SSEAlgorithm\"\n"
     );
 }
+
+#[test]
+fn put_bucket_lifecycle_configuration() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write(
+        "lifecycle.json",
+        r#"{"Rules": [{"ID": "archive", "Filter": {"And": {"Prefix": "data/",
+            "Tags": [{"Key": "k", "Value": "v"}], "ObjectSizeGreaterThan": 1024}},
+            "Status": "Enabled", "Transitions": [{"Days": 30, "StorageClass": "GLACIER"}],
+            "Expiration": {"Date": "2030-01-01T00:00:00Z"}}]}"#,
+    );
+    env.run(&[
+        "api",
+        "put-bucket-lifecycle-configuration",
+        "--bucket",
+        "bucket",
+        "--lifecycle-configuration",
+        "file://lifecycle.json",
+        "--transition-default-minimum-object-size",
+        "all_storage_classes_128K",
+    ]);
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<LifecycleConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Rule>\
+             <Expiration><Date>2030-01-01T00:00:00Z</Date></Expiration><ID>archive</ID>\
+             <Filter><And><Prefix>data/</Prefix><Tag><Key>k</Key><Value>v</Value></Tag>\
+             <ObjectSizeGreaterThan>1024</ObjectSizeGreaterThan></And></Filter>\
+             <Status>Enabled</Status><Transition><Days>30</Days>\
+             <StorageClass>GLACIER</StorageClass></Transition></Rule></LifecycleConfiguration>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+    let requests = env.requests();
+    assert_eq!(
+        requests
+            .last()
+            .unwrap()
+            .headers
+            .get("x-amz-transition-default-minimum-object-size")
+            .unwrap(),
+        "all_storage_classes_128K"
+    );
+
+    for (value, code, message) in [
+        (
+            "Rules=[{Filter={Prefix=x}}]",
+            252,
+            "An error occurred (ParamValidation): Parameter validation failed:\n\
+             Missing required parameter in LifecycleConfiguration.Rules[0]: \"Status\"",
+        ),
+        (
+            "Rules=[{Status=Enabled,Expiration={Days=x}}]",
+            255,
+            "invalid literal for int() with base 10: 'x'",
+        ),
+    ] {
+        let result = env.run(&[
+            "api",
+            "put-bucket-lifecycle-configuration",
+            "--bucket",
+            "bucket",
+            "--lifecycle-configuration",
+            value,
+        ]);
+        assert_eq!(result.code, code, "{value}");
+        assert_eq!(
+            result.stderr,
+            format!("\naws3: [ERROR]: {message}\n"),
+            "{value}"
+        );
+    }
+}

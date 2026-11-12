@@ -20,6 +20,10 @@ pub fn bool(value: &Value, key: &str) -> Option<bool> {
     }
 }
 
+pub fn int(value: &Value, key: &str) -> Option<i32> {
+    long(value, key).and_then(|value| i32::try_from(value).ok())
+}
+
 pub fn long(value: &Value, key: &str) -> Option<i64> {
     match value.get(key) {
         Some(Value::Int(value)) => value.parse().ok(),

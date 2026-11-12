@@ -384,6 +384,34 @@ pub enum ApiOperation {
     PutBucketPolicy(PutBucketPolicyArgs),
     /// Set the default encryption of a bucket
     PutBucketEncryption(PutBucketEncryptionArgs),
+    /// Set the lifecycle configuration of a bucket
+    PutBucketLifecycleConfiguration(PutBucketLifecycleConfigurationArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketLifecycleConfigurationArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// The lifecycle configuration, e.g. file://lifecycle.json
+    #[arg(
+        long,
+        value_name = "Rules=[{ID=string,Filter={Prefix=string},Status=string,Expiration={Days=integer}},...]"
+    )]
+    pub lifecycle_configuration: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// The default minimum size of the objects to transition, e.g. all_storage_classes_128K
+    #[arg(long, value_name = "STRING")]
+    pub transition_default_minimum_object_size: Option<String>,
 }
 
 #[derive(Debug, Args)]
