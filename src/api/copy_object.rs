@@ -136,7 +136,21 @@ pub async fn run(client: &Client, args: &CopyObjectArgs) -> Result<Value, Error>
         })
         .await
         .map_err(|err| Error::sdk("CopyObject", err))?;
+    // The members of the headers precede the payload, like botocore.
     let mut response = Response::default();
+    response.str("Expiration", output.expiration());
+    response.str("CopySourceVersionId", output.copy_source_version_id());
+    response.str("VersionId", output.version_id());
+    response.str("ServerSideEncryption", output.server_side_encryption());
+    response.str("SSECustomerAlgorithm", output.sse_customer_algorithm());
+    response.str("SSECustomerKeyMD5", output.sse_customer_key_md5());
+    response.str("SSEKMSKeyId", output.ssekms_key_id());
+    response.str(
+        "SSEKMSEncryptionContext",
+        output.ssekms_encryption_context(),
+    );
+    response.bool("BucketKeyEnabled", output.bucket_key_enabled());
+    response.str("RequestCharged", output.request_charged());
     if let Some(result) = output.copy_object_result() {
         let mut copy_object_result = Response::default();
         copy_object_result.str("ETag", result.e_tag());
@@ -154,19 +168,6 @@ pub async fn run(client: &Client, args: &CopyObjectArgs) -> Result<Value, Error>
         copy_object_result.str("ChecksumXXHASH128", result.checksum_xxhash128());
         response.value("CopyObjectResult", copy_object_result.build());
     }
-    response.str("Expiration", output.expiration());
-    response.str("CopySourceVersionId", output.copy_source_version_id());
-    response.str("VersionId", output.version_id());
-    response.str("ServerSideEncryption", output.server_side_encryption());
-    response.str("SSECustomerAlgorithm", output.sse_customer_algorithm());
-    response.str("SSECustomerKeyMD5", output.sse_customer_key_md5());
-    response.str("SSEKMSKeyId", output.ssekms_key_id());
-    response.str(
-        "SSEKMSEncryptionContext",
-        output.ssekms_encryption_context(),
-    );
-    response.bool("BucketKeyEnabled", output.bucket_key_enabled());
-    response.str("RequestCharged", output.request_charged());
     Ok(response.build())
 }
 

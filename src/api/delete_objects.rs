@@ -60,7 +60,9 @@ pub async fn run(client: &Client, args: &DeleteObjectsArgs) -> Result<Value, Err
         })
         .await
         .map_err(|err| Error::sdk("DeleteObjects", err))?;
+    // The members of the headers precede those of the body, like botocore.
     let mut response = Response::default();
+    response.str("RequestCharged", output.request_charged());
     if !output.deleted().is_empty() {
         let deleted = output.deleted().iter().map(|deleted| {
             let mut response = Response::default();
@@ -72,7 +74,6 @@ pub async fn run(client: &Client, args: &DeleteObjectsArgs) -> Result<Value, Err
         });
         response.value("Deleted", Value::List(deleted.collect()));
     }
-    response.str("RequestCharged", output.request_charged());
     if !output.errors().is_empty() {
         let errors = output.errors().iter().map(|error| {
             let mut response = Response::default();
