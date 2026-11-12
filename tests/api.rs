@@ -1,3 +1,6 @@
+// The paths in the outputs assume Unix.
+#![cfg(unix)]
+
 mod common;
 
 use common::Env;
