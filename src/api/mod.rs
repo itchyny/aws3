@@ -4,6 +4,7 @@
 mod copy_object;
 mod create_bucket;
 mod delete_bucket;
+mod delete_bucket_policy;
 mod delete_object;
 mod delete_objects;
 mod delete_public_access_block;
@@ -103,6 +104,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::GetBucketPolicy(args) => get_bucket_policy::run(&client, args).await?.into(),
         ApiOperation::PutBucketPolicy(args) => put_bucket_policy::run(&client, args).await?.into(),
+        ApiOperation::DeleteBucketPolicy(args) => {
+            delete_bucket_policy::run(&client, args).await?.into()
+        }
         ApiOperation::GetBucketEncryption(args) => {
             get_bucket_encryption::run(&client, args).await?.into()
         }

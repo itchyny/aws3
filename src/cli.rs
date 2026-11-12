@@ -390,6 +390,8 @@ pub enum ApiOperation {
     GetBucketPolicy(BucketArgs),
     /// Apply a policy to a bucket
     PutBucketPolicy(PutBucketPolicyArgs),
+    /// Delete the policy of a bucket
+    DeleteBucketPolicy(BucketArgs),
     /// Return the default encryption of a bucket
     GetBucketEncryption(BucketArgs),
     /// Set the default encryption of a bucket

@@ -1606,3 +1606,11 @@ fn delete_public_access_block() {
     );
     assert_eq!(query, "publicAccessBlock");
 }
+
+#[test]
+fn delete_bucket_policy() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = delete_bucket_configuration(&env, "delete-bucket-policy", "DeleteBucketPolicy");
+    assert_eq!(query, "policy");
+}
