@@ -289,6 +289,21 @@ pub fn load_key(name: &str, value: Option<&str>) -> Result<Option<Vec<u8>>, Erro
         .map_err(|err| Error::param_validation(format!("Error parsing parameter '{name}': {err}")))
 }
 
+/// Loads the string argument from the parameter file of the value with the
+/// prefix, which is returned as it is without the prefix.
+pub fn load_string(name: &str, value: &str) -> Result<Value, Error> {
+    let error = |err| Error::param_validation(format!("Error parsing parameter '{name}': {err}"));
+    if let Some(path) = value.strip_prefix("file://") {
+        read_text_paramfile(value, path)
+            .map(Value::Str)
+            .map_err(error)
+    } else if let Some(path) = value.strip_prefix("fileb://") {
+        read_paramfile(value, path).map(Value::Bytes).map_err(error)
+    } else {
+        Ok(Value::Str(value.to_owned()))
+    }
+}
+
 /// Reads the parameter file of the value with the prefix, whose path is
 /// expanded like `get_file` of the AWS CLI.
 fn read_paramfile(value: &str, path: &str) -> Result<Vec<u8>, String> {

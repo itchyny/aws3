@@ -380,6 +380,57 @@ pub enum ApiOperation {
     PutBucketVersioning(PutBucketVersioningArgs),
     /// Set the configuration of the public access block of a bucket
     PutPublicAccessBlock(PutPublicAccessBlockArgs),
+    /// Apply a policy to a bucket
+    PutBucketPolicy(PutBucketPolicyArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketPolicyArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    #[command(flatten)]
+    pub confirm_remove_self_bucket_access: ConfirmRemoveSelfBucketAccessArgs,
+
+    /// The policy in JSON, e.g. file://policy.json
+    #[arg(long, value_name = "STRING")]
+    pub policy: String,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct ConfirmRemoveSelfBucketAccessArgs {
+    /// Confirm removing the permissions of the requester to change the policy
+    #[arg(long, overrides_with = "no_confirm_remove_self_bucket_access")]
+    confirm_remove_self_bucket_access: bool,
+
+    /// Do not confirm removing the permissions of the requester to change the policy
+    #[arg(long, overrides_with = "confirm_remove_self_bucket_access")]
+    no_confirm_remove_self_bucket_access: bool,
+}
+
+impl ConfirmRemoveSelfBucketAccessArgs {
+    pub fn value(&self) -> Option<bool> {
+        if self.confirm_remove_self_bucket_access {
+            Some(true)
+        } else if self.no_confirm_remove_self_bucket_access {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Args)]

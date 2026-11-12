@@ -1235,3 +1235,42 @@ fn put_public_access_block() {
          type: <class 'str'>, valid types: <class 'bool'>\n"
     );
 }
+
+#[test]
+fn put_bucket_policy() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let policy = r#"{"Version":"2012-10-17","Statement":[]}"#;
+    env.write("policy.json", policy);
+    for value in [policy, "file://policy.json"] {
+        env.run(&[
+            "api",
+            "put-bucket-policy",
+            "--bucket",
+            "bucket",
+            "--policy",
+            value,
+        ]);
+        let (body, headers) = last_request_body(&env);
+        assert_eq!(body, policy);
+        assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+    }
+
+    let result = env.run(&[
+        "api",
+        "put-bucket-policy",
+        "--bucket",
+        "bucket",
+        "--policy",
+        "file://missing.json",
+    ]);
+    assert_eq!(result.code, 252);
+    assert!(
+        result.stderr.starts_with(
+            "\naws3: [ERROR]: An error occurred (ParamValidation): Error parsing parameter \
+             '--policy': Unable to load paramfile file://missing.json: [Errno 2] No such file or directory: "
+        ),
+        "{}",
+        result.stderr
+    );
+}
