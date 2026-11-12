@@ -10,6 +10,7 @@ mod delete_bucket_policy;
 mod delete_object;
 mod delete_objects;
 mod delete_public_access_block;
+mod get_bucket_cors;
 mod get_bucket_encryption;
 mod get_bucket_lifecycle_configuration;
 mod get_bucket_location;
@@ -131,6 +132,7 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::DeleteBucketLifecycle(args) => {
             delete_bucket_lifecycle::run(&client, args).await?.into()
         }
+        ApiOperation::GetBucketCors(args) => get_bucket_cors::run(&client, args).await?.into(),
     };
     print(responses, format, query.as_ref())?;
     Ok(ExitCode::SUCCESS)

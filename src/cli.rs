@@ -404,6 +404,8 @@ pub enum ApiOperation {
     PutBucketLifecycleConfiguration(PutBucketLifecycleConfigurationArgs),
     /// Delete the lifecycle configuration of a bucket
     DeleteBucketLifecycle(BucketArgs),
+    /// Return the CORS configuration of a bucket
+    GetBucketCors(BucketArgs),
 }
 
 #[derive(Debug, Args)]

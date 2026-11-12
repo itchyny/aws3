@@ -1632,3 +1632,11 @@ fn delete_bucket_lifecycle() {
         delete_bucket_configuration(&env, "delete-bucket-lifecycle", "DeleteBucketLifecycle");
     assert_eq!(query, "lifecycle");
 }
+
+#[test]
+fn get_bucket_cors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "get-bucket-cors", "GetBucketCors");
+    assert_eq!(query, "cors");
+}
