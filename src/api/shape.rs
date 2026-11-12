@@ -163,7 +163,7 @@ fn validate(value: &Value, shape: &Shape, name: &str, errors: &mut Vec<String>) 
 }
 
 /// Returns the name of the type of the value in Python.
-fn type_name(value: &Value) -> &'static str {
+pub fn type_name(value: &Value) -> &'static str {
     match value {
         Value::Str(_) => "str",
         Value::Bytes(_) => "bytes",

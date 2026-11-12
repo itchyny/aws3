@@ -5,8 +5,10 @@ mod delete_object;
 mod delete_objects;
 mod head_object;
 mod output;
+mod put_object;
 mod shape;
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -15,7 +17,9 @@ use aws_sdk_s3::config::{ConfigBag, Intercept, RuntimeComponents};
 use aws_sdk_s3::primitives::DateTime;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::BeforeDeserializationInterceptorContextRef;
+use aws_smithy_types::base64;
 use clap::ValueEnum;
+use md5::{Digest, Md5};
 
 use crate::cli::{ApiArgs, ApiOperation, GlobalArgs, Output};
 use crate::client;
@@ -40,6 +44,7 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
     let client = client::new_client(&config, None);
     let response = match &args.operation {
         ApiOperation::HeadObject(args) => head_object::run(&client, args).await?,
+        ApiOperation::PutObject(args) => put_object::run(&config, &client, args).await?,
         ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?,
         ApiOperation::DeleteObjects(args) => delete_objects::run(&client, args).await?,
     };
@@ -81,6 +86,57 @@ fn parse_timestamp(member: &str, value: Option<&str>) -> Result<Option<DateTime>
             })
         })
         .transpose()
+}
+
+/// Parses the `--metadata` argument, whose values must be ASCII strings like
+/// `validate_ascii_metadata` of botocore, which fails on other types before
+/// validating the parameters.
+fn parse_metadata(value: Option<&str>) -> Result<Option<HashMap<String, String>>, Error> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let (pairs, _) = params::parse_map_argument("--metadata", value)?;
+    let mut metadata = HashMap::new();
+    for (key, value) in pairs {
+        let Value::Str(value) = value else {
+            return Err(Error::new(format!(
+                "'{}' object has no attribute 'encode'",
+                shape::type_name(&value)
+            )));
+        };
+        if !key.is_ascii() || !value.is_ascii() {
+            return Err(Error::param_validation(format!(
+                "Parameter validation failed:\nNon ascii characters found in S3 metadata for \
+                 key \"{key}\", value: \"{value}\".  \nS3 metadata can only contain ASCII \
+                 characters. "
+            )));
+        }
+        metadata.insert(key, value);
+    }
+    Ok(Some(metadata))
+}
+
+/// Returns the customer-provided key and its MD5 digest, where the key is
+/// base64 encoded and the digest is calculated unless the digest is given,
+/// like `sse_md5` of botocore.
+fn sse_customer_key(
+    key: Option<&str>,
+    key_md5: Option<&str>,
+) -> Result<(Option<String>, Option<String>), Error> {
+    let key_md5 = key_md5.map(str::to_owned);
+    let Some(key) = params::load_key("--sse-customer-key", key)? else {
+        return Ok((None, key_md5));
+    };
+    Ok(match key_md5 {
+        Some(key_md5) => (
+            Some(String::from_utf8_lossy(&key).into_owned()),
+            Some(key_md5),
+        ),
+        None => (
+            Some(base64::encode(&key)),
+            Some(base64::encode(Md5::digest(&key))),
+        ),
+    })
 }
 
 /// The interceptor to keep the headers of the response, whose order of the

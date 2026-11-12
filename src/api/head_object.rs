@@ -4,15 +4,12 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::head_object::HeadObjectOutput;
 use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::{ChecksumMode, RequestPayer};
-use aws_smithy_types::base64;
-use md5::{Digest, Md5};
 
 use super::output::Response;
-use super::{ResponseHeaders, parse_int, parse_timestamp};
+use super::{ResponseHeaders, parse_int, parse_timestamp, sse_customer_key};
 use crate::cli::HeadObjectArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;
-use crate::transfer::params::load_key;
 use crate::value::Value;
 
 pub async fn run(client: &Client, args: &HeadObjectArgs) -> Result<Value, Error> {
@@ -21,7 +18,10 @@ pub async fn run(client: &Client, args: &HeadObjectArgs) -> Result<Value, Error>
         parse_timestamp("IfUnmodifiedSince", args.if_unmodified_since.as_deref())?;
     let response_expires = parse_timestamp("ResponseExpires", args.response_expires.as_deref())?;
     let part_number = parse_int(args.part_number.as_deref())?;
-    let (sse_customer_key, sse_customer_key_md5) = sse_customer_key(args)?;
+    let (sse_customer_key, sse_customer_key_md5) = sse_customer_key(
+        args.sse_customer_key.as_deref(),
+        args.sse_customer_key_md5.as_deref(),
+    )?;
     let headers = ResponseHeaders::default();
     let output = Redirector::default()
         .send(client, &args.bucket, "HeadObject", |client| {
@@ -55,25 +55,6 @@ pub async fn run(client: &Client, args: &HeadObjectArgs) -> Result<Value, Error>
         .await
         .map_err(|err| Error::sdk("HeadObject", err))?;
     Ok(response(&output, &headers))
-}
-
-/// Returns the customer-provided key and its MD5 digest, where the key is
-/// base64 encoded and the digest is calculated unless the digest is given,
-/// like `sse_md5` of botocore.
-fn sse_customer_key(args: &HeadObjectArgs) -> Result<(Option<String>, Option<String>), Error> {
-    let Some(key) = load_key("--sse-customer-key", args.sse_customer_key.as_deref())? else {
-        return Ok((None, args.sse_customer_key_md5.clone()));
-    };
-    Ok(match &args.sse_customer_key_md5 {
-        Some(md5) => (
-            Some(String::from_utf8_lossy(&key).into_owned()),
-            Some(md5.clone()),
-        ),
-        None => (
-            Some(base64::encode(&key)),
-            Some(base64::encode(Md5::digest(&key))),
-        ),
-    })
 }
 
 fn response(output: &HeadObjectOutput, headers: &ResponseHeaders) -> Value {

@@ -66,7 +66,7 @@ pub enum Command {
     /// Set the website configuration for a bucket
     Website(WebsiteArgs),
     /// Call an operation of the S3 API
-    Api(ApiArgs),
+    Api(Box<ApiArgs>),
     /// Generate the completion script of the shell
     #[command(hide = true)]
     Completion(CompletionArgs),
@@ -352,6 +352,8 @@ pub struct ApiArgs {
 pub enum ApiOperation {
     /// Retrieve the metadata of an object without returning the object itself
     HeadObject(HeadObjectArgs),
+    /// Add an object to a bucket
+    PutObject(PutObjectArgs),
     /// Remove an object or a version of an object
     DeleteObject(DeleteObjectArgs),
     /// Remove multiple objects from a bucket in a single request
@@ -443,6 +445,255 @@ pub struct HeadObjectArgs {
     /// Enables the checksums in the response, i.e. ENABLED
     #[arg(long, value_name = "STRING")]
     pub checksum_mode: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PutObjectArgs {
+    /// The canned ACL to apply to the object
+    #[arg(long, value_name = "STRING")]
+    pub acl: Option<String>,
+
+    /// The path of the file to upload
+    #[arg(long, value_name = "PATH")]
+    pub body: Option<String>,
+
+    /// The name of the bucket to which the object is added
+    #[arg(long)]
+    pub bucket: String,
+
+    /// Caching behavior along the request/reply chain
+    #[arg(long, value_name = "STRING")]
+    pub cache_control: Option<String>,
+
+    /// Presentational information for the object
+    #[arg(long, value_name = "STRING")]
+    pub content_disposition: Option<String>,
+
+    /// The content encodings that have been applied to the object
+    #[arg(long, value_name = "STRING")]
+    pub content_encoding: Option<String>,
+
+    /// The language the content is in
+    #[arg(long, value_name = "STRING")]
+    pub content_language: Option<String>,
+
+    /// The size of the body in bytes
+    #[arg(long, value_name = "LONG", allow_negative_numbers = true)]
+    pub content_length: Option<i64>,
+
+    /// The base64-encoded 128-bit MD5 digest of the body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// A standard MIME type describing the format of the contents
+    #[arg(long, value_name = "STRING")]
+    pub content_type: Option<String>,
+
+    /// The algorithm used to create the checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    #[command(flatten)]
+    pub checksums: ChecksumArgs,
+
+    /// The date and time at which the object is no longer cacheable
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub expires: Option<String>,
+
+    /// Upload the object only if its entity tag (ETag) is the same as the one specified
+    #[arg(long, value_name = "ETAG")]
+    pub if_match: Option<String>,
+
+    /// Upload the object only if its entity tag (ETag) is different from the one specified
+    #[arg(long, value_name = "ETAG")]
+    pub if_none_match: Option<String>,
+
+    /// Gives the grantee READ, READ_ACP, and WRITE_ACP permissions on the object
+    #[arg(long, value_name = "STRING")]
+    pub grant_full_control: Option<String>,
+
+    /// Allows the grantee to read the object data and its metadata
+    #[arg(long, value_name = "STRING")]
+    pub grant_read: Option<String>,
+
+    /// Allows the grantee to read the object ACL
+    #[arg(long, value_name = "STRING")]
+    pub grant_read_acp: Option<String>,
+
+    /// Allows the grantee to write the ACL for the applicable object
+    #[arg(long, value_name = "STRING")]
+    pub grant_write_acp: Option<String>,
+
+    /// The object key
+    #[arg(long)]
+    pub key: String,
+
+    /// The offset in bytes to append the data to the object
+    #[arg(long, value_name = "LONG", allow_negative_numbers = true)]
+    pub write_offset_bytes: Option<i64>,
+
+    /// A map of metadata to store with the object
+    #[arg(long, value_name = "KeyName1=string,KeyName2=string")]
+    pub metadata: Option<String>,
+
+    /// The server-side encryption algorithm, e.g. AES256, aws:kms
+    #[arg(long, value_name = "STRING")]
+    pub server_side_encryption: Option<String>,
+
+    /// The storage class of the object, e.g. STANDARD
+    #[arg(long, value_name = "STRING")]
+    pub storage_class: Option<String>,
+
+    /// Redirects the requests for the object to another object or URL
+    #[arg(long, value_name = "STRING")]
+    pub website_redirect_location: Option<String>,
+
+    /// The algorithm of the server-side encryption with the customer-provided key, e.g. AES256
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_algorithm: Option<String>,
+
+    /// The customer-provided key of the server-side encryption
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_key: Option<String>,
+
+    /// The base64-encoded MD5 digest of the customer-provided key
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_key_md5: Option<String>,
+
+    /// The ID of the KMS key to use for the object encryption
+    #[arg(long, value_name = "STRING")]
+    pub ssekms_key_id: Option<String>,
+
+    /// The base64-encoded JSON of the encryption context of the KMS key
+    #[arg(long, value_name = "STRING")]
+    pub ssekms_encryption_context: Option<String>,
+
+    #[command(flatten)]
+    pub bucket_key_enabled: BucketKeyEnabledArgs,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    /// The tag-set of the object encoded as URL query parameters, e.g. Key1=Value1
+    #[arg(long, value_name = "STRING")]
+    pub tagging: Option<String>,
+
+    /// The Object Lock mode to apply to the object, i.e. GOVERNANCE or COMPLIANCE
+    #[arg(long, value_name = "STRING")]
+    pub object_lock_mode: Option<String>,
+
+    /// The date and time when the Object Lock of the object expires
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub object_lock_retain_until_date: Option<String>,
+
+    /// The legal hold status of the object, i.e. ON or OFF
+    #[arg(long, value_name = "STRING")]
+    pub object_lock_legal_hold_status: Option<String>,
+
+    /// The event hold status of the object, i.e. ON or OFF
+    #[arg(long, value_name = "STRING")]
+    pub object_lock_event_hold: Option<String>,
+
+    /// The number of days of the event hold of the object
+    #[arg(long, value_name = "INTEGER", allow_negative_numbers = true)]
+    pub object_lock_event_hold_duration_days: Option<String>,
+
+    /// The number of years of the event hold of the object
+    #[arg(long, value_name = "INTEGER", allow_negative_numbers = true)]
+    pub object_lock_event_hold_duration_years: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+}
+
+/// The base64-encoded checksums of the object, which are sent instead of
+/// being calculated.
+#[derive(Debug, Args)]
+pub struct ChecksumArgs {
+    /// The base64-encoded CRC32 checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_crc32: Option<String>,
+
+    /// The base64-encoded CRC32C checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_crc32_c: Option<String>,
+
+    /// The base64-encoded CRC64NVME checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_crc64_nvme: Option<String>,
+
+    /// The base64-encoded SHA1 digest of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_sha1: Option<String>,
+
+    /// The base64-encoded SHA256 digest of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_sha256: Option<String>,
+
+    /// The base64-encoded SHA512 digest of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_sha512: Option<String>,
+
+    /// The base64-encoded MD5 digest of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_md5: Option<String>,
+
+    /// The base64-encoded XXHASH64 checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_xxhash64: Option<String>,
+
+    /// The base64-encoded XXHASH3 checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_xxhash3: Option<String>,
+
+    /// The base64-encoded XXHASH128 checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_xxhash128: Option<String>,
+}
+
+impl ChecksumArgs {
+    /// Returns whether any checksum is given.
+    pub fn is_empty(&self) -> bool {
+        [
+            &self.checksum_crc32,
+            &self.checksum_crc32_c,
+            &self.checksum_crc64_nvme,
+            &self.checksum_sha1,
+            &self.checksum_sha256,
+            &self.checksum_sha512,
+            &self.checksum_md5,
+            &self.checksum_xxhash64,
+            &self.checksum_xxhash3,
+            &self.checksum_xxhash128,
+        ]
+        .iter()
+        .all(|checksum| checksum.is_none())
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct BucketKeyEnabledArgs {
+    /// Use an S3 Bucket Key for the object encryption with KMS keys
+    #[arg(long, overrides_with = "no_bucket_key_enabled")]
+    bucket_key_enabled: bool,
+
+    /// Do not use an S3 Bucket Key for the object encryption with KMS keys
+    #[arg(long, overrides_with = "bucket_key_enabled")]
+    no_bucket_key_enabled: bool,
+}
+
+impl BucketKeyEnabledArgs {
+    pub fn value(&self) -> Option<bool> {
+        if self.bucket_key_enabled {
+            Some(true)
+        } else if self.no_bucket_key_enabled {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Args)]
