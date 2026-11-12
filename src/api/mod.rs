@@ -16,6 +16,7 @@ mod get_bucket_encryption;
 mod get_bucket_lifecycle_configuration;
 mod get_bucket_location;
 mod get_bucket_policy;
+mod get_bucket_tagging;
 mod get_bucket_versioning;
 mod get_object;
 mod get_public_access_block;
@@ -140,6 +141,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::PutBucketCors(args) => put_bucket_cors::run(&client, args).await?.into(),
         ApiOperation::DeleteBucketCors(args) => {
             delete_bucket_cors::run(&client, args).await?.into()
+        }
+        ApiOperation::GetBucketTagging(args) => {
+            get_bucket_tagging::run(&client, args).await?.into()
         }
     };
     let colored = match global.color {

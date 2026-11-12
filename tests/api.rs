@@ -1879,3 +1879,11 @@ fn output_yaml() {
     );
     assert_eq!(stdout, "");
 }
+
+#[test]
+fn get_bucket_tagging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "get-bucket-tagging", "GetBucketTagging");
+    assert_eq!(query, "tagging");
+}

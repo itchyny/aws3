@@ -410,6 +410,8 @@ pub enum ApiOperation {
     PutBucketCors(PutBucketCorsArgs),
     /// Delete the CORS configuration of a bucket
     DeleteBucketCors(BucketArgs),
+    /// Return the tags of a bucket
+    GetBucketTagging(BucketArgs),
 }
 
 #[derive(Debug, Args)]
