@@ -1614,3 +1614,12 @@ fn delete_bucket_policy() {
     let query = delete_bucket_configuration(&env, "delete-bucket-policy", "DeleteBucketPolicy");
     assert_eq!(query, "policy");
 }
+
+#[test]
+fn delete_bucket_encryption() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query =
+        delete_bucket_configuration(&env, "delete-bucket-encryption", "DeleteBucketEncryption");
+    assert_eq!(query, "encryption");
+}

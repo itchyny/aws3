@@ -396,6 +396,8 @@ pub enum ApiOperation {
     GetBucketEncryption(BucketArgs),
     /// Set the default encryption of a bucket
     PutBucketEncryption(PutBucketEncryptionArgs),
+    /// Delete the default encryption of a bucket
+    DeleteBucketEncryption(BucketArgs),
     /// Return the lifecycle configuration of a bucket
     GetBucketLifecycleConfiguration(BucketArgs),
     /// Set the lifecycle configuration of a bucket
