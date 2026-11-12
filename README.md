@@ -47,6 +47,7 @@ with `aws3 api` for these operations, and use `aws s3api` for the others.
 | Policy | `get-bucket-policy`, `put-bucket-policy`, `delete-bucket-policy` |
 | Encryption | `get-bucket-encryption`, `put-bucket-encryption`, `delete-bucket-encryption` |
 | Lifecycle | `get-bucket-lifecycle-configuration`, `put-bucket-lifecycle-configuration`, `delete-bucket-lifecycle` |
+| CORS | `get-bucket-cors`, `put-bucket-cors`, `delete-bucket-cors` |
 
 ```sh
 aws3 api head-object --bucket bucket --key path/to/file.txt
