@@ -1193,3 +1193,45 @@ fn put_bucket_versioning() {
          Unknown parameter in VersioningConfiguration: \"Foo\", must be one of: MFADelete, Status\n"
     );
 }
+
+#[test]
+fn put_public_access_block() {
+    let env = Env::new();
+    env.bucket("bucket");
+    // The fake server does not implement the public access block.
+    let result = env.run(&[
+        "api",
+        "put-public-access-block",
+        "--bucket",
+        "bucket",
+        "--public-access-block-configuration",
+        "BlockPublicAcls=true,IgnorePublicAcls=TRUE,BlockPublicPolicy=false",
+    ]);
+    assert_eq!(result.code, 254);
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<PublicAccessBlockConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+             <BlockPublicAcls>true</BlockPublicAcls><IgnorePublicAcls>true</IgnorePublicAcls>\
+             <BlockPublicPolicy>false</BlockPublicPolicy></PublicAccessBlockConfiguration>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+
+    let result = env.run(&[
+        "api",
+        "put-public-access-block",
+        "--bucket",
+        "bucket",
+        "--public-access-block-configuration",
+        r#"{"BlockPublicAcls":"true"}"#,
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+         Invalid type for parameter PublicAccessBlockConfiguration.BlockPublicAcls, value: true, \
+         type: <class 'str'>, valid types: <class 'bool'>\n"
+    );
+}

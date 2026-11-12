@@ -378,6 +378,34 @@ pub enum ApiOperation {
     DeleteBucket(BucketArgs),
     /// Set the versioning state of a bucket
     PutBucketVersioning(PutBucketVersioningArgs),
+    /// Set the configuration of the public access block of a bucket
+    PutPublicAccessBlock(PutPublicAccessBlockArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PutPublicAccessBlockArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// The configuration of the public access block
+    #[arg(
+        long,
+        value_name = "BlockPublicAcls=boolean,IgnorePublicAcls=boolean,BlockPublicPolicy=boolean,RestrictPublicBuckets=boolean"
+    )]
+    pub public_access_block_configuration: String,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
 }
 
 #[derive(Debug, Args)]

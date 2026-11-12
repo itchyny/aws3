@@ -19,6 +19,7 @@ mod output;
 mod paginate;
 mod put_bucket_versioning;
 mod put_object;
+mod put_public_access_block;
 mod shape;
 
 use std::collections::HashMap;
@@ -81,6 +82,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::DeleteBucket(args) => delete_bucket::run(&client, args).await?,
         ApiOperation::PutBucketVersioning(args) => {
             put_bucket_versioning::run(&client, args).await?
+        }
+        ApiOperation::PutPublicAccessBlock(args) => {
+            put_public_access_block::run(&client, args).await?
         }
     };
     let response = match query {
