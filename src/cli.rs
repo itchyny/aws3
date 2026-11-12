@@ -376,6 +376,8 @@ pub enum ApiOperation {
     CreateBucket(CreateBucketArgs),
     /// Delete an empty bucket
     DeleteBucket(BucketArgs),
+    /// Return the versioning state of a bucket
+    GetBucketVersioning(BucketArgs),
     /// Set the versioning state of a bucket
     PutBucketVersioning(PutBucketVersioningArgs),
     /// Set the configuration of the public access block of a bucket

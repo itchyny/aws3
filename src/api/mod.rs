@@ -7,6 +7,7 @@ mod delete_bucket;
 mod delete_object;
 mod delete_objects;
 mod get_bucket_location;
+mod get_bucket_versioning;
 mod get_object;
 mod head_bucket;
 mod head_object;
@@ -83,6 +84,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::GetBucketLocation(args) => get_bucket_location::run(&client, args).await?,
         ApiOperation::CreateBucket(args) => create_bucket::run(&client, args).await?,
         ApiOperation::DeleteBucket(args) => delete_bucket::run(&client, args).await?,
+        ApiOperation::GetBucketVersioning(args) => {
+            get_bucket_versioning::run(&client, args).await?
+        }
         ApiOperation::PutBucketVersioning(args) => {
             put_bucket_versioning::run(&client, args).await?
         }

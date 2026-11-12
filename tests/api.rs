@@ -1393,3 +1393,30 @@ fn put_bucket_lifecycle_configuration() {
         );
     }
 }
+
+/// Runs the get operation of a bucket configuration, which the fake server
+/// does not implement, and returns the query of the request.
+fn get_bucket_configuration(env: &Env, operation: &str, name: &str) -> String {
+    let result = env.run(&["api", operation, "--bucket", "bucket"]);
+    assert_eq!(result.code, 254);
+    assert_eq!(
+        result.stderr,
+        format!(
+            "\naws3: [ERROR]: An error occurred (NotImplemented) when calling the {name} \
+             operation: {name} is not implemented yet\n"
+        )
+    );
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(request.method, http::Method::GET);
+    assert_eq!(request.uri.path(), "/bucket/");
+    request.uri.query().unwrap().to_owned()
+}
+
+#[test]
+fn get_bucket_versioning() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "get-bucket-versioning", "GetBucketVersioning");
+    assert_eq!(query, "versioning");
+}
