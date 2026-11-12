@@ -402,6 +402,8 @@ pub enum ApiOperation {
     GetBucketLifecycleConfiguration(BucketArgs),
     /// Set the lifecycle configuration of a bucket
     PutBucketLifecycleConfiguration(PutBucketLifecycleConfigurationArgs),
+    /// Delete the lifecycle configuration of a bucket
+    DeleteBucketLifecycle(BucketArgs),
 }
 
 #[derive(Debug, Args)]

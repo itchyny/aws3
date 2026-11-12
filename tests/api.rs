@@ -1623,3 +1623,12 @@ fn delete_bucket_encryption() {
         delete_bucket_configuration(&env, "delete-bucket-encryption", "DeleteBucketEncryption");
     assert_eq!(query, "encryption");
 }
+
+#[test]
+fn delete_bucket_lifecycle() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query =
+        delete_bucket_configuration(&env, "delete-bucket-lifecycle", "DeleteBucketLifecycle");
+    assert_eq!(query, "lifecycle");
+}

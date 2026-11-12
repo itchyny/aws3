@@ -5,6 +5,7 @@ mod copy_object;
 mod create_bucket;
 mod delete_bucket;
 mod delete_bucket_encryption;
+mod delete_bucket_lifecycle;
 mod delete_bucket_policy;
 mod delete_object;
 mod delete_objects;
@@ -126,6 +127,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
             put_bucket_lifecycle_configuration::run(&client, args)
                 .await?
                 .into()
+        }
+        ApiOperation::DeleteBucketLifecycle(args) => {
+            delete_bucket_lifecycle::run(&client, args).await?.into()
         }
     };
     print(responses, format, query.as_ref())?;
