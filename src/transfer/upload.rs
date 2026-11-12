@@ -389,7 +389,7 @@ async fn put_object(
 /// aws-chunked as another header after the content encoding of the argument,
 /// which S3-compatible storage may reject. The encodings are joined with commas
 /// like the AWS CLI, e.g. `gzip,aws-chunked`.
-fn merge_content_encodings(headers: &mut Headers) {
+pub fn merge_content_encodings(headers: &mut Headers) {
     let encodings: Vec<String> = headers
         .get_all("content-encoding")
         .map(str::to_owned)

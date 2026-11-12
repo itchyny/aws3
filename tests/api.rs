@@ -1456,3 +1456,34 @@ fn get_bucket_lifecycle_configuration() {
     );
     assert_eq!(query, "lifecycle");
 }
+
+#[test]
+fn put_object_content_encoding_over_tls() {
+    let env = Env::new_tls();
+    env.bucket("bucket");
+    env.write("a.txt", "hello");
+    env.run(&[
+        "api",
+        "put-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "a.txt",
+        "--body",
+        "a.txt",
+        "--content-encoding",
+        "gzip",
+        "--ca-bundle",
+        "ca.pem",
+    ])
+    .success();
+    // The checksum is sent in the trailer of the aws-chunked encoding over
+    // TLS, whose content encoding is merged into one header.
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    let header = |name: &str| request.headers.get(name).unwrap().to_str().unwrap();
+    let encodings: Vec<_> = request.headers.get_all("content-encoding").iter().collect();
+    assert_eq!(encodings, ["gzip,aws-chunked"]);
+    assert_eq!(header("x-amz-trailer"), "x-amz-checksum-crc64nvme");
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"hello");
+}

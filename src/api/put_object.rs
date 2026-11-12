@@ -20,6 +20,7 @@ use crate::cli::PutObjectArgs;
 use crate::client::Config;
 use crate::error::Error;
 use crate::redirect::Redirector;
+use crate::transfer::merge_content_encodings;
 use crate::value::Value;
 
 pub async fn run(config: &Config, client: &Client, args: &PutObjectArgs) -> Result<Value, Error> {
@@ -119,6 +120,7 @@ pub async fn run(config: &Config, client: &Client, args: &PutObjectArgs) -> Resu
                     if !has_content_type {
                         request.headers_mut().remove("content-type");
                     }
+                    merge_content_encodings(request.headers_mut());
                 })
                 .send()
         })
@@ -170,10 +172,9 @@ async fn body(path: Option<&str>) -> Result<SdkBody, Error> {
     Ok(stream.into_inner())
 }
 
-/// Returns the checksum of the file computed before sending, which is sent in
-/// the header instead of the trailer of the aws-chunked encoding. botocore
-/// sends the trailers only over TLS, and the SDK sends the aws-chunked content
-/// encoding in another header than the one of the argument.
+/// Returns the checksum of the file computed before sending over HTTP, which
+/// is sent in the header instead of the trailer of the aws-chunked encoding,
+/// since botocore sends the trailers only over TLS.
 async fn header_checksum(
     config: &Config,
     args: &PutObjectArgs,
@@ -186,7 +187,7 @@ async fn header_checksum(
         url.get(..7)
             .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
     });
-    if !is_http && args.content_encoding.is_none() || !args.checksums.is_empty() {
+    if !is_http || !args.checksums.is_empty() {
         return Ok(None);
     }
     // The MD5 of the SDK is an alias of CRC32, which is not computed here.

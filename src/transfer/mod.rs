@@ -40,6 +40,7 @@ pub use json::decode as decode_json;
 use params::{RequestParams, Unpacked};
 use paths::{Endpoint, relative_path, split_bucket_key};
 use printer::{PrintMode, Printer, TransferId};
+pub use upload::merge_content_encodings;
 
 /// The maximum size of an object of S3.
 const MAX_UPLOAD_SIZE: u64 = 5 * 1024 * 1024 * 1024 * 1024;
