@@ -1887,3 +1887,56 @@ fn get_bucket_tagging() {
     let query = get_bucket_configuration(&env, "get-bucket-tagging", "GetBucketTagging");
     assert_eq!(query, "tagging");
 }
+
+#[test]
+fn put_bucket_tagging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.run(&[
+        "api",
+        "put-bucket-tagging",
+        "--bucket",
+        "bucket",
+        "--tagging",
+        r#"{"TagSet": [{"Key": "env", "Value": "dev"}, {"Key": "team", "Value": ""}]}"#,
+    ]);
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<Tagging xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><TagSet>\
+             <Tag><Key>env</Key><Value>dev</Value></Tag>\
+             <Tag><Key>team</Key><Value></Value></Tag></TagSet></Tagging>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+
+    for (tagging, message) in [
+        (
+            "TagSet=[{Key=env}]",
+            "Missing required parameter in Tagging.TagSet[0]: \"Value\"",
+        ),
+        (
+            "TagSet=[{Key=,Value=dev}]",
+            "Invalid length for parameter Tagging.TagSet[0].Key, value: 0, valid min length: 1",
+        ),
+    ] {
+        let result = env.run(&[
+            "api",
+            "put-bucket-tagging",
+            "--bucket",
+            "bucket",
+            "--tagging",
+            tagging,
+        ]);
+        assert_eq!(result.code, 252);
+        assert_eq!(
+            result.stderr,
+            format!(
+                "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+                 {message}\n"
+            ),
+            "{tagging}"
+        );
+    }
+}

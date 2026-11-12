@@ -33,6 +33,7 @@ mod put_bucket_cors;
 mod put_bucket_encryption;
 mod put_bucket_lifecycle_configuration;
 mod put_bucket_policy;
+mod put_bucket_tagging;
 mod put_bucket_versioning;
 mod put_object;
 mod put_public_access_block;
@@ -144,6 +145,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::GetBucketTagging(args) => {
             get_bucket_tagging::run(&client, args).await?.into()
+        }
+        ApiOperation::PutBucketTagging(args) => {
+            put_bucket_tagging::run(&client, args).await?.into()
         }
     };
     let colored = match global.color {

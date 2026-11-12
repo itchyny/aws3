@@ -412,6 +412,8 @@ pub enum ApiOperation {
     DeleteBucketCors(BucketArgs),
     /// Return the tags of a bucket
     GetBucketTagging(BucketArgs),
+    /// Set the tags of a bucket
+    PutBucketTagging(PutBucketTaggingArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1470,6 +1472,29 @@ pub struct PutBucketCorsArgs {
         value_name = "CORSRules=[{AllowedMethods=[string,...],AllowedOrigins=[string,...]},...]"
     )]
     pub cors_configuration: String,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketTaggingArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The tags of the bucket
+    #[arg(long, value_name = "TagSet=[{Key=string,Value=string},...]")]
+    pub tagging: String,
 
     /// The base64-encoded 128-bit MD5 digest of the request body
     #[arg(long, value_name = "STRING")]
