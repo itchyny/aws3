@@ -4,6 +4,7 @@
 mod copy_object;
 mod delete_object;
 mod delete_objects;
+mod get_object;
 mod head_object;
 mod output;
 mod put_object;
@@ -45,6 +46,7 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
     let client = client::new_client(&config, None);
     let response = match &args.operation {
         ApiOperation::HeadObject(args) => head_object::run(&client, args).await?,
+        ApiOperation::GetObject(args) => get_object::run(&client, args).await?,
         ApiOperation::PutObject(args) => put_object::run(&config, &client, args).await?,
         ApiOperation::CopyObject(args) => copy_object::run(&client, args).await?,
         ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?,

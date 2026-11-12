@@ -3,51 +3,91 @@
 use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::head_object::HeadObjectOutput;
 use aws_sdk_s3::primitives::DateTime;
-use aws_sdk_s3::types::{ChecksumMode, RequestPayer};
+use aws_sdk_s3::types::ChecksumMode;
 
 use super::output::Response;
 use super::{ResponseHeaders, parse_int, parse_timestamp, sse_customer_key};
-use crate::cli::HeadObjectArgs;
+use crate::cli::ObjectArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;
 use crate::value::Value;
 
-pub async fn run(client: &Client, args: &HeadObjectArgs) -> Result<Value, Error> {
-    let if_modified_since = parse_timestamp("IfModifiedSince", args.if_modified_since.as_deref())?;
-    let if_unmodified_since =
-        parse_timestamp("IfUnmodifiedSince", args.if_unmodified_since.as_deref())?;
-    let response_expires = parse_timestamp("ResponseExpires", args.response_expires.as_deref())?;
-    let part_number = parse_int(args.part_number.as_deref())?;
-    let (sse_customer_key, sse_customer_key_md5) = sse_customer_key(
-        "--sse-customer-key",
-        args.sse_customer_key.as_deref(),
-        args.sse_customer_key_md5.as_deref(),
-    )?;
+/// The arguments of the requests of an object parsed before sending, which
+/// are shared with get-object.
+pub struct ObjectRequest {
+    pub if_modified_since: Option<DateTime>,
+    pub if_unmodified_since: Option<DateTime>,
+    pub response_expires: Option<DateTime>,
+    pub part_number: Option<i32>,
+    pub sse_customer_key: Option<String>,
+    pub sse_customer_key_md5: Option<String>,
+}
+
+impl ObjectRequest {
+    pub fn parse(args: &ObjectArgs) -> Result<Self, Error> {
+        let (sse_customer_key, sse_customer_key_md5) = sse_customer_key(
+            "--sse-customer-key",
+            args.sse_customer_key.as_deref(),
+            args.sse_customer_key_md5.as_deref(),
+        )?;
+        Ok(Self {
+            if_modified_since: parse_timestamp(
+                "IfModifiedSince",
+                args.if_modified_since.as_deref(),
+            )?,
+            if_unmodified_since: parse_timestamp(
+                "IfUnmodifiedSince",
+                args.if_unmodified_since.as_deref(),
+            )?,
+            response_expires: parse_timestamp("ResponseExpires", args.response_expires.as_deref())?,
+            part_number: parse_int(args.part_number.as_deref())?,
+            sse_customer_key,
+            sse_customer_key_md5,
+        })
+    }
+}
+
+/// Sets the arguments of the requests of an object except for the checksum
+/// mode, whose default differs between the operations.
+macro_rules! set_object_request {
+    ($builder:expr, $args:expr, $request:expr) => {{
+        let args: &$crate::cli::ObjectArgs = $args;
+        let request: &$crate::api::head_object::ObjectRequest = $request;
+        $builder
+            .bucket(&args.bucket)
+            .key(&args.key)
+            .set_if_match(args.if_match.clone())
+            .set_if_modified_since(request.if_modified_since)
+            .set_if_none_match(args.if_none_match.clone())
+            .set_if_unmodified_since(request.if_unmodified_since)
+            .set_range(args.range.clone())
+            .set_response_cache_control(args.response_cache_control.clone())
+            .set_response_content_disposition(args.response_content_disposition.clone())
+            .set_response_content_encoding(args.response_content_encoding.clone())
+            .set_response_content_language(args.response_content_language.clone())
+            .set_response_content_type(args.response_content_type.clone())
+            .set_response_expires(request.response_expires)
+            .set_version_id(args.version_id.clone())
+            .set_sse_customer_algorithm(args.sse_customer_algorithm.clone())
+            .set_sse_customer_key(request.sse_customer_key.clone())
+            .set_sse_customer_key_md5(request.sse_customer_key_md5.clone())
+            .set_request_payer(
+                args.request_payer
+                    .as_deref()
+                    .map(aws_sdk_s3::types::RequestPayer::from),
+            )
+            .set_part_number(request.part_number)
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+    }};
+}
+pub(crate) use set_object_request;
+
+pub async fn run(client: &Client, args: &ObjectArgs) -> Result<Value, Error> {
+    let request = ObjectRequest::parse(args)?;
     let headers = ResponseHeaders::default();
     let output = Redirector::default()
         .send(client, &args.bucket, "HeadObject", |client| {
-            client
-                .head_object()
-                .bucket(&args.bucket)
-                .key(&args.key)
-                .set_if_match(args.if_match.clone())
-                .set_if_modified_since(if_modified_since)
-                .set_if_none_match(args.if_none_match.clone())
-                .set_if_unmodified_since(if_unmodified_since)
-                .set_range(args.range.clone())
-                .set_response_cache_control(args.response_cache_control.clone())
-                .set_response_content_disposition(args.response_content_disposition.clone())
-                .set_response_content_encoding(args.response_content_encoding.clone())
-                .set_response_content_language(args.response_content_language.clone())
-                .set_response_content_type(args.response_content_type.clone())
-                .set_response_expires(response_expires)
-                .set_version_id(args.version_id.clone())
-                .set_sse_customer_algorithm(args.sse_customer_algorithm.clone())
-                .set_sse_customer_key(sse_customer_key.clone())
-                .set_sse_customer_key_md5(sse_customer_key_md5.clone())
-                .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
-                .set_part_number(part_number)
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            set_object_request!(client.head_object(), args, &request)
                 .set_checksum_mode(args.checksum_mode.as_deref().map(ChecksumMode::from))
                 .customize()
                 .interceptor(headers.clone())

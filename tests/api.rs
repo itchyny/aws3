@@ -569,3 +569,121 @@ fn copy_object() {
         "\naws3: [ERROR]: An error occurred (NoSuchKey) when calling the CopyObject operation: Unknown\n"
     );
 }
+
+#[test]
+fn get_object() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "hello world");
+    env.run(&[
+        "api",
+        "put-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "a.txt",
+        "--body",
+        "a.txt",
+        "--metadata",
+        "foo=bar",
+        "--content-type",
+        "text/plain",
+    ])
+    .success();
+    let result = env
+        .run(&[
+            "api",
+            "get-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            "a.txt",
+            "out.txt",
+        ])
+        .success();
+    assert_eq!(
+        without_last_modified(&result.stdout),
+        r#"{
+    "ContentLength": 11,
+    "ETag": "\"5eb63bbbe01eeed093cb22bb8f5acdc3\"",
+    "ChecksumCRC64NVME": "jSnVw/bqjr4=",
+    "ChecksumType": "FULL_OBJECT",
+    "ContentType": "text/plain",
+    "Metadata": {
+        "foo": "bar"
+    }
+}
+"#
+    );
+    assert_eq!(env.read("out.txt"), b"hello world");
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(request.method, http::Method::GET);
+    assert_eq!(
+        request.headers.get("x-amz-checksum-mode").unwrap(),
+        "ENABLED"
+    );
+
+    let result = env
+        .run(&[
+            "api",
+            "get-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            "a.txt",
+            "--range",
+            "bytes=0-4",
+            "out.txt",
+        ])
+        .success();
+    assert!(
+        result
+            .stdout
+            .contains("\n    \"ContentRange\": \"bytes 0-4/11\",\n"),
+        "{}",
+        result.stdout
+    );
+    assert_eq!(env.read("out.txt"), b"hello");
+}
+
+#[test]
+fn get_object_errors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    std::fs::create_dir(env.path("dir")).unwrap();
+    for (key, outfile, code, message) in [
+        (
+            "missing",
+            "out.txt",
+            254,
+            "An error occurred (NoSuchKey) when calling the GetObject operation: Unknown",
+        ),
+        ("a.txt", "dir", 255, "[Errno 21] Is a directory: 'dir'"),
+        (
+            "a.txt",
+            "missing/out.txt",
+            255,
+            "[Errno 2] No such file or directory: 'missing/out.txt'",
+        ),
+    ] {
+        let result = env.run(&[
+            "api",
+            "get-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            key,
+            outfile,
+        ]);
+        assert_eq!(result.code, code, "{outfile}");
+        assert_eq!(
+            result.stderr,
+            format!("\naws3: [ERROR]: {message}\n"),
+            "{outfile}"
+        );
+    }
+    // The file is not created on the errors of the requests.
+    assert!(!env.path("out.txt").exists());
+}

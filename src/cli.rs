@@ -351,7 +351,9 @@ pub struct ApiArgs {
 #[derive(Debug, Subcommand)]
 pub enum ApiOperation {
     /// Retrieve the metadata of an object without returning the object itself
-    HeadObject(HeadObjectArgs),
+    HeadObject(ObjectArgs),
+    /// Retrieve an object and write it to a file
+    GetObject(GetObjectArgs),
     /// Add an object to a bucket
     PutObject(PutObjectArgs),
     /// Create a copy of an object that is already stored in S3
@@ -363,7 +365,19 @@ pub enum ApiOperation {
 }
 
 #[derive(Debug, Args)]
-pub struct HeadObjectArgs {
+pub struct GetObjectArgs {
+    #[command(flatten)]
+    pub object: ObjectArgs,
+
+    /// The path of the file to write the object to
+    #[arg(value_name = "OUTFILE")]
+    pub outfile: PathBuf,
+}
+
+/// The arguments of the requests of an object, which are the same between
+/// head-object and get-object.
+#[derive(Debug, Args)]
+pub struct ObjectArgs {
     /// The name of the bucket that contains the object
     #[arg(long)]
     pub bucket: String,
