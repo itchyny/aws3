@@ -2,12 +2,12 @@
 //! way as the formatters of the AWS CLI, which render the code and the message
 //! of an error.
 
-use std::fmt::Write;
 use std::sync::LazyLock;
 
 use regex_lite::Regex;
 
-use crate::east_asian_width::WIDE_RANGES;
+use crate::table;
+use crate::value::Value;
 
 /// Formats the error in JSON, in the same way as `json.dump` with the indent
 /// of four spaces.
@@ -330,215 +330,14 @@ fn is_implicit_non_string(value: &str) -> bool {
 /// the AWS CLI, which is converted to the vertical table if it is wider than
 /// the terminal. The values are colored if `colored` is true.
 pub fn table(code: &str, message: &str, terminal_width: usize, colored: bool) -> String {
-    let mut section = Section {
-        title: "error",
-        headers: vec!["Code".to_owned(), "Message".to_owned()],
-        rows: Vec::new(),
-        max_widths: Vec::new(),
-    };
-    section.update_max_widths(&section.headers.clone());
-    let row = vec![code.to_owned(), message.to_owned()];
-    section.update_max_widths(&row);
-    section.rows.push(row);
-    let mut max_width = section.total_width();
-    if max_width > terminal_width {
-        let headers = std::mem::take(&mut section.headers);
-        let row = section.rows.remove(0);
-        section.max_widths.clear();
-        for (header, element) in headers.into_iter().zip(row) {
-            let row = vec![header, element];
-            section.update_max_widths(&row);
-            section.rows.push(row);
-        }
-        max_width = section.total_width();
+    let error = Value::Map(vec![
+        ("Code".to_owned(), Value::Str(code.to_owned())),
+        ("Message".to_owned(), Value::Str(message.to_owned())),
+    ]);
+    match table::build("error", &error) {
+        Ok(Some(table)) => table.render(terminal_width, colored),
+        _ => String::new(),
     }
-    let mut output = format!("{}\n", "-".repeat(max_width));
-    let _ = writeln!(
-        output,
-        "{}",
-        center_text(section.title, max_width, "|", "|")
-    );
-    if !section.headers.is_empty() {
-        let widths = section.column_widths(4, Some(max_width));
-        line_break(&mut output, &widths);
-        let mut line = String::new();
-        for (i, (width, header)) in widths.iter().zip(&section.headers).enumerate() {
-            let left_edge = if i == 0 { "|" } else { "" };
-            line += &center_text(header, *width, left_edge, "|");
-        }
-        let _ = writeln!(output, "{line}");
-    }
-    let widths = section.column_widths(4, Some(max_width));
-    line_break(&mut output, &widths);
-    for row in &section.rows {
-        let mut line = String::new();
-        for (i, (width, element)) in widths.iter().zip(row).enumerate() {
-            let left_edge = if i == 0 { "|" } else { "" };
-            line += &align_left(element, *width, left_edge, "|", colored);
-        }
-        let _ = writeln!(output, "{line}");
-    }
-    line_break(&mut output, &widths);
-    output
-}
-
-struct Section {
-    title: &'static str,
-    headers: Vec<String>,
-    rows: Vec<Vec<String>>,
-    max_widths: Vec<usize>,
-}
-
-impl Section {
-    fn update_max_widths(&mut self, row: &[String]) {
-        if self.max_widths.is_empty() {
-            self.max_widths = row.iter().map(|element| text_length(element)).collect();
-        } else {
-            for (width, element) in self.max_widths.iter_mut().zip(row) {
-                *width = (*width).max(text_length(element));
-            }
-        }
-    }
-
-    /// Returns the widths of the columns scaled to the maximum width.
-    fn column_widths(&self, padding: usize, max_width: Option<usize>) -> Vec<usize> {
-        let unscaled: Vec<_> = self
-            .max_widths
-            .iter()
-            .map(|width| width + padding)
-            .collect();
-        let Some(max_width) = max_width else {
-            return unscaled;
-        };
-        let total: usize = unscaled.iter().sum();
-        let scale = max_width as f64 / total as f64;
-        let mut scaled: Vec<i64> = unscaled
-            .iter()
-            .map(|&width| (scale * width as f64).round_ties_even() as i64)
-            .collect();
-        let mut off_by = scaled.iter().sum::<i64>() - max_width as i64;
-        while off_by != 0 {
-            let order: Vec<usize> = if off_by < 0 {
-                (0..scaled.len()).rev().collect()
-            } else {
-                (0..scaled.len()).collect()
-            };
-            for i in order {
-                if off_by > 0 {
-                    scaled[i] -= 1;
-                    off_by -= 1;
-                } else {
-                    scaled[i] += 1;
-                    off_by += 1;
-                }
-                if off_by == 0 {
-                    break;
-                }
-            }
-        }
-        scaled
-            .into_iter()
-            .map(|width| width.max(0) as usize)
-            .collect()
-    }
-
-    fn total_width(&self) -> usize {
-        let total = self
-            .column_widths(0, None)
-            .iter()
-            .map(|w| w + 4)
-            .sum::<usize>()
-            + 2;
-        total.max(text_length(self.title) + 2)
-    }
-}
-
-fn line_break(output: &mut String, widths: &[usize]) {
-    for (i, width) in widths.iter().enumerate() {
-        if i == 0 {
-            let _ = write!(output, "+{}+", "-".repeat(width.saturating_sub(2)));
-        } else {
-            let _ = write!(output, "{}+", "-".repeat(width.saturating_sub(1)));
-        }
-    }
-    output.push('\n');
-}
-
-fn center_text(text: &str, length: usize, left_edge: &str, right_edge: &str) -> String {
-    let text_length = text_length(text) as i64;
-    let char_start = (length as i64 / 2 - text_length / 2 - 1).max(0);
-    let so_far = left_edge.len() as i64 + char_start + text_length;
-    let right = (length as i64 - right_edge.len() as i64 - so_far).max(0);
-    format!(
-        "{left_edge}{}{text}{}{right_edge}",
-        " ".repeat(char_start as usize),
-        " ".repeat(right as usize)
-    )
-}
-
-fn align_left(
-    text: &str,
-    length: usize,
-    left_edge: &str,
-    right_edge: &str,
-    colored: bool,
-) -> String {
-    let text_length = text_length(text);
-    let computed = text_length + 2 + left_edge.len() + right_edge.len();
-    let padding = if length >= computed { 2 } else { 0 };
-    let right = length.saturating_sub(left_edge.len() + padding + text_length + right_edge.len());
-    // The colors of the row elements of `ColorizedStyler` of the AWS CLI.
-    let text = if colored {
-        format!("\x1b[1m\x1b[34m{text}\x1b[0m")
-    } else {
-        text.to_owned()
-    };
-    format!(
-        "{left_edge}{}{text}{}{right_edge}",
-        " ".repeat(padding),
-        " ".repeat(right)
-    )
-}
-
-/// Returns the width of the text, where the wide, fullwidth and ambiguous
-/// characters are counted as two like `get_text_length` of the AWS CLI.
-fn text_length(text: &str) -> usize {
-    text.chars()
-        .map(|ch| {
-            let code = ch as u32;
-            let wide = WIDE_RANGES
-                .binary_search_by(|&(start, end)| {
-                    if end < code {
-                        std::cmp::Ordering::Less
-                    } else if start > code {
-                        std::cmp::Ordering::Greater
-                    } else {
-                        std::cmp::Ordering::Equal
-                    }
-                })
-                .is_ok();
-            if wide { 2 } else { 1 }
-        })
-        .sum()
-}
-
-/// Returns the width of the terminal of the standard output, which is 80 if
-/// unavailable like `determine_terminal_width` of the AWS CLI.
-pub fn terminal_width() -> usize {
-    #[cfg(unix)]
-    {
-        let mut size = libc::winsize {
-            ws_row: 0,
-            ws_col: 0,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        };
-        // SAFETY: TIOCGWINSZ writes the size to the struct of the argument.
-        if unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut size) } == 0 {
-            return usize::from(size.ws_col);
-        }
-    }
-    80
 }
 
 #[cfg(test)]

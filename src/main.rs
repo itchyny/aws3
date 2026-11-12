@@ -14,6 +14,7 @@ mod mime;
 mod path;
 mod presign;
 mod redirect;
+mod table;
 mod tls;
 mod transfer;
 mod value;

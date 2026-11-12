@@ -7,6 +7,7 @@ use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use crate::cli::ErrorFormat;
 use crate::client;
 use crate::errorformat;
+use crate::table;
 
 /// Exit code of the AWS CLI on parameter validation errors.
 const EXIT_PARAM_VALIDATION: u8 = 252;
@@ -218,7 +219,7 @@ impl Error {
             ErrorFormat::Yaml => errorformat::yaml(code, message),
             ErrorFormat::Text => errorformat::text(code, message),
             ErrorFormat::Table => {
-                errorformat::table(code, message, errorformat::terminal_width(), colored)
+                errorformat::table(code, message, table::terminal_width(), colored)
             }
         }
     }

@@ -35,7 +35,7 @@ mod put_bucket_policy;
 mod put_bucket_versioning;
 mod put_object;
 mod put_public_access_block;
-mod shape;
+pub mod shape;
 mod text;
 
 use std::collections::HashMap;
