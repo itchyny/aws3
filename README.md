@@ -34,9 +34,9 @@ HTTPS are verified with the same CA bundle as the endpoints.
 ### The api subcommand
 
 The commonly used operations of `aws s3api` are supported by `aws3 api`, with
-the same options, outputs in JSON, text and table, and exit codes. Replace
-`aws s3api` with `aws3 api` for these operations, and use `aws s3api` for the
-others.
+the same options, outputs in JSON, YAML, text and table, and exit codes.
+Replace `aws s3api` with `aws3 api` for these operations, and use `aws s3api`
+for the others.
 
 | Target | Operations |
 | --- | --- |
@@ -66,10 +66,7 @@ filtered by the JMESPath expressions of `--query`.
 ### Differences from the AWS CLI
 
 - Only the commonly used operations of `aws s3api` are supported by
-  `aws3 api`, whose outputs are in JSON, text and table, not in YAML of
-  `--output`, and are not shown through the pager of `cli_pager` or
-  `AWS_PAGER`.
-- The error messages are prefixed with `aws3:` instead of `aws:`.
+  `aws3 api`, whose outputs are not shown through a client-side pager program.
 - The root certificates of Mozilla are used for TLS, unless a CA bundle is
   specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
 - The default of `max_concurrent_requests` in the `s3` section is 64 instead

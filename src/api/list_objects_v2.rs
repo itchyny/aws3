@@ -129,6 +129,7 @@ fn response(output: &ListObjectsV2Output, decode: bool) -> Value {
 /// Returns the page of the response, whose prefix and the request charged
 /// are recorded from the first page.
 fn page(output: &ListObjectsV2Output, decode: bool) -> Page {
+    let response = response(output, decode);
     let decode = |value: Option<&str>| value.map(|value| decoded(value, decode));
     let next_token = if output.is_truncated() == Some(true) {
         let token = output
@@ -140,6 +141,7 @@ fn page(output: &ListObjectsV2Output, decode: bool) -> Page {
     };
     let optional = |value: Option<String>| value.map_or(Value::Null, Value::Str);
     Page {
+        response,
         results: vec![
             contents(output, decode),
             common_prefixes(output.common_prefixes(), decode),

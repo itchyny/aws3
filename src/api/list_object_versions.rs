@@ -128,6 +128,7 @@ fn response(output: &ListObjectVersionsOutput, decode: bool) -> Value {
 /// Returns the page of the response, whose prefix and the request charged
 /// are recorded from the first page.
 fn page(output: &ListObjectVersionsOutput, decode: bool) -> Page {
+    let response = response(output, decode);
     let decode = |value: Option<&str>| value.map(|value| decoded(value, decode));
     let next_token = if output.is_truncated() == Some(true) {
         vec![
@@ -142,6 +143,7 @@ fn page(output: &ListObjectVersionsOutput, decode: bool) -> Page {
     };
     let optional = |value: Option<String>| value.map_or(Value::Null, Value::Str);
     Page {
+        response,
         results: vec![
             versions(output, decode),
             delete_markers(output, decode),

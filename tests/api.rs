@@ -165,22 +165,6 @@ fn head_object_errors() {
         result.stderr,
         "\naws3: [ERROR]: invalid literal for int() with base 10: 'x'\n"
     );
-
-    let result = env.run(&[
-        "api",
-        "head-object",
-        "--bucket",
-        "bucket",
-        "--key",
-        "a.txt",
-        "--output",
-        "yaml",
-    ]);
-    assert_eq!(result.code, 255);
-    assert_eq!(
-        result.stderr,
-        "\naws3: [ERROR]: --output yaml is not supported by the api command\n"
-    );
 }
 
 #[test]
@@ -1782,4 +1766,92 @@ fn output_table() {
         result.stderr,
         "\naws3: [ERROR]: string indices must be integers, not 'str'\n"
     );
+}
+
+#[test]
+fn output_yaml() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "abc");
+    env.object("bucket", "dir/b.txt", "x");
+    let run = |args: &[&str], output: &str| {
+        let mut command = vec!["api"];
+        command.extend(args);
+        command.extend(["--output", output]);
+        env.run(&command).success().stdout
+    };
+
+    // The keys of the mappings are sorted, and the strings resolved to the
+    // other types are quoted.
+    let stdout = run(
+        &[
+            "list-objects-v2",
+            "--bucket",
+            "bucket",
+            "--query",
+            "{Keys: Contents[].Key, Prefix: Prefix, Size: to_string(Contents[0].Size), Empty: `[]`}",
+        ],
+        "yaml",
+    );
+    assert_eq!(
+        stdout,
+        "Empty: []\nKeys:\n- a.txt\n- dir/b.txt\nPrefix: null\nSize: '3'\n"
+    );
+    let stdout = run(&["get-bucket-location", "--bucket", "bucket"], "yaml");
+    assert_eq!(stdout, "LocationConstraint: null\n");
+
+    // The scalars are written in JSON.
+    let stdout = run(
+        &[
+            "list-objects-v2",
+            "--bucket",
+            "bucket",
+            "--query",
+            "Contents[0].Key",
+        ],
+        "yaml",
+    );
+    assert_eq!(stdout, "\"a.txt\"\n");
+
+    // The pages are written one by one in the lists, where the other result
+    // keys are null on the first page of the starting token.
+    let stdout = run(
+        &[
+            "list-objects-v2",
+            "--bucket",
+            "bucket",
+            "--page-size",
+            "1",
+            "--query",
+            "Contents[].Key",
+        ],
+        "yaml-stream",
+    );
+    assert_eq!(stdout, "- - a.txt\n- - dir/b.txt\n");
+    let stdout = run(
+        &[
+            "list-objects-v2",
+            "--bucket",
+            "bucket",
+            "--starting-token",
+            "eyJDb250aW51YXRpb25Ub2tlbiI6IG51bGwsICJib3RvX3RydW5jYXRlX2Ftb3VudCI6IDF9",
+            "--query",
+            "[CommonPrefixes, Contents[].Key, NextToken]",
+        ],
+        "yaml-stream",
+    );
+    assert_eq!(stdout, "- - null\n  - - dir/b.txt\n  - null\n");
+
+    // The empty response is not written.
+    let stdout = run(
+        &[
+            "get-bucket-location",
+            "--bucket",
+            "bucket",
+            "--query",
+            "`{}`",
+        ],
+        "yaml-stream",
+    );
+    assert_eq!(stdout, "");
 }

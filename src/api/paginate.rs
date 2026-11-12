@@ -26,6 +26,8 @@ pub struct Paginator {
 
 /// A page of the responses.
 pub struct Page {
+    /// The full response of the page.
+    pub response: Value,
     /// The values of the result keys, which are `None` if absent.
     pub results: Vec<Option<Vec<Value>>>,
     /// The members of the response recorded from the first page.
@@ -93,6 +95,7 @@ impl Paginator {
             None => (vec![None; self.input_tokens.len()], 0),
         };
         let mut pages = Vec::new();
+        let mut responses = Vec::new();
         let mut non_aggregate = Vec::new();
         let mut resume_token = None;
         let mut previous_token = None;
@@ -110,6 +113,7 @@ impl Paginator {
                     for items in page.results.iter_mut().skip(1).flatten() {
                         items.clear();
                     }
+                    self.set_results(&mut page.response, &page.results, self.result_keys.len());
                 }
                 non_aggregate = std::mem::take(&mut page.non_aggregate);
                 first = false;
@@ -125,10 +129,13 @@ impl Paginator {
                 if let Some(items) = &mut page.results[0] {
                     items.truncate(keep);
                 }
+                self.set_results(&mut page.response, &page.results, 1);
+                responses.push(page.response);
                 pages.push(page.results);
                 resume_token = Some((next_token, Some(keep + starting_truncation)));
                 break;
             }
+            responses.push(page.response);
             pages.push(page.results);
             total_items += count;
             if page.next_token.iter().all(Option::is_none) {
@@ -160,10 +167,26 @@ impl Paginator {
         Ok(Pages {
             result_keys: self.result_keys,
             pages,
+            responses,
             non_aggregate,
             next_token: resume_token
                 .map(|(token, truncation)| self.encode_token(&token, truncation)),
         })
+    }
+
+    /// Sets the values of the first result keys to the response, where the
+    /// absent values are set to null, like `set_value_from_jmespath` of
+    /// botocore.
+    fn set_results(&self, response: &mut Value, results: &[Option<Vec<Value>>], count: usize) {
+        if let Value::Map(pairs) = response {
+            for (key, items) in self.result_keys.iter().zip(results).take(count) {
+                insert(
+                    pairs,
+                    (*key).to_owned(),
+                    items.clone().map_or(Value::Null, Value::List),
+                );
+            }
+        }
     }
 
     /// Encodes the token in base64 of JSON, like `TokenEncoder` of botocore.
@@ -258,6 +281,8 @@ pub struct Pages {
     result_keys: &'static [&'static str],
     /// The values of the result keys of the pages, which are `None` if absent.
     pages: Vec<Vec<Option<Vec<Value>>>>,
+    /// The full responses of the pages, whose result keys are truncated.
+    responses: Vec<Value>,
     non_aggregate: Vec<(&'static str, Value)>,
     /// The token to resume the pagination, which is encoded.
     next_token: Option<String>,
@@ -289,6 +314,13 @@ impl Pages {
             response.push(("NextToken".to_owned(), Value::Str(token)));
         }
         Value::Map(response)
+    }
+
+    /// Returns the full responses of the pages for the streamed YAML output,
+    /// like the iteration of `PageIterator` of botocore, which does not
+    /// include the token to resume.
+    pub fn into_responses(self) -> Vec<Value> {
+        self.responses
     }
 
     /// Returns the responses of the pages for the text output, where the first

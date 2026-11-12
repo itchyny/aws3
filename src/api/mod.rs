@@ -59,6 +59,7 @@ use crate::error::Error;
 use crate::table;
 use crate::transfer::params;
 use crate::value::{Value, insert};
+use crate::yaml;
 use jmespath::Expression;
 use paginate::Pages;
 
@@ -169,6 +170,8 @@ enum Format {
     Json,
     Text,
     Table,
+    Yaml,
+    YamlStream,
     Off,
 }
 
@@ -200,17 +203,17 @@ fn output_format(global: &GlobalArgs) -> Result<Format, Error> {
         "json" => Ok(Format::Json),
         "text" => Ok(Format::Text),
         "table" => Ok(Format::Table),
+        "yaml" => Ok(Format::Yaml),
+        "yaml-stream" => Ok(Format::YamlStream),
         "off" => Ok(Format::Off),
-        "yaml" | "yaml-stream" => Err(Error::new(format!(
-            "--output {name} is not supported by the api command"
-        ))),
         _ => Err(Error::new(format!("Unknown output type: {name}"))),
     }
 }
 
 /// Prints the responses in the format after applying the query, ignoring the
 /// errors of writing like the other outputs of the commands. The empty objects
-/// are not printed in JSON, and the pages are printed one by one in text.
+/// are not printed in JSON and YAML, and the pages are printed one by one in
+/// text and the streamed YAML.
 fn print(
     operation: &ApiOperation,
     responses: Responses,
@@ -258,9 +261,43 @@ fn print(
                 );
             }
         }
+        Format::Yaml => {
+            let response = search(match responses {
+                Responses::Value(value) => value,
+                Responses::Pages(pages) => pages.merge(),
+            })?;
+            if !matches!(&response, Value::Map(pairs) if pairs.is_empty()) {
+                let _ = io::stdout().write_all(yaml(&response).as_bytes());
+            }
+        }
+        Format::YamlStream => {
+            let responses = match responses {
+                Responses::Value(value) => {
+                    let response = search(value)?;
+                    if matches!(&response, Value::Map(pairs) if pairs.is_empty()) {
+                        return Ok(());
+                    }
+                    vec![response]
+                }
+                Responses::Pages(pages) => pages.into_responses(),
+            };
+            for response in responses {
+                let response = Value::List(vec![search(response)?]);
+                let _ = io::stdout().write_all(yaml(&response).as_bytes());
+            }
+        }
         Format::Off => {}
     }
     Ok(())
+}
+
+/// Formats the response in YAML, where the scalars are formatted in JSON like
+/// `YAMLDumper` of the AWS CLI.
+fn yaml(response: &Value) -> String {
+    match response {
+        Value::List(_) | Value::Map(_) => yaml::dump(response),
+        _ => format!("{}\n", response.to_json_pretty()),
+    }
 }
 
 /// Parses the integer argument, failing with the same message as `int` of

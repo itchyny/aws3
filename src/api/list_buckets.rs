@@ -79,6 +79,7 @@ fn page(output: &ListBucketsOutput) -> Page {
         .filter(|token| !token.is_empty())
         .map(str::to_owned);
     Page {
+        response: response(output),
         results: vec![buckets(output)],
         non_aggregate: vec![
             ("Owner", output.owner().map_or(Value::Null, owner_value)),
