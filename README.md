@@ -41,7 +41,7 @@ with `aws3 api` for these operations, and use `aws s3api` for the others.
 |---|---|
 | Objects | `head-object`, `get-object`, `put-object`, `copy-object`, `delete-object`, `delete-objects`, `list-objects-v2`, `list-object-versions` |
 | Buckets | `list-buckets`, `head-bucket`, `get-bucket-location`, `create-bucket`, `delete-bucket` |
-| Bucket configurations | `get-`/`put-bucket-versioning`, `get-`/`put-public-access-block`, `get-`/`put-bucket-policy`, `get-`/`put-bucket-encryption`, `get-`/`put-bucket-lifecycle-configuration` |
+| Bucket configurations | `get-`/`put-bucket-versioning`, `get-`/`put-`/`delete-public-access-block`, `get-`/`put-`/`delete-bucket-policy`, `get-`/`put-`/`delete-bucket-encryption`, `get-`/`put-bucket-lifecycle-configuration`, `delete-bucket-lifecycle` |
 
 ```sh
 aws3 api head-object --bucket bucket --key path/to/file.txt
