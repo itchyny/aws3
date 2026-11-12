@@ -111,8 +111,30 @@ impl Value {
                 indent(buf, depth);
                 buf.push('}');
             }
+            // The floats are formatted like `json.dumps` of Python.
+            Self::Float(value) if value.is_finite() => buf.push_str(&python_float(*value)),
             _ => buf.push_str(&self.to_json()),
         }
+    }
+}
+
+/// Formats the float like `repr` of Python, which uses the exponent for the
+/// large or small numbers.
+pub fn python_float(value: f64) -> String {
+    if value.is_nan() {
+        "nan".to_owned()
+    } else if value.is_infinite() {
+        if value > 0.0 { "inf" } else { "-inf" }.to_owned()
+    } else if value != 0.0 && !(1e-4..1e16).contains(&value.abs()) {
+        let formatted = format!("{value:e}");
+        let (mantissa, exponent) = formatted.split_once('e').unwrap_or((&formatted, "0"));
+        let (sign, digits) = match exponent.strip_prefix('-') {
+            Some(digits) => ('-', digits),
+            None => ('+', exponent),
+        };
+        format!("{mantissa}e{sign}{digits:0>2}")
+    } else {
+        format!("{value:?}")
     }
 }
 
@@ -157,6 +179,15 @@ mod tests {
             value.to_json(),
             r#"{"a":["x\"\n","y",1,1.5,1e16,-Infinity,true,null],"b":{}}"#
         );
+    }
+
+    #[test]
+    fn python_float() {
+        assert_eq!(super::python_float(1.0), "1.0");
+        assert_eq!(super::python_float(2.5), "2.5");
+        assert_eq!(super::python_float(1e16), "1e+16");
+        assert_eq!(super::python_float(1.5e-5), "1.5e-05");
+        assert_eq!(super::python_float(0.0001), "0.0001");
     }
 
     #[test]

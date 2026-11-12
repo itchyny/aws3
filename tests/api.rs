@@ -166,19 +166,21 @@ fn head_object_errors() {
         "\naws3: [ERROR]: invalid literal for int() with base 10: 'x'\n"
     );
 
-    for (args, message) in [
-        (&["--output", "text"][..], "--output text"),
-        (&["--query", "ETag"][..], "--query"),
-    ] {
-        let mut command = vec!["api", "head-object", "--bucket", "bucket", "--key", "a.txt"];
-        command.extend(args);
-        let result = env.run(&command);
-        assert_eq!(result.code, 255);
-        assert_eq!(
-            result.stderr,
-            format!("\naws3: [ERROR]: {message} is not supported by the api command\n")
-        );
-    }
+    let result = env.run(&[
+        "api",
+        "head-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "a.txt",
+        "--output",
+        "text",
+    ]);
+    assert_eq!(result.code, 255);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: --output text is not supported by the api command\n"
+    );
 }
 
 #[test]
@@ -1054,5 +1056,71 @@ fn create_bucket_and_delete_bucket() {
          Unknown parameter in CreateBucketConfiguration: \"Foo\", must be one of: \
          LocationConstraint, Location, Bucket, Tags\n\
          Missing required parameter in CreateBucketConfiguration.Tags[0]: \"Value\"\n"
+    );
+}
+
+#[test]
+fn query() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for (key, content) in [("a.txt", "abc"), ("b.txt", "x"), ("dir/c.txt", "hello")] {
+        env.object("bucket", key, content);
+    }
+    let query = |args: &[&str]| {
+        let mut command = vec!["api", "list-objects-v2", "--bucket", "bucket"];
+        command.extend(args);
+        env.run(&command)
+    };
+
+    // The query is applied to the merged pages.
+    let result = query(&["--page-size", "1", "--query", "Contents[?Size > `1`].Key"]).success();
+    assert_eq!(result.stdout, "[\n    \"a.txt\",\n    \"dir/c.txt\"\n]\n");
+    let result = query(&["--query", "{n: length(Contents), s: sum(Contents[].Size)}"]).success();
+    assert_eq!(result.stdout, "{\n    \"n\": 3,\n    \"s\": 9\n}\n");
+    let result = query(&["--query", "Contents[0].Key"]).success();
+    assert_eq!(result.stdout, "\"a.txt\"\n");
+    let result = query(&["--query", "Missing"]).success();
+    assert_eq!(result.stdout, "null\n");
+    // The empty objects are not printed.
+    let result = query(&["--query", "`{}`"]).success();
+    assert_eq!(result.stdout, "");
+
+    let result = env
+        .run(&[
+            "api",
+            "head-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            "a.txt",
+            "--query",
+            "[ContentLength, ETag]",
+        ])
+        .success();
+    assert_eq!(
+        result.stdout,
+        "[\n    3,\n    \"\\\"900150983cd24fb0d6963f7d28e17f72\\\"\"\n]\n"
+    );
+
+    let result = query(&["--query", "Contents["]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Bad value for --query Contents[: \
+         Invalid jmespath expression: Incomplete expression:\n\"Contents[\"\n          ^\n"
+    );
+    // The expression is validated before sending the requests.
+    assert!(
+        env.requests()
+            .iter()
+            .all(|request| request.method != http::Method::PUT)
+    );
+
+    let result = query(&["--query", "length(`1`)"]);
+    assert_eq!(result.code, 255);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: In function length(), invalid type for value: 1, expected one of: \
+         ['string', 'array', 'object'], received: \"number\"\n"
     );
 }

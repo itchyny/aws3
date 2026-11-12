@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use crate::transfer::params;
-use crate::value::Value;
+use crate::value::{Value, python_float};
 
 /// The shape of a member, a subset of the types of the models of botocore.
 #[derive(Debug)]
@@ -186,12 +186,12 @@ pub fn str(value: &Value) -> String {
 }
 
 /// Returns the value like `repr` of Python.
-fn repr(value: &Value) -> String {
+pub fn repr(value: &Value) -> String {
     match value {
         Value::Str(string) => repr_string(string, ""),
         Value::Bytes(bytes) => repr_string(&String::from_utf8_lossy(bytes), "b"),
         Value::Int(digits) => digits.clone(),
-        Value::Float(value) => repr_float(*value),
+        Value::Float(value) => python_float(*value),
         Value::Bool(true) => "True".to_owned(),
         Value::Bool(false) => "False".to_owned(),
         Value::Null => "None".to_owned(),
@@ -233,26 +233,6 @@ fn repr_string(string: &str, prefix: &str) -> String {
     }
     buf.push(quote);
     buf
-}
-
-/// Formats the float like `repr` of Python, which uses the exponent for the
-/// large or small numbers.
-fn repr_float(value: f64) -> String {
-    if value.is_nan() {
-        "nan".to_owned()
-    } else if value.is_infinite() {
-        if value > 0.0 { "inf" } else { "-inf" }.to_owned()
-    } else if value != 0.0 && !(1e-4..1e16).contains(&value.abs()) {
-        let formatted = format!("{value:e}");
-        let (mantissa, exponent) = formatted.split_once('e').unwrap_or((&formatted, "0"));
-        let (sign, digits) = match exponent.strip_prefix('-') {
-            Some(digits) => ('-', digits),
-            None => ('+', exponent),
-        };
-        format!("{mantissa}e{sign}{digits:0>2}")
-    } else {
-        format!("{value:?}")
-    }
 }
 
 #[cfg(test)]
@@ -336,14 +316,5 @@ mod tests {
                     .to_owned()
             )
         );
-    }
-
-    #[test]
-    fn repr_float() {
-        assert_eq!(super::repr_float(1.0), "1.0");
-        assert_eq!(super::repr_float(2.5), "2.5");
-        assert_eq!(super::repr_float(1e16), "1e+16");
-        assert_eq!(super::repr_float(1.5e-5), "1.5e-05");
-        assert_eq!(super::repr_float(0.0001), "0.0001");
     }
 }

@@ -10,6 +10,7 @@ mod get_bucket_location;
 mod get_object;
 mod head_bucket;
 mod head_object;
+mod jmespath;
 mod list_buckets;
 mod list_object_versions;
 mod list_objects_v2;
@@ -36,6 +37,7 @@ use crate::client;
 use crate::error::Error;
 use crate::transfer::params;
 use crate::value::{Value, insert};
+use jmespath::Expression;
 
 pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     if let Some(output) = global.output.filter(|output| *output != Output::Json) {
@@ -47,9 +49,15 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
             name.unwrap_or_default()
         )));
     }
-    if global.query.is_some() {
-        return Err(Error::new("--query is not supported by the api command"));
-    }
+    let query = global
+        .query
+        .as_deref()
+        .map(|query| {
+            Expression::compile(query).map_err(|err| {
+                Error::param_validation(format!("Bad value for --query {query}: {err}"))
+            })
+        })
+        .transpose()?;
     let config = client::load_config(global).await?;
     let client = client::new_client(&config, None);
     let response = match &args.operation {
@@ -69,11 +77,17 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::CreateBucket(args) => create_bucket::run(&client, args).await?,
         ApiOperation::DeleteBucket(args) => delete_bucket::run(&client, args).await?,
     };
+    let response = match query {
+        Some(query) => query
+            .search(&response)
+            .map_err(|err| Error::new(err.to_string()))?,
+        None => response,
+    };
     print(&response);
     Ok(ExitCode::SUCCESS)
 }
 
-/// Prints the response in JSON, except for the empty responses, ignoring the
+/// Prints the response in JSON, except for the empty objects, ignoring the
 /// errors of writing like the other outputs of the commands.
 fn print(response: &Value) {
     if !matches!(response, Value::Map(pairs) if pairs.is_empty()) {
