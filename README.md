@@ -8,7 +8,8 @@
 A fast command compatible with `aws s3`, written in Rust.
 
 The goal is a drop-in replacement for `aws s3`: replace `aws s3` with `aws3`
-and your scripts keep working, with faster startup and a single binary.
+and your scripts keep working, with faster startup and a single binary. The
+commonly used operations of `aws s3api` are also supported by `aws3 api`.
 
 ## Usage
 
@@ -30,9 +31,37 @@ CLI. The requests are sent through the proxies of `HTTP_PROXY` and
 credentials in the URLs of the proxies. The certificates of the proxies of
 HTTPS are verified with the same CA bundle as the endpoints.
 
+### The api subcommand
+
+The commonly used operations of `aws s3api` are supported by `aws3 api`, with
+the same options, outputs in JSON and exit codes. Replace `aws s3api` with
+`aws3 api` for these operations, and use `aws s3api` for the others.
+
+| Target | Operations |
+|---|---|
+| Objects | `head-object`, `get-object`, `put-object`, `copy-object`, `delete-object`, `delete-objects`, `list-objects-v2`, `list-object-versions` |
+| Buckets | `list-buckets`, `head-bucket`, `get-bucket-location`, `create-bucket`, `delete-bucket` |
+| Bucket configurations | `get-`/`put-bucket-versioning`, `get-`/`put-public-access-block`, `get-`/`put-bucket-policy`, `get-`/`put-bucket-encryption`, `get-`/`put-bucket-lifecycle-configuration` |
+
+```sh
+aws3 api head-object --bucket bucket --key path/to/file.txt
+aws3 api list-objects-v2 --bucket bucket --prefix logs/ --query 'Contents[?Size > `0`].Key'
+aws3 api put-object --bucket bucket --key file.txt --body file.txt --metadata key=value
+aws3 api put-bucket-policy --bucket bucket --policy file://policy.json
+```
+
+The structured arguments are accepted in the shorthand syntax and in JSON, also
+from the files of `file://`, and validated with the same error messages as the
+AWS CLI. The responses of the list operations are paginated automatically with
+`--page-size`, `--max-items`, `--starting-token` and `--no-paginate`, and
+filtered by the JMESPath expressions of `--query`.
+
 ### Differences from the AWS CLI
 
-- Only the commands of `aws s3` are supported, not `aws s3api`.
+- Only the commonly used operations of `aws s3api` are supported by
+  `aws3 api`, whose outputs are only in JSON, not in the text, table and YAML
+  of `--output`, and are not shown through the pager of `cli_pager` or
+  `AWS_PAGER`.
 - The error messages are prefixed with `aws3:` instead of `aws:`.
 - The root certificates of Mozilla are used for TLS, unless a CA bundle is
   specified with `--ca-bundle` or `AWS_CA_BUNDLE`.
