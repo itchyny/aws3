@@ -1,11 +1,11 @@
 //! The delete-objects operation.
 
 use aws_sdk_s3::Client;
-use aws_sdk_s3::types::{ChecksumAlgorithm, Delete, ObjectIdentifier, RequestPayer};
+use aws_sdk_s3::types::{Delete, ObjectIdentifier, RequestPayer};
 
-use super::members;
 use super::output::Response;
 use super::shape::{Shape, Structure, parse_structure};
+use super::{members, required_checksum_algorithm};
 use crate::cli::DeleteObjectsArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;
@@ -50,11 +50,9 @@ pub async fn run(client: &Client, args: &DeleteObjectsArgs) -> Result<Value, Err
                 .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
                 .set_bypass_governance_retention(args.bypass_governance_retention.value())
                 .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .set_checksum_algorithm(
-                    args.checksum_algorithm
-                        .as_deref()
-                        .map(ChecksumAlgorithm::from),
-                )
+                .checksum_algorithm(required_checksum_algorithm(
+                    args.checksum_algorithm.as_deref(),
+                ))
                 .send()
         })
         .await

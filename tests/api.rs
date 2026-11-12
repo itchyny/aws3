@@ -273,7 +273,8 @@ fn delete_objects() {
     let request = requests.last().unwrap();
     assert_eq!(request.method, http::Method::POST);
     assert_eq!(request.uri.query(), Some("delete"));
-    assert!(request.headers.contains_key("x-amz-checksum-crc32"));
+    // The checksum is required, which defaults to CRC64NVME.
+    assert!(request.headers.contains_key("x-amz-checksum-crc64nvme"));
 
     env.write("delete.json", r#"{"Objects": [{"Key": "c.txt"}]}"#);
     let result = env
