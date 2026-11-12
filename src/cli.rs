@@ -388,6 +388,8 @@ pub enum ApiOperation {
     GetBucketPolicy(BucketArgs),
     /// Apply a policy to a bucket
     PutBucketPolicy(PutBucketPolicyArgs),
+    /// Return the default encryption of a bucket
+    GetBucketEncryption(BucketArgs),
     /// Set the default encryption of a bucket
     PutBucketEncryption(PutBucketEncryptionArgs),
     /// Set the lifecycle configuration of a bucket

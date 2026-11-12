@@ -1436,3 +1436,11 @@ fn get_bucket_policy() {
     let query = get_bucket_configuration(&env, "get-bucket-policy", "GetBucketPolicy");
     assert_eq!(query, "policy");
 }
+
+#[test]
+fn get_bucket_encryption() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "get-bucket-encryption", "GetBucketEncryption");
+    assert_eq!(query, "encryption");
+}

@@ -6,6 +6,7 @@ mod create_bucket;
 mod delete_bucket;
 mod delete_object;
 mod delete_objects;
+mod get_bucket_encryption;
 mod get_bucket_location;
 mod get_bucket_policy;
 mod get_bucket_versioning;
@@ -100,6 +101,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::GetBucketPolicy(args) => get_bucket_policy::run(&client, args).await?,
         ApiOperation::PutBucketPolicy(args) => put_bucket_policy::run(&client, args).await?,
+        ApiOperation::GetBucketEncryption(args) => {
+            get_bucket_encryption::run(&client, args).await?
+        }
         ApiOperation::PutBucketEncryption(args) => {
             put_bucket_encryption::run(&client, args).await?
         }
