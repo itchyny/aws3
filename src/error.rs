@@ -31,7 +31,7 @@ pub struct Error {
 struct ErrorInfo {
     kind: ErrorKind,
     code: String,
-    message: String,
+    message: Option<String>,
 }
 
 /// The kinds of the errors of the handlers of the AWS CLI, which format the
@@ -61,7 +61,7 @@ impl Error {
             info: Some(ErrorInfo {
                 kind: ErrorKind::ParamValidation,
                 code: "ParamValidation".to_owned(),
-                message: message.to_string(),
+                message: Some(message.to_string()),
             }),
         }
     }
@@ -86,11 +86,10 @@ impl Error {
                 // or whose bodies are not XML, are reported by the status code
                 // and the reason phrase like botocore.
                 let (code, message) = match inner.code() {
-                    Some(code) if !operation.starts_with("Head") => (
-                        code.to_owned(),
-                        inner.message().unwrap_or("Unknown").to_owned(),
-                    ),
-                    _ => (status.to_string(), reason_phrase(status).to_owned()),
+                    Some(code) if !operation.starts_with("Head") => {
+                        (code.to_owned(), inner.message().map(str::to_owned))
+                    }
+                    _ => (status.to_string(), Some(reason_phrase(status).to_owned())),
                 };
                 let retries = raw
                     .extension::<client::Retries>()
@@ -101,7 +100,8 @@ impl Error {
                 Self {
                     code: EXIT_SERVICE,
                     message: format!(
-                        "An error occurred ({code}) when calling the {operation} operation{retries}: {message}"
+                        "An error occurred ({code}) when calling the {operation} operation{retries}: {}",
+                        message.as_deref().unwrap_or("Unknown")
                     ),
                     info: Some(ErrorInfo {
                         kind: ErrorKind::Client,
@@ -118,9 +118,11 @@ impl Error {
                 info: Some(ErrorInfo {
                     kind: ErrorKind::NoCredentials,
                     code: "NoCredentials".to_owned(),
-                    message: "Unable to locate credentials. \
-                              You can configure credentials by running \"aws login\"."
-                        .to_owned(),
+                    message: Some(
+                        "Unable to locate credentials. \
+                         You can configure credentials by running \"aws login\"."
+                            .to_owned(),
+                    ),
                 }),
             },
             SdkError::DispatchFailure(failure) if failure.is_io() || failure.is_timeout() => {
@@ -206,15 +208,16 @@ impl Error {
         let Some(info) = &self.info else {
             return plain(&self.message);
         };
-        let (code, message) = (info.code.as_str(), info.message.as_str());
+        let (code, message) = (info.code.as_str(), info.message.as_deref());
         match format {
-            ErrorFormat::Enhanced if info.kind == ErrorKind::NoCredentials => {
-                plain(&format!("An error occurred ({code}): {message}"))
-            }
+            ErrorFormat::Enhanced if info.kind == ErrorKind::NoCredentials => plain(&format!(
+                "An error occurred ({code}): {}",
+                message.unwrap_or(&self.message)
+            )),
             ErrorFormat::Enhanced => plain(&self.message),
             // The legacy format omits the code except for the client errors.
             ErrorFormat::Legacy if info.kind == ErrorKind::Client => plain(&self.message),
-            ErrorFormat::Legacy => plain(message),
+            ErrorFormat::Legacy => plain(message.unwrap_or(&self.message)),
             ErrorFormat::Json => errorformat::json(code, message),
             ErrorFormat::Yaml => errorformat::yaml(code, message),
             ErrorFormat::Text => errorformat::text(code, message),

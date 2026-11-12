@@ -673,6 +673,27 @@ fn get_object_errors() {
     }
     // The file is not created on the errors of the requests.
     assert!(!env.path("out.txt").exists());
+
+    // The structured formats omit the message absent in the error response.
+    for (format, expected) in [
+        ("json", "{\n    \"Code\": \"NoSuchKey\"\n}\n"),
+        ("yaml", "Code: NoSuchKey\n"),
+        ("text", "NoSuchKey\n"),
+    ] {
+        let result = env.run(&[
+            "api",
+            "get-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            "missing",
+            "out.txt",
+            "--cli-error-format",
+            format,
+        ]);
+        assert_eq!(result.code, 254);
+        assert_eq!(result.stderr, expected, "{format}");
+    }
 }
 
 #[test]

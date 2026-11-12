@@ -606,5 +606,13 @@
   "yaml": "Code: ParamValidation\nMessage: 'Value for multipart_chunksize must be a positive integer: 0'\n",
   "text": "ParamValidation\tValue for multipart_chunksize must be a positive integer: 0\n",
   "table": "----------------------------------------------------------------------------\n|                                   error                                  |\n+---------+----------------------------------------------------------------+\n|  Code   |  ParamValidation                                               |\n|  Message|  Value for multipart_chunksize must be a positive integer: 0   |\n+---------+----------------------------------------------------------------+\n"
+ },
+ {
+  "code": "NoSuchKey",
+  "message": null,
+  "json": "{\n    \"Code\": \"NoSuchKey\"\n}\n",
+  "yaml": "Code: NoSuchKey\n",
+  "text": "NoSuchKey\n",
+  "table": "-----------------------\n|        error        |\n+-------+-------------+\n|  Code |  NoSuchKey  |\n+-------+-------------+\n"
  }
 ]
