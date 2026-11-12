@@ -38,10 +38,15 @@ the same options, outputs in JSON and text, and exit codes. Replace `aws s3api`
 with `aws3 api` for these operations, and use `aws s3api` for the others.
 
 | Target | Operations |
-|---|---|
-| Objects | `head-object`, `get-object`, `put-object`, `copy-object`, `delete-object`, `delete-objects`, `list-objects-v2`, `list-object-versions` |
+| --- | --- |
+| Objects | `head-object`, `get-object`, `put-object`, `copy-object`, `delete-object`, `delete-objects` |
+| Object listing | `list-objects-v2`, `list-object-versions` |
 | Buckets | `list-buckets`, `head-bucket`, `get-bucket-location`, `create-bucket`, `delete-bucket` |
-| Bucket configurations | `get-`/`put-bucket-versioning`, `get-`/`put-`/`delete-public-access-block`, `get-`/`put-`/`delete-bucket-policy`, `get-`/`put-`/`delete-bucket-encryption`, `get-`/`put-bucket-lifecycle-configuration`, `delete-bucket-lifecycle` |
+| Versioning | `get-bucket-versioning`, `put-bucket-versioning` |
+| Public access block | `get-public-access-block`, `put-public-access-block`, `delete-public-access-block` |
+| Policy | `get-bucket-policy`, `put-bucket-policy`, `delete-bucket-policy` |
+| Encryption | `get-bucket-encryption`, `put-bucket-encryption`, `delete-bucket-encryption` |
+| Lifecycle | `get-bucket-lifecycle-configuration`, `put-bucket-lifecycle-configuration`, `delete-bucket-lifecycle` |
 
 ```sh
 aws3 api head-object --bucket bucket --key path/to/file.txt
