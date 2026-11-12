@@ -743,3 +743,149 @@ fn get_bucket_location() {
         result.stderr
     );
 }
+
+/// Returns the keys of the contents in the output of the listing.
+fn listed_keys(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("\"Key\": \""))
+        .map(|key| key.trim_end_matches(['"', ',']).to_owned())
+        .collect()
+}
+
+#[test]
+fn list_objects_v2() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for key in ["a b+c.txt", "a.txt", "dir/sub/z.txt", "dir/x.txt", "e.txt"] {
+        env.object("bucket", key, "x");
+    }
+    let list = |args: &[&str]| {
+        let mut command = vec!["api", "list-objects-v2", "--bucket", "bucket"];
+        command.extend(args);
+        env.run(&command).success().stdout
+    };
+
+    // The keys are decoded, and the pages are merged.
+    let stdout = list(&["--page-size", "2"]);
+    assert_eq!(
+        listed_keys(&stdout),
+        ["a b+c.txt", "a.txt", "dir/sub/z.txt", "dir/x.txt", "e.txt"]
+    );
+    assert!(
+        stdout.ends_with("    ],\n    \"RequestCharged\": null,\n    \"Prefix\": null\n}\n"),
+        "{stdout}"
+    );
+    let requests = env.requests();
+    let queries: Vec<_> = requests
+        .iter()
+        .rev()
+        .take(3)
+        .map(|request| request.uri.query().unwrap_or_default().to_owned())
+        .collect();
+    assert!(
+        queries
+            .iter()
+            .all(|query| query.contains("encoding-type=url"))
+    );
+    assert!(queries.iter().all(|query| query.contains("max-keys=2")));
+
+    let stdout = list(&["--prefix", "dir/", "--delimiter", "/"]);
+    assert_eq!(listed_keys(&stdout), ["dir/x.txt"]);
+    assert!(
+        stdout.contains("\"CommonPrefixes\": [\n        {\n            \"Prefix\": \"dir/sub/\"\n        }\n    ],\n    \"RequestCharged\": null,\n    \"Prefix\": \"dir/\"\n"),
+        "{stdout}"
+    );
+
+    // The keys are not decoded with the encoding type given by the user.
+    let stdout = list(&["--encoding-type", "url", "--max-items", "1"]);
+    assert_eq!(listed_keys(&stdout), ["a+b%2Bc.txt"]);
+
+    // The output is truncated with the token to resume.
+    let stdout = list(&["--max-items", "3", "--page-size", "2"]);
+    assert_eq!(
+        listed_keys(&stdout),
+        ["a b+c.txt", "a.txt", "dir/sub/z.txt"]
+    );
+    let token = "eyJDb250aW51YXRpb25Ub2tlbiI6ICJhLnR4dCIsICJib3RvX3RydW5jYXRlX2Ftb3VudCI6IDF9";
+    assert!(
+        stdout.ends_with(&format!("    \"NextToken\": \"{token}\"\n}}\n")),
+        "{stdout}"
+    );
+    let stdout = list(&["--starting-token", token]);
+    assert_eq!(listed_keys(&stdout), ["dir/x.txt", "e.txt"]);
+    assert!(!stdout.contains("NextToken"));
+
+    // The full response of a request without the pagination.
+    let stdout = list(&["--max-keys", "2"]);
+    assert_eq!(listed_keys(&stdout), ["a b+c.txt", "a.txt"]);
+    assert!(
+        stdout.starts_with("{\n    \"IsTruncated\": true,\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.ends_with(
+            "    \"Name\": \"bucket\",\n    \"MaxKeys\": 2,\n    \"EncodingType\": \"url\",\n    \
+             \"KeyCount\": 2,\n    \"NextContinuationToken\": \"a.txt\"\n}\n"
+        ),
+        "{stdout}"
+    );
+    let stdout = list(&["--no-paginate"]);
+    assert!(
+        stdout.starts_with("{\n    \"IsTruncated\": false,\n"),
+        "{stdout}"
+    );
+
+    let stdout = list(&["--prefix", "missing/"]);
+    assert_eq!(
+        stdout,
+        "{\n    \"RequestCharged\": null,\n    \"Prefix\": \"missing/\"\n}\n"
+    );
+}
+
+#[test]
+fn list_objects_v2_errors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "x");
+    let result = env.run(&[
+        "api",
+        "list-objects-v2",
+        "--bucket",
+        "bucket",
+        "--no-paginate",
+        "--max-items",
+        "1",
+        "--starting-token",
+        "x",
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Cannot specify --no-paginate \
+         along with pagination arguments: --starting-token, --max-items\n"
+    );
+
+    let result = env
+        .run(&[
+            "api",
+            "list-objects-v2",
+            "--bucket",
+            "bucket",
+            "--max-items",
+            "0",
+        ])
+        .success();
+    assert_eq!(
+        result.stderr,
+        "warning: Non-positive values for --max-items may result in undefined behavior.\n"
+    );
+    assert!(result.stdout.starts_with("{\n    \"Contents\": [],\n"));
+
+    let result = env.run(&["api", "list-objects-v2", "--bucket", "missing"]);
+    assert_eq!(result.code, 254);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (NoSuchBucket) when calling the ListObjectsV2 operation: Unknown\n"
+    );
+}

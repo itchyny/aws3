@@ -178,7 +178,7 @@ pub fn type_name(value: &Value) -> &'static str {
 
 /// Returns the value like `str` of Python, which is the same as `repr`
 /// except for the strings.
-fn str(value: &Value) -> String {
+pub fn str(value: &Value) -> String {
     match value {
         Value::Str(string) => string.clone(),
         value => repr(value),

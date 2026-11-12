@@ -362,10 +362,105 @@ pub enum ApiOperation {
     DeleteObject(DeleteObjectArgs),
     /// Remove multiple objects from a bucket in a single request
     DeleteObjects(DeleteObjectsArgs),
+    /// List the objects in a bucket
+    ListObjectsV2(ListObjectsV2Args),
     /// Determine whether a bucket exists and you have permission to access it
     HeadBucket(BucketArgs),
     /// Return the region the bucket resides in
     GetBucketLocation(BucketArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ListObjectsV2Args {
+    /// The name of the bucket to list
+    #[arg(long)]
+    pub bucket: String,
+
+    /// A character to group the keys by, e.g. /
+    #[arg(long, value_name = "STRING")]
+    pub delimiter: Option<String>,
+
+    /// The encoding of the keys in the response, i.e. url
+    #[arg(long, value_name = "STRING")]
+    pub encoding_type: Option<String>,
+
+    /// The maximum number of keys in a response, which disables the pagination
+    #[arg(
+        long,
+        value_name = "INTEGER",
+        allow_negative_numbers = true,
+        hide = true
+    )]
+    pub max_keys: Option<String>,
+
+    /// Limits the response to the keys that begin with the specified prefix
+    #[arg(long, value_name = "STRING")]
+    pub prefix: Option<String>,
+
+    /// The token to continue the listing, which disables the pagination
+    #[arg(long, value_name = "STRING", hide = true)]
+    pub continuation_token: Option<String>,
+
+    #[command(flatten)]
+    pub fetch_owner: FetchOwnerArgs,
+
+    /// Start listing after the specified key
+    #[arg(long, value_name = "STRING")]
+    pub start_after: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// The optional fields to return, i.e. RestoreStatus
+    #[arg(long, value_name = "STRING", num_args = 1..)]
+    pub optional_object_attributes: Option<Vec<String>>,
+
+    #[command(flatten)]
+    pub pagination: PaginationArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct FetchOwnerArgs {
+    /// Return the owner of each key
+    #[arg(long, overrides_with = "no_fetch_owner")]
+    fetch_owner: bool,
+
+    /// Do not return the owner of each key
+    #[arg(long, overrides_with = "fetch_owner")]
+    no_fetch_owner: bool,
+}
+
+impl FetchOwnerArgs {
+    pub fn value(&self) -> Option<bool> {
+        if self.fetch_owner {
+            Some(true)
+        } else if self.no_fetch_owner {
+            Some(false)
+        } else {
+            None
+        }
+    }
+}
+
+/// The arguments of the automatic pagination.
+#[derive(Debug, Args)]
+pub struct PaginationArgs {
+    /// The token to continue the pagination, which is the NextToken of a previous output
+    #[arg(long, value_name = "STRING")]
+    pub starting_token: Option<String>,
+
+    /// The number of items in each response, which does not limit the total
+    #[arg(long, value_name = "INTEGER", allow_negative_numbers = true)]
+    pub page_size: Option<i32>,
+
+    /// The total number of items to return
+    #[arg(long, value_name = "INTEGER", allow_negative_numbers = true)]
+    pub max_items: Option<i64>,
 }
 
 #[derive(Debug, Args)]

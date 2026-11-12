@@ -36,6 +36,7 @@ use crate::path::{is_s3express_bucket, validate_bucket_name};
 use crate::redirect::Redirector;
 pub use copy::url_encode;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
+pub use json::decode as decode_json;
 use params::{RequestParams, Unpacked};
 use paths::{Endpoint, relative_path, split_bucket_key};
 use printer::{PrintMode, Printer, TransferId};
