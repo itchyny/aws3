@@ -380,6 +380,8 @@ pub enum ApiOperation {
     GetBucketVersioning(BucketArgs),
     /// Set the versioning state of a bucket
     PutBucketVersioning(PutBucketVersioningArgs),
+    /// Return the configuration of the public access block of a bucket
+    GetPublicAccessBlock(BucketArgs),
     /// Set the configuration of the public access block of a bucket
     PutPublicAccessBlock(PutPublicAccessBlockArgs),
     /// Apply a policy to a bucket

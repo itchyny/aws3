@@ -9,6 +9,7 @@ mod delete_objects;
 mod get_bucket_location;
 mod get_bucket_versioning;
 mod get_object;
+mod get_public_access_block;
 mod head_bucket;
 mod head_object;
 mod jmespath;
@@ -89,6 +90,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::PutBucketVersioning(args) => {
             put_bucket_versioning::run(&client, args).await?
+        }
+        ApiOperation::GetPublicAccessBlock(args) => {
+            get_public_access_block::run(&client, args).await?
         }
         ApiOperation::PutPublicAccessBlock(args) => {
             put_public_access_block::run(&client, args).await?

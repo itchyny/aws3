@@ -1420,3 +1420,11 @@ fn get_bucket_versioning() {
     let query = get_bucket_configuration(&env, "get-bucket-versioning", "GetBucketVersioning");
     assert_eq!(query, "versioning");
 }
+
+#[test]
+fn get_public_access_block() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "get-public-access-block", "GetPublicAccessBlock");
+    assert_eq!(query, "publicAccessBlock");
+}
