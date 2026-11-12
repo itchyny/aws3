@@ -687,3 +687,59 @@ fn get_object_errors() {
     // The file is not created on the errors of the requests.
     assert!(!env.path("out.txt").exists());
 }
+
+#[test]
+fn head_bucket() {
+    let env = Env::new();
+    env.bucket("bucket");
+    // The fake server responds with no headers of the bucket.
+    let result = env
+        .run(&["api", "head-bucket", "--bucket", "bucket"])
+        .success();
+    assert_eq!(result.stdout, "");
+
+    let result = env.run(&["api", "head-bucket", "--bucket", "missing"]);
+    assert_eq!(result.code, 254);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (404) when calling the HeadBucket operation: Not Found\n"
+    );
+
+    // The request is redirected to the region of the bucket.
+    env.bucket("west");
+    env.bucket_region("west", "us-west-2");
+    env.run(&["api", "head-bucket", "--bucket", "west"])
+        .success();
+    let regions: Vec<_> = env
+        .requests()
+        .iter()
+        .filter(|request| request.bucket() == "west")
+        .map(|request| request.signed_region().to_owned())
+        .collect();
+    assert_eq!(regions, ["us-east-1", "us-west-2"]);
+}
+
+#[test]
+fn get_bucket_location() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let result = env
+        .run(&["api", "get-bucket-location", "--bucket", "bucket"])
+        .success();
+    // The location constraint of us-east-1 is null.
+    assert_eq!(result.stdout, "{\n    \"LocationConstraint\": null\n}\n");
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(request.uri.path(), "/bucket/");
+    assert_eq!(request.uri.query(), Some("location"));
+
+    let result = env.run(&["api", "get-bucket-location", "--bucket", "missing"]);
+    assert_eq!(result.code, 254);
+    assert!(
+        result
+            .stderr
+            .starts_with("\naws3: [ERROR]: An error occurred (NoSuchBucket) when calling the GetBucketLocation operation: "),
+        "{}",
+        result.stderr
+    );
+}

@@ -362,6 +362,21 @@ pub enum ApiOperation {
     DeleteObject(DeleteObjectArgs),
     /// Remove multiple objects from a bucket in a single request
     DeleteObjects(DeleteObjectsArgs),
+    /// Determine whether a bucket exists and you have permission to access it
+    HeadBucket(BucketArgs),
+    /// Return the region the bucket resides in
+    GetBucketLocation(BucketArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct BucketArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
 }
 
 #[derive(Debug, Args)]

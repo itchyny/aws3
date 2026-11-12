@@ -4,7 +4,9 @@
 mod copy_object;
 mod delete_object;
 mod delete_objects;
+mod get_bucket_location;
 mod get_object;
+mod head_bucket;
 mod head_object;
 mod output;
 mod put_object;
@@ -51,6 +53,8 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::CopyObject(args) => copy_object::run(&client, args).await?,
         ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?,
         ApiOperation::DeleteObjects(args) => delete_objects::run(&client, args).await?,
+        ApiOperation::HeadBucket(args) => head_bucket::run(&client, args).await?,
+        ApiOperation::GetBucketLocation(args) => get_bucket_location::run(&client, args).await?,
     };
     print(&response);
     Ok(ExitCode::SUCCESS)
