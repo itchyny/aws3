@@ -351,6 +351,47 @@ fn cp_content_type_and_metadata() {
 }
 
 #[test]
+fn cp_content_encoding() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "hello");
+    env.run(&[
+        "cp",
+        "a.txt",
+        "s3://bucket/a.txt",
+        "--content-encoding",
+        "gzip",
+        "--no-progress",
+    ])
+    .success();
+    // The content encoding is sent in one header with aws-chunked, which the
+    // fake server stores as it is unlike S3.
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    let encodings: Vec<_> = request.headers.get_all("content-encoding").iter().collect();
+    assert_eq!(encodings, ["gzip,aws-chunked"]);
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"hello");
+
+    // The parts of multipart uploads are not affected.
+    let config = env.multipart_config();
+    env.write("big.bin", content(6 * 1024 * 1024));
+    let mut command = env.command(&[
+        "cp",
+        "big.bin",
+        "s3://bucket/big.bin",
+        "--content-encoding",
+        "gzip",
+        "--no-progress",
+    ]);
+    command.envs(config.iter().map(|(key, value)| (key, value)));
+    assert!(command.output().unwrap().status.success());
+    assert_eq!(
+        env.head("bucket", "big.bin").content_encoding(),
+        Some("gzip")
+    );
+}
+
+#[test]
 fn cp_copy_props() {
     let env = Env::new();
     env.bucket("bucket");

@@ -8,6 +8,7 @@ use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadOut
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
 use aws_smithy_checksums::ChecksumAlgorithm as Checksums;
+use aws_smithy_runtime_api::http::Headers;
 use aws_smithy_types::body::{Error as BoxError, SdkBody};
 use bytes::Bytes;
 use http_body::{Body, Frame, SizeHint};
@@ -370,6 +371,7 @@ async fn put_object(
                     if !has_content_type {
                         request.headers_mut().remove("content-type");
                     }
+                    merge_content_encodings(request.headers_mut());
                 })
                 .send()
         })
@@ -380,6 +382,20 @@ async fn put_object(
             Ok(Outcome::Skipped)
         }
         Err(err) => Err(Error::sdk("PutObject", err).to_string()),
+    }
+}
+
+/// Merges the content encodings into one header, where the SDK appends
+/// aws-chunked as another header after the content encoding of the argument,
+/// which S3-compatible storage may reject. The encodings are joined with commas
+/// like the AWS CLI, e.g. `gzip,aws-chunked`.
+fn merge_content_encodings(headers: &mut Headers) {
+    let encodings: Vec<String> = headers
+        .get_all("content-encoding")
+        .map(str::to_owned)
+        .collect();
+    if encodings.len() > 1 {
+        headers.insert("content-encoding", encodings.join(","));
     }
 }
 
