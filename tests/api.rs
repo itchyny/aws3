@@ -174,12 +174,12 @@ fn head_object_errors() {
         "--key",
         "a.txt",
         "--output",
-        "table",
+        "yaml",
     ]);
     assert_eq!(result.code, 255);
     assert_eq!(
         result.stderr,
-        "\naws3: [ERROR]: --output table is not supported by the api command\n"
+        "\naws3: [ERROR]: --output yaml is not supported by the api command\n"
     );
 }
 
@@ -1687,4 +1687,99 @@ fn delete_bucket_cors() {
     env.bucket("bucket");
     let query = delete_bucket_configuration(&env, "delete-bucket-cors", "DeleteBucketCors");
     assert_eq!(query, "cors");
+}
+
+#[test]
+fn output_table() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "abc");
+    env.object("bucket", "dir/b.txt", "x");
+    let run = |args: &[&str]| {
+        let mut command = vec!["api"];
+        command.extend(args);
+        command.extend(["--output", "table"]);
+        env.run(&command)
+    };
+
+    // The scalars are the columns of the rows, and the nested values are the
+    // indented sections, where the title is the name of the operation.
+    let result = run(&[
+        "list-objects-v2",
+        "--bucket",
+        "bucket",
+        "--delimiter",
+        "/",
+        "--query",
+        "{Prefix: Prefix, Keys: Contents[].{Key: Key, Size: Size}, CommonPrefixes: CommonPrefixes}",
+    ])
+    .success();
+    assert_eq!(
+        result.stdout,
+        "---------------------\n\
+         |   ListObjectsV2   |\n\
+         +----------+--------+\n\
+         |  Prefix  |  None  |\n\
+         +----------+--------+\n\
+         || CommonPrefixes  ||\n\
+         |+-----------------+|\n\
+         ||     Prefix      ||\n\
+         |+-----------------+|\n\
+         ||  dir/           ||\n\
+         |+-----------------+|\n\
+         ||      Keys       ||\n\
+         |+--------+--------+|\n\
+         ||   Key  | Size   ||\n\
+         |+--------+--------+|\n\
+         ||  a.txt |  3     ||\n\
+         |+--------+--------+|\n"
+    );
+
+    // The colors are reset after each write like the AWS CLI. The expected
+    // outputs are of the formatter of the AWS CLI.
+    let result = env
+        .run(&[
+            "api",
+            "get-bucket-location",
+            "--bucket",
+            "bucket",
+            "--query",
+            "{a: 'x'}",
+            "--output",
+            "table",
+            "--color",
+            "on",
+        ])
+        .success();
+    assert_eq!(
+        result.stdout,
+        "-------------------\n\x1b[0m\
+         \x1b[0m|GetBucketLocation|\x1b[0m\x1b[0m\n\x1b[0m\
+         \x1b[0m+-------+---------+\x1b[0m\x1b[0m\n\x1b[0m\
+         \x1b[0m|  \x1b[1m\x1b[34ma\x1b[0m    |  \x1b[1m\x1b[34mx\x1b[0m      |\x1b[0m\x1b[0m\n\x1b[0m\
+         \x1b[0m+-------+---------+\x1b[0m\x1b[0m\n\x1b[0m"
+    );
+
+    // The false values of Python are not written.
+    let result = run(&[
+        "get-bucket-location",
+        "--bucket",
+        "bucket",
+        "--query",
+        "LocationConstraint",
+    ]);
+    assert_eq!(result.success().stdout, "");
+
+    let result = run(&[
+        "get-bucket-location",
+        "--bucket",
+        "bucket",
+        "--query",
+        "`[{\"a\": 1}, \"x\"]`",
+    ]);
+    assert_eq!(result.code, 255);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: string indices must be integers, not 'str'\n"
+    );
 }

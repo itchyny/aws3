@@ -149,15 +149,13 @@ impl MultiTable {
         let mut headers = Vec::new();
         let mut more = Vec::new();
         for value in values {
+            // The errors of grouping the keys of the other values in Python.
             let Value::Map(pairs) = value else {
-                return Err(format!(
-                    "{} indices must be integers or slices, not str",
-                    if matches!(value, Value::Str(_)) {
-                        "string"
-                    } else {
-                        shape::type_name(value)
-                    }
-                ));
+                return Err(match value {
+                    Value::Str(_) => "string indices must be integers, not 'str'".to_owned(),
+                    Value::List(_) => "list indices must be integers or slices, not str".to_owned(),
+                    value => format!("'{}' object is not iterable", shape::type_name(value)),
+                });
             };
             let (h, m) = group_scalar_keys(pairs);
             headers.extend(h);
@@ -203,16 +201,20 @@ impl MultiTable {
     }
 
     /// Renders the sections, which are converted to the vertical tables if
-    /// they do not fit in the width of the terminal.
-    pub fn render(mut self, terminal_width: usize, colored: bool) -> String {
+    /// they do not fit in the width of the terminal. The colors are reset
+    /// after each write if `resets` is true, like colorama of the AWS CLI,
+    /// which wraps the standard output but not the standard error.
+    pub fn render(mut self, terminal_width: usize, colored: bool, resets: bool) -> String {
         let mut max_width = self.max_width();
         if max_width > terminal_width {
             self.convert_to_vertical();
             max_width = self.max_width();
         }
         let mut output = format!("{}\n", "-".repeat(max_width));
+        let reset = if colored && resets { RESET } else { "" };
+        output.push_str(reset);
         for section in &self.sections {
-            section.render(max_width, colored, &mut output);
+            section.render(max_width, colored, reset, &mut output);
         }
         output
     }
@@ -322,18 +324,20 @@ impl Section {
         total.max(text_length(&self.title) + 2 + outer)
     }
 
-    fn render(&self, max_width: usize, colored: bool, output: &mut String) {
+    fn render(&self, max_width: usize, colored: bool, reset: &str, output: &mut String) {
         let indent = if colored {
             "\x1b[2m\x1b[33m|\x1b[0m"
         } else {
             "|"
         }
         .repeat(self.indent_level);
+        // The indentation, the line, the indentation and the line break are
+        // written separately by the AWS CLI.
         let mut write_line = |line: &str| {
-            output.push_str(&indent);
-            output.push_str(line);
-            output.push_str(&indent);
-            output.push('\n');
+            for part in [indent.as_str(), line, indent.as_str(), "\n"] {
+                output.push_str(part);
+                output.push_str(reset);
+            }
         };
         let max_width = max_width - 2 * self.indent_level;
         if !self.title.is_empty() {
@@ -370,6 +374,9 @@ impl Section {
         }
     }
 }
+
+/// The escape sequence to reset the colors.
+const RESET: &str = "\x1b[0m";
 
 /// Returns whether the value is false in Python.
 fn is_false(value: &Value) -> bool {

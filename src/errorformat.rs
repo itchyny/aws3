@@ -335,7 +335,7 @@ pub fn table(code: &str, message: &str, terminal_width: usize, colored: bool) ->
         ("Message".to_owned(), Value::Str(message.to_owned())),
     ]);
     match table::build("error", &error) {
-        Ok(Some(table)) => table.render(terminal_width, colored),
+        Ok(Some(table)) => table.render(terminal_width, colored, false),
         _ => String::new(),
     }
 }

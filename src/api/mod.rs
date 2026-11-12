@@ -39,7 +39,7 @@ pub mod shape;
 mod text;
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -52,10 +52,11 @@ use aws_smithy_types::base64;
 use clap::ValueEnum;
 use md5::{Digest, Md5};
 
-use crate::cli::{ApiArgs, ApiOperation, GlobalArgs};
+use crate::cli::{ApiArgs, ApiOperation, Color, GlobalArgs};
 use crate::client;
 use crate::config::ProfileConfig;
 use crate::error::Error;
+use crate::table;
 use crate::transfer::params;
 use crate::value::{Value, insert};
 use jmespath::Expression;
@@ -140,7 +141,12 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
             delete_bucket_cors::run(&client, args).await?.into()
         }
     };
-    print(responses, format, query.as_ref())?;
+    let colored = match global.color {
+        Some(Color::On) => true,
+        Some(Color::Off) => false,
+        _ => io::stdout().is_terminal(),
+    };
+    print(&args.operation, responses, format, query.as_ref(), colored)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -162,7 +168,19 @@ impl From<Value> for Responses {
 enum Format {
     Json,
     Text,
+    Table,
     Off,
+}
+
+/// Returns the name of the operation, e.g. `HeadObject`, which is the name of
+/// the variant of the subcommand.
+fn operation_name(operation: &ApiOperation) -> String {
+    let debug = format!("{operation:?}");
+    debug
+        .split(['(', ' '])
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// Returns the format of the outputs of the option, the environment variable
@@ -181,8 +199,9 @@ fn output_format(global: &GlobalArgs) -> Result<Format, Error> {
     match name.as_str() {
         "json" => Ok(Format::Json),
         "text" => Ok(Format::Text),
+        "table" => Ok(Format::Table),
         "off" => Ok(Format::Off),
-        "table" | "yaml" | "yaml-stream" => Err(Error::new(format!(
+        "yaml" | "yaml-stream" => Err(Error::new(format!(
             "--output {name} is not supported by the api command"
         ))),
         _ => Err(Error::new(format!("Unknown output type: {name}"))),
@@ -192,7 +211,13 @@ fn output_format(global: &GlobalArgs) -> Result<Format, Error> {
 /// Prints the responses in the format after applying the query, ignoring the
 /// errors of writing like the other outputs of the commands. The empty objects
 /// are not printed in JSON, and the pages are printed one by one in text.
-fn print(responses: Responses, format: Format, query: Option<&Expression>) -> Result<(), Error> {
+fn print(
+    operation: &ApiOperation,
+    responses: Responses,
+    format: Format,
+    query: Option<&Expression>,
+    colored: bool,
+) -> Result<(), Error> {
     let search = |value: Value| match query {
         Some(query) => query
             .search(&value)
@@ -216,6 +241,21 @@ fn print(responses: Responses, format: Format, query: Option<&Expression>) -> Re
             };
             for response in responses {
                 let _ = io::stdout().write_all(text::format(&search(response)?)?.as_bytes());
+            }
+        }
+        Format::Table => {
+            let response = search(match responses {
+                Responses::Value(value) => value,
+                Responses::Pages(pages) => pages.merge(),
+            })?;
+            if let Some(table) =
+                table::build(&operation_name(operation), &response).map_err(Error::new)?
+            {
+                let _ = io::stdout().write_all(
+                    table
+                        .render(table::terminal_width(), colored, true)
+                        .as_bytes(),
+                );
             }
         }
         Format::Off => {}
