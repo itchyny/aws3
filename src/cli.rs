@@ -420,6 +420,8 @@ pub enum ApiOperation {
     GetObjectTagging(GetObjectTaggingArgs),
     /// Set the tags of an object
     PutObjectTagging(PutObjectTaggingArgs),
+    /// Delete the tags of an object
+    DeleteObjectTagging(DeleteObjectTaggingArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1571,6 +1573,25 @@ pub struct PutObjectTaggingArgs {
     /// Confirms that the requester knows that they will be charged for the request
     #[arg(long, value_name = "STRING")]
     pub request_payer: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct DeleteObjectTaggingArgs {
+    /// The name of the bucket that contains the object
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The key of the object
+    #[arg(long)]
+    pub key: String,
+
+    /// The version ID of the object
+    #[arg(long)]
+    pub version_id: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
 }
 
 #[derive(Debug, Args)]

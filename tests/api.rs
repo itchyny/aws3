@@ -2026,3 +2026,28 @@ fn put_object_tagging() {
     );
     assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
 }
+
+#[test]
+fn delete_object_tagging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    let (method, path, query) = object_tagging(
+        &env,
+        &[
+            "delete-object-tagging",
+            "--bucket",
+            "bucket",
+            "--key",
+            "a.txt",
+            "--version-id",
+            "v1",
+        ],
+        "DeleteObjectTagging",
+    );
+    assert_eq!(method, http::Method::DELETE);
+    assert_eq!(path, "/bucket/a.txt");
+    assert_eq!(query, "tagging&versionId=v1");
+    // The object is not deleted.
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"hello");
+}
