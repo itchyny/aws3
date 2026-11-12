@@ -35,6 +35,7 @@ pub async fn run(config: &Config, client: &Client, args: &PutObjectArgs) -> Resu
     let object_lock_event_hold_duration_years =
         parse_int(args.object_lock_event_hold_duration_years.as_deref())?;
     let (sse_customer_key, sse_customer_key_md5) = sse_customer_key(
+        "--sse-customer-key",
         args.sse_customer_key.as_deref(),
         args.sse_customer_key_md5.as_deref(),
     )?;

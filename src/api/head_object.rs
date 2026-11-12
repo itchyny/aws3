@@ -19,6 +19,7 @@ pub async fn run(client: &Client, args: &HeadObjectArgs) -> Result<Value, Error>
     let response_expires = parse_timestamp("ResponseExpires", args.response_expires.as_deref())?;
     let part_number = parse_int(args.part_number.as_deref())?;
     let (sse_customer_key, sse_customer_key_md5) = sse_customer_key(
+        "--sse-customer-key",
         args.sse_customer_key.as_deref(),
         args.sse_customer_key_md5.as_deref(),
     )?;

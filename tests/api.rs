@@ -7,7 +7,7 @@ use common::Env;
 fn without_last_modified(stdout: &str) -> String {
     stdout
         .lines()
-        .filter(|line| !line.starts_with("    \"LastModified\": "))
+        .filter(|line| !line.trim_start().starts_with("\"LastModified\": "))
         .map(|line| format!("{line}\n"))
         .collect()
 }
@@ -480,4 +480,92 @@ fn put_object_errors() {
         );
     }
     assert_eq!(env.object_content("bucket", "k"), None);
+}
+
+#[test]
+fn copy_object() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a b+\u{3042}.txt", "hello");
+    let result = env
+        .run(&[
+            "api",
+            "copy-object",
+            "--bucket",
+            "bucket",
+            "--key",
+            "b.txt",
+            "--copy-source",
+            "bucket/a b+\u{3042}.txt",
+            "--metadata-directive",
+            "REPLACE",
+            "--metadata",
+            "foo=bar",
+            "--content-type",
+            "text/plain",
+            "--copy-source-if-modified-since",
+            "2000-01-01",
+        ])
+        .success();
+    assert_eq!(
+        without_last_modified(&result.stdout),
+        r#"{
+    "CopyObjectResult": {
+        "ETag": "\"5d41402abc4b2a76b9719d911017c592\"",
+    }
+}
+"#
+    );
+    assert!(
+        result.stdout.contains("\n        \"LastModified\": \"20"),
+        "{}",
+        result.stdout
+    );
+    assert_eq!(env.object_content("bucket", "b.txt").unwrap(), b"hello");
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    let header = |name: &str| request.headers.get(name).unwrap().to_str().unwrap();
+    assert_eq!(header("x-amz-copy-source"), "bucket/a%20b%2B%E3%81%82.txt");
+    assert_eq!(header("x-amz-metadata-directive"), "REPLACE");
+    assert_eq!(header("x-amz-meta-foo"), "bar");
+    assert_eq!(header("content-type"), "text/plain");
+    assert_eq!(
+        header("x-amz-copy-source-if-modified-since"),
+        "Sat, 01 Jan 2000 00:00:00 GMT"
+    );
+
+    // The version ID suffix is not encoded.
+    env.run(&[
+        "api",
+        "copy-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "c.txt",
+        "--copy-source",
+        "bucket/b.txt?versionId=null",
+    ])
+    .success();
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(
+        request.headers.get("x-amz-copy-source").unwrap(),
+        "bucket/b.txt?versionId=null"
+    );
+
+    let result = env.run(&[
+        "api",
+        "copy-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "c.txt",
+        "--copy-source",
+        "bucket/missing",
+    ]);
+    assert_eq!(result.code, 254);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (NoSuchKey) when calling the CopyObject operation: Unknown\n"
+    );
 }

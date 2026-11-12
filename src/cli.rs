@@ -354,6 +354,8 @@ pub enum ApiOperation {
     HeadObject(HeadObjectArgs),
     /// Add an object to a bucket
     PutObject(PutObjectArgs),
+    /// Create a copy of an object that is already stored in S3
+    CopyObject(CopyObjectArgs),
     /// Remove an object or a version of an object
     DeleteObject(DeleteObjectArgs),
     /// Remove multiple objects from a bucket in a single request
@@ -606,6 +608,196 @@ pub struct PutObjectArgs {
     /// The account ID of the expected bucket owner
     #[arg(long, value_name = "STRING")]
     pub expected_bucket_owner: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CopyObjectArgs {
+    /// The canned ACL to apply to the object
+    #[arg(long, value_name = "STRING")]
+    pub acl: Option<String>,
+
+    /// The name of the destination bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// Caching behavior along the request/reply chain
+    #[arg(long, value_name = "STRING")]
+    pub cache_control: Option<String>,
+
+    /// The algorithm used to create the checksum of the object
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// Presentational information for the object
+    #[arg(long, value_name = "STRING")]
+    pub content_disposition: Option<String>,
+
+    /// The content encodings that have been applied to the object
+    #[arg(long, value_name = "STRING")]
+    pub content_encoding: Option<String>,
+
+    /// The language the content is in
+    #[arg(long, value_name = "STRING")]
+    pub content_language: Option<String>,
+
+    /// A standard MIME type describing the format of the contents
+    #[arg(long, value_name = "STRING")]
+    pub content_type: Option<String>,
+
+    /// The source object, i.e. the bucket and the key separated by a slash
+    #[arg(long, value_name = "STRING")]
+    pub copy_source: String,
+
+    /// Copy the object only if its entity tag (ETag) is the same as the one specified
+    #[arg(long, value_name = "ETAG")]
+    pub copy_source_if_match: Option<String>,
+
+    /// Copy the object only if it has been modified since the specified time
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub copy_source_if_modified_since: Option<String>,
+
+    /// Copy the object only if its entity tag (ETag) is different from the one specified
+    #[arg(long, value_name = "ETAG")]
+    pub copy_source_if_none_match: Option<String>,
+
+    /// Copy the object only if it has not been modified since the specified time
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub copy_source_if_unmodified_since: Option<String>,
+
+    /// The date and time at which the object is no longer cacheable
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub expires: Option<String>,
+
+    /// Gives the grantee READ, READ_ACP, and WRITE_ACP permissions on the object
+    #[arg(long, value_name = "STRING")]
+    pub grant_full_control: Option<String>,
+
+    /// Allows the grantee to read the object data and its metadata
+    #[arg(long, value_name = "STRING")]
+    pub grant_read: Option<String>,
+
+    /// Allows the grantee to read the object ACL
+    #[arg(long, value_name = "STRING")]
+    pub grant_read_acp: Option<String>,
+
+    /// Allows the grantee to write the ACL for the applicable object
+    #[arg(long, value_name = "STRING")]
+    pub grant_write_acp: Option<String>,
+
+    /// Copy the object only if the destination has the entity tag (ETag) specified
+    #[arg(long, value_name = "ETAG")]
+    pub if_match: Option<String>,
+
+    /// Copy the object only if the destination does not have the entity tag (ETag) specified
+    #[arg(long, value_name = "ETAG")]
+    pub if_none_match: Option<String>,
+
+    /// The key of the destination object
+    #[arg(long)]
+    pub key: String,
+
+    /// A map of metadata to store with the object
+    #[arg(long, value_name = "KeyName1=string,KeyName2=string")]
+    pub metadata: Option<String>,
+
+    /// Whether the metadata is copied from the source or replaced, i.e. COPY or REPLACE
+    #[arg(long, value_name = "STRING")]
+    pub metadata_directive: Option<String>,
+
+    /// Whether the tag-set is copied from the source or replaced, i.e. COPY or REPLACE
+    #[arg(long, value_name = "STRING")]
+    pub tagging_directive: Option<String>,
+
+    /// Whether the annotations are copied from the source or replaced, i.e. COPY or REPLACE
+    #[arg(long, value_name = "STRING")]
+    pub annotation_directive: Option<String>,
+
+    /// The server-side encryption algorithm, e.g. AES256, aws:kms
+    #[arg(long, value_name = "STRING")]
+    pub server_side_encryption: Option<String>,
+
+    /// The storage class of the object, e.g. STANDARD
+    #[arg(long, value_name = "STRING")]
+    pub storage_class: Option<String>,
+
+    /// Redirects the requests for the object to another object or URL
+    #[arg(long, value_name = "STRING")]
+    pub website_redirect_location: Option<String>,
+
+    /// The algorithm of the server-side encryption with the customer-provided key, e.g. AES256
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_algorithm: Option<String>,
+
+    /// The customer-provided key of the server-side encryption
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_key: Option<String>,
+
+    /// The base64-encoded MD5 digest of the customer-provided key
+    #[arg(long, value_name = "STRING")]
+    pub sse_customer_key_md5: Option<String>,
+
+    /// The ID of the KMS key to use for the object encryption
+    #[arg(long, value_name = "STRING")]
+    pub ssekms_key_id: Option<String>,
+
+    /// The base64-encoded JSON of the encryption context of the KMS key
+    #[arg(long, value_name = "STRING")]
+    pub ssekms_encryption_context: Option<String>,
+
+    #[command(flatten)]
+    pub bucket_key_enabled: BucketKeyEnabledArgs,
+
+    /// The algorithm to decrypt the source object with the customer-provided key, e.g. AES256
+    #[arg(long, value_name = "STRING")]
+    pub copy_source_sse_customer_algorithm: Option<String>,
+
+    /// The customer-provided key to decrypt the source object
+    #[arg(long, value_name = "STRING")]
+    pub copy_source_sse_customer_key: Option<String>,
+
+    /// The base64-encoded MD5 digest of the customer-provided key of the source object
+    #[arg(long, value_name = "STRING")]
+    pub copy_source_sse_customer_key_md5: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    /// The tag-set of the object encoded as URL query parameters, e.g. Key1=Value1
+    #[arg(long, value_name = "STRING")]
+    pub tagging: Option<String>,
+
+    /// The Object Lock mode to apply to the object, i.e. GOVERNANCE or COMPLIANCE
+    #[arg(long, value_name = "STRING")]
+    pub object_lock_mode: Option<String>,
+
+    /// The date and time when the Object Lock of the object expires
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub object_lock_retain_until_date: Option<String>,
+
+    /// The legal hold status of the object, i.e. ON or OFF
+    #[arg(long, value_name = "STRING")]
+    pub object_lock_legal_hold_status: Option<String>,
+
+    /// The event hold status of the object, i.e. ON or OFF
+    #[arg(long, value_name = "STRING")]
+    pub object_lock_event_hold: Option<String>,
+
+    /// The number of days of the event hold of the object
+    #[arg(long, value_name = "INTEGER", allow_negative_numbers = true)]
+    pub object_lock_event_hold_duration_days: Option<String>,
+
+    /// The number of years of the event hold of the object
+    #[arg(long, value_name = "INTEGER", allow_negative_numbers = true)]
+    pub object_lock_event_hold_duration_years: Option<String>,
+
+    /// The account ID of the expected destination bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// The account ID of the expected source bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_source_bucket_owner: Option<String>,
 }
 
 /// The base64-encoded checksums of the object, which are sent instead of

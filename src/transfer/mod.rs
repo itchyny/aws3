@@ -34,6 +34,7 @@ use crate::error::Error;
 use crate::filter::Filters;
 use crate::path::{is_s3express_bucket, validate_bucket_name};
 use crate::redirect::Redirector;
+pub use copy::url_encode;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
 use params::{RequestParams, Unpacked};
 use paths::{Endpoint, relative_path, split_bucket_key};

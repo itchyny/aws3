@@ -1,6 +1,7 @@
 //! The api command, which calls the operations of the S3 API in the same way
 //! as `aws s3api`, and prints the responses in the same format.
 
+mod copy_object;
 mod delete_object;
 mod delete_objects;
 mod head_object;
@@ -45,6 +46,7 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
     let response = match &args.operation {
         ApiOperation::HeadObject(args) => head_object::run(&client, args).await?,
         ApiOperation::PutObject(args) => put_object::run(&config, &client, args).await?,
+        ApiOperation::CopyObject(args) => copy_object::run(&client, args).await?,
         ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?,
         ApiOperation::DeleteObjects(args) => delete_objects::run(&client, args).await?,
     };
@@ -120,11 +122,12 @@ fn parse_metadata(value: Option<&str>) -> Result<Option<HashMap<String, String>>
 /// base64 encoded and the digest is calculated unless the digest is given,
 /// like `sse_md5` of botocore.
 fn sse_customer_key(
+    option: &str,
     key: Option<&str>,
     key_md5: Option<&str>,
 ) -> Result<(Option<String>, Option<String>), Error> {
     let key_md5 = key_md5.map(str::to_owned);
-    let Some(key) = params::load_key("--sse-customer-key", key)? else {
+    let Some(key) = params::load_key(option, key)? else {
         return Ok((None, key_md5));
     };
     Ok(match key_md5 {
