@@ -7,6 +7,7 @@ mod delete_bucket;
 mod delete_object;
 mod delete_objects;
 mod get_bucket_encryption;
+mod get_bucket_lifecycle_configuration;
 mod get_bucket_location;
 mod get_bucket_policy;
 mod get_bucket_versioning;
@@ -106,6 +107,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::PutBucketEncryption(args) => {
             put_bucket_encryption::run(&client, args).await?
+        }
+        ApiOperation::GetBucketLifecycleConfiguration(args) => {
+            get_bucket_lifecycle_configuration::run(&client, args).await?
         }
         ApiOperation::PutBucketLifecycleConfiguration(args) => {
             put_bucket_lifecycle_configuration::run(&client, args).await?

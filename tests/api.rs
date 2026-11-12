@@ -1444,3 +1444,15 @@ fn get_bucket_encryption() {
     let query = get_bucket_configuration(&env, "get-bucket-encryption", "GetBucketEncryption");
     assert_eq!(query, "encryption");
 }
+
+#[test]
+fn get_bucket_lifecycle_configuration() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(
+        &env,
+        "get-bucket-lifecycle-configuration",
+        "GetBucketLifecycleConfiguration",
+    );
+    assert_eq!(query, "lifecycle");
+}
