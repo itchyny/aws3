@@ -2,7 +2,10 @@
 
 use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output;
-use aws_sdk_s3::types::{EncodingType, Object, OptionalObjectAttributes, RequestPayer};
+use aws_sdk_s3::types::{
+    ChecksumAlgorithm, CommonPrefix, EncodingType, Object, OptionalObjectAttributes, Owner,
+    RequestPayer, RestoreStatus,
+};
 
 use super::output::Response;
 use super::paginate::{Page, Paginator};
@@ -111,7 +114,7 @@ fn response(output: &ListObjectsV2Output, decode: bool) -> Value {
     response.str("Prefix", decode(output.prefix()));
     response.str("Delimiter", decode(output.delimiter()));
     response.int("MaxKeys", output.max_keys());
-    if let Some(common_prefixes) = common_prefixes(output, decode) {
+    if let Some(common_prefixes) = common_prefixes(output.common_prefixes(), decode) {
         response.value("CommonPrefixes", Value::List(common_prefixes));
     }
     response.str("EncodingType", output.encoding_type());
@@ -136,7 +139,10 @@ fn page(output: &ListObjectsV2Output, decode: bool) -> Page {
     };
     let optional = |value: Option<String>| value.map_or(Value::Null, Value::Str);
     Page {
-        results: vec![contents(output, decode), common_prefixes(output, decode)],
+        results: vec![
+            contents(output, decode),
+            common_prefixes(output.common_prefixes(), decode),
+        ],
         non_aggregate: vec![
             (
                 "RequestCharged",
@@ -152,7 +158,9 @@ fn page(output: &ListObjectsV2Output, decode: bool) -> Page {
     }
 }
 
-fn decoded(value: &str, decode: bool) -> String {
+/// Decodes the value if the keys are encoded by the encoding type not
+/// specified by the user.
+pub(super) fn decoded(value: &str, decode: bool) -> String {
     if decode {
         url_decode(value)
     } else {
@@ -173,11 +181,12 @@ fn contents(
     })
 }
 
-fn common_prefixes(
-    output: &ListObjectsV2Output,
+/// Returns the common prefixes, which are absent if empty like the flattened
+/// lists of botocore.
+pub(super) fn common_prefixes(
+    common_prefixes: &[CommonPrefix],
     decode: impl Fn(Option<&str>) -> Option<String>,
 ) -> Option<Vec<Value>> {
-    let common_prefixes = output.common_prefixes();
     (!common_prefixes.is_empty()).then(|| {
         common_prefixes
             .iter()
@@ -195,27 +204,38 @@ fn object_value(object: &Object, decode: impl Fn(Option<&str>) -> Option<String>
     response.str("Key", decode(object.key()));
     response.timestamp("LastModified", object.last_modified());
     response.str("ETag", object.e_tag());
-    if !object.checksum_algorithm().is_empty() {
-        let algorithms = object
-            .checksum_algorithm()
-            .iter()
-            .map(|algorithm| Value::Str(algorithm.as_str().to_owned()));
-        response.value("ChecksumAlgorithm", Value::List(algorithms.collect()));
-    }
+    checksum_algorithms(&mut response, object.checksum_algorithm());
     response.str("ChecksumType", object.checksum_type());
     response.int("Size", object.size());
     response.str("StorageClass", object.storage_class());
     if let Some(owner) = object.owner() {
-        let mut value = Response::default();
-        value.str("DisplayName", owner.display_name());
-        value.str("ID", owner.id());
-        response.value("Owner", value.build());
+        response.value("Owner", owner_value(owner));
     }
     if let Some(status) = object.restore_status() {
-        let mut value = Response::default();
-        value.bool("IsRestoreInProgress", status.is_restore_in_progress());
-        value.timestamp("RestoreExpiryDate", status.restore_expiry_date());
-        response.value("RestoreStatus", value.build());
+        response.value("RestoreStatus", restore_status_value(status));
     }
+    response.build()
+}
+
+pub(super) fn checksum_algorithms(response: &mut Response, algorithms: &[ChecksumAlgorithm]) {
+    if !algorithms.is_empty() {
+        let algorithms = algorithms
+            .iter()
+            .map(|algorithm| Value::Str(algorithm.as_str().to_owned()));
+        response.value("ChecksumAlgorithm", Value::List(algorithms.collect()));
+    }
+}
+
+pub(super) fn owner_value(owner: &Owner) -> Value {
+    let mut response = Response::default();
+    response.str("DisplayName", owner.display_name());
+    response.str("ID", owner.id());
+    response.build()
+}
+
+pub(super) fn restore_status_value(status: &RestoreStatus) -> Value {
+    let mut response = Response::default();
+    response.bool("IsRestoreInProgress", status.is_restore_in_progress());
+    response.timestamp("RestoreExpiryDate", status.restore_expiry_date());
     response.build()
 }

@@ -889,3 +889,106 @@ fn list_objects_v2_errors() {
         "\naws3: [ERROR]: An error occurred (NoSuchBucket) when calling the ListObjectsV2 operation: Unknown\n"
     );
 }
+
+#[test]
+fn list_buckets() {
+    let env = Env::new();
+    env.bucket("bucket-a");
+    env.bucket("bucket-b");
+    let result = env.run(&["api", "list-buckets"]).success();
+    // The fake server lists the buckets in the order of the file system.
+    let mut names: Vec<_> = result
+        .lines()
+        .iter()
+        .filter_map(|line| line.trim_start().strip_prefix("\"Name\": \""))
+        .map(|name| name.trim_end_matches(['"', ',']).to_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["bucket-a", "bucket-b"]);
+    assert!(
+        result
+            .stdout
+            .ends_with("    ],\n    \"Owner\": null,\n    \"Prefix\": null\n}\n"),
+        "{}",
+        result.stdout
+    );
+
+    // The output is truncated with the token to resume.
+    let result = env
+        .run(&["api", "list-buckets", "--max-items", "1"])
+        .success();
+    assert!(
+        result.stdout.ends_with(
+            "    \"NextToken\": \"eyJDb250aW51YXRpb25Ub2tlbiI6IG51bGwsICJib3RvX3RydW5jYXRlX2Ftb3VudCI6IDF9\"\n}\n"
+        ),
+        "{}",
+        result.stdout
+    );
+
+    let result = env
+        .run(&["api", "list-buckets", "--no-paginate", "--prefix", "bucket"])
+        .success();
+    assert!(!result.stdout.contains("\"Owner\""), "{}", result.stdout);
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert!(request.uri.query().unwrap().contains("prefix=bucket"));
+}
+
+#[test]
+fn list_object_versions() {
+    let env = Env::new();
+    env.bucket("bucket");
+    // The fake server does not implement the versions.
+    let result = env.run(&[
+        "api",
+        "list-object-versions",
+        "--bucket",
+        "bucket",
+        "--prefix",
+        "dir/",
+        "--page-size",
+        "2",
+    ]);
+    assert_eq!(result.code, 254);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (NotImplemented) when calling the \
+         ListObjectVersions operation: ListObjectVersions is not implemented yet\n"
+    );
+    let requests = env.requests();
+    let mut query: Vec<_> = requests
+        .last()
+        .unwrap()
+        .uri
+        .query()
+        .unwrap()
+        .split('&')
+        .collect();
+    query.sort();
+    assert_eq!(
+        query,
+        [
+            "encoding-type=url",
+            "max-keys=2",
+            "prefix=dir%2F",
+            "versions"
+        ]
+    );
+
+    let result = env.run(&[
+        "api",
+        "list-object-versions",
+        "--bucket",
+        "bucket",
+        "--key-marker",
+        "a",
+        "--page-size",
+        "2",
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Cannot specify --no-paginate \
+         along with pagination arguments: --page-size\n"
+    );
+}
