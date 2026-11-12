@@ -8,6 +8,7 @@ mod delete_bucket_cors;
 mod delete_bucket_encryption;
 mod delete_bucket_lifecycle;
 mod delete_bucket_policy;
+mod delete_bucket_tagging;
 mod delete_object;
 mod delete_objects;
 mod delete_public_access_block;
@@ -148,6 +149,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::PutBucketTagging(args) => {
             put_bucket_tagging::run(&client, args).await?.into()
+        }
+        ApiOperation::DeleteBucketTagging(args) => {
+            delete_bucket_tagging::run(&client, args).await?.into()
         }
     };
     let colored = match global.color {

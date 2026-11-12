@@ -414,6 +414,8 @@ pub enum ApiOperation {
     GetBucketTagging(BucketArgs),
     /// Set the tags of a bucket
     PutBucketTagging(PutBucketTaggingArgs),
+    /// Delete the tags of a bucket
+    DeleteBucketTagging(BucketArgs),
 }
 
 #[derive(Debug, Args)]

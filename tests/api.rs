@@ -1940,3 +1940,11 @@ fn put_bucket_tagging() {
         );
     }
 }
+
+#[test]
+fn delete_bucket_tagging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = delete_bucket_configuration(&env, "delete-bucket-tagging", "DeleteBucketTagging");
+    assert_eq!(query, "tagging");
+}
