@@ -418,6 +418,8 @@ pub enum ApiOperation {
     DeleteBucketTagging(BucketArgs),
     /// Return the tags of an object
     GetObjectTagging(GetObjectTaggingArgs),
+    /// Set the tags of an object
+    PutObjectTagging(PutObjectTaggingArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1526,6 +1528,41 @@ pub struct GetObjectTaggingArgs {
     /// The version ID of the object
     #[arg(long)]
     pub version_id: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PutObjectTaggingArgs {
+    /// The name of the bucket that contains the object
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The key of the object
+    #[arg(long)]
+    pub key: String,
+
+    /// The version ID of the object
+    #[arg(long)]
+    pub version_id: Option<String>,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// The tags of the object
+    #[arg(long, value_name = "TagSet=[{Key=string,Value=string},...]")]
+    pub tagging: String,
 
     /// The account ID of the expected bucket owner
     #[arg(long, value_name = "STRING")]

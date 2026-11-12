@@ -1994,3 +1994,35 @@ fn get_object_tagging() {
     assert_eq!(path, "/bucket/dir/a%20b.txt");
     assert_eq!(query, "tagging&versionId=v1");
 }
+
+#[test]
+fn put_object_tagging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "hello");
+    let (method, path, query) = object_tagging(
+        &env,
+        &[
+            "put-object-tagging",
+            "--bucket",
+            "bucket",
+            "--key",
+            "a.txt",
+            "--tagging",
+            "TagSet=[{Key=env,Value=dev}]",
+        ],
+        "PutObjectTagging",
+    );
+    assert_eq!(method, http::Method::PUT);
+    assert_eq!(path, "/bucket/a.txt");
+    assert_eq!(query, "tagging");
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<Tagging xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><TagSet>\
+             <Tag><Key>env</Key><Value>dev</Value></Tag></TagSet></Tagging>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+}

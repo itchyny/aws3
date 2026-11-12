@@ -38,6 +38,7 @@ mod put_bucket_policy;
 mod put_bucket_tagging;
 mod put_bucket_versioning;
 mod put_object;
+mod put_object_tagging;
 mod put_public_access_block;
 pub mod shape;
 mod text;
@@ -156,6 +157,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::GetObjectTagging(args) => {
             get_object_tagging::run(&client, args).await?.into()
+        }
+        ApiOperation::PutObjectTagging(args) => {
+            put_object_tagging::run(&client, args).await?.into()
         }
     };
     let colored = match global.color {
