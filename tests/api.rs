@@ -1397,6 +1397,16 @@ fn put_bucket_lifecycle_configuration() {
 /// Runs the get operation of a bucket configuration, which the fake server
 /// does not implement, and returns the query of the request.
 fn get_bucket_configuration(env: &Env, operation: &str, name: &str) -> String {
+    bucket_configuration(env, operation, name, http::Method::GET)
+}
+
+/// Runs the delete operation of a bucket configuration, which the fake server
+/// does not implement, and returns the query of the request.
+fn delete_bucket_configuration(env: &Env, operation: &str, name: &str) -> String {
+    bucket_configuration(env, operation, name, http::Method::DELETE)
+}
+
+fn bucket_configuration(env: &Env, operation: &str, name: &str, method: http::Method) -> String {
     let result = env.run(&["api", operation, "--bucket", "bucket"]);
     assert_eq!(result.code, 254);
     assert_eq!(
@@ -1408,7 +1418,7 @@ fn get_bucket_configuration(env: &Env, operation: &str, name: &str) -> String {
     );
     let requests = env.requests();
     let request = requests.last().unwrap();
-    assert_eq!(request.method, http::Method::GET);
+    assert_eq!(request.method, method);
     assert_eq!(request.uri.path(), "/bucket/");
     request.uri.query().unwrap().to_owned()
 }
@@ -1583,4 +1593,16 @@ fn output_format() {
         result.stderr,
         "\naws3: [ERROR]: Unknown output type: TEXT\n"
     );
+}
+
+#[test]
+fn delete_public_access_block() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = delete_bucket_configuration(
+        &env,
+        "delete-public-access-block",
+        "DeletePublicAccessBlock",
+    );
+    assert_eq!(query, "publicAccessBlock");
 }

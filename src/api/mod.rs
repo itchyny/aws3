@@ -6,6 +6,7 @@ mod create_bucket;
 mod delete_bucket;
 mod delete_object;
 mod delete_objects;
+mod delete_public_access_block;
 mod get_bucket_encryption;
 mod get_bucket_lifecycle_configuration;
 mod get_bucket_location;
@@ -96,6 +97,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::PutPublicAccessBlock(args) => {
             put_public_access_block::run(&client, args).await?.into()
+        }
+        ApiOperation::DeletePublicAccessBlock(args) => {
+            delete_public_access_block::run(&client, args).await?.into()
         }
         ApiOperation::GetBucketPolicy(args) => get_bucket_policy::run(&client, args).await?.into(),
         ApiOperation::PutBucketPolicy(args) => put_bucket_policy::run(&client, args).await?.into(),

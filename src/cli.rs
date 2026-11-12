@@ -384,6 +384,8 @@ pub enum ApiOperation {
     GetPublicAccessBlock(BucketArgs),
     /// Set the configuration of the public access block of a bucket
     PutPublicAccessBlock(PutPublicAccessBlockArgs),
+    /// Delete the configuration of the public access block of a bucket
+    DeletePublicAccessBlock(BucketArgs),
     /// Return the policy of a bucket
     GetBucketPolicy(BucketArgs),
     /// Apply a policy to a bucket
