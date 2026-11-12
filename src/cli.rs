@@ -408,6 +408,8 @@ pub enum ApiOperation {
     GetBucketCors(BucketArgs),
     /// Set the CORS configuration of a bucket
     PutBucketCors(PutBucketCorsArgs),
+    /// Delete the CORS configuration of a bucket
+    DeleteBucketCors(BucketArgs),
 }
 
 #[derive(Debug, Args)]

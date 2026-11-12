@@ -4,6 +4,7 @@
 mod copy_object;
 mod create_bucket;
 mod delete_bucket;
+mod delete_bucket_cors;
 mod delete_bucket_encryption;
 mod delete_bucket_lifecycle;
 mod delete_bucket_policy;
@@ -135,6 +136,9 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         }
         ApiOperation::GetBucketCors(args) => get_bucket_cors::run(&client, args).await?.into(),
         ApiOperation::PutBucketCors(args) => put_bucket_cors::run(&client, args).await?.into(),
+        ApiOperation::DeleteBucketCors(args) => {
+            delete_bucket_cors::run(&client, args).await?.into()
+        }
     };
     print(responses, format, query.as_ref())?;
     Ok(ExitCode::SUCCESS)

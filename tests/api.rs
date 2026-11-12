@@ -1680,3 +1680,11 @@ fn put_bucket_cors() {
          Missing required parameter in CORSConfiguration.CORSRules[0]: \"AllowedOrigins\"\n"
     );
 }
+
+#[test]
+fn delete_bucket_cors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = delete_bucket_configuration(&env, "delete-bucket-cors", "DeleteBucketCors");
+    assert_eq!(query, "cors");
+}
