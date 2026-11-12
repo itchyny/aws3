@@ -11,7 +11,7 @@ use super::list_objects_v2::{
 };
 use super::output::Response;
 use super::paginate::{Page, Paginator, Token};
-use super::parse_int;
+use super::{Responses, parse_int};
 use crate::cli::{GlobalArgs, ListObjectVersionsArgs};
 use crate::error::Error;
 use crate::redirect::Redirector;
@@ -26,7 +26,7 @@ pub async fn run(
     client: &Client,
     args: &ListObjectVersionsArgs,
     global: &GlobalArgs,
-) -> Result<Value, Error> {
+) -> Result<Responses, Error> {
     let max_keys = parse_int(args.max_keys.as_deref())?;
     let manual =
         args.key_marker.is_some() || args.version_id_marker.is_some() || max_keys.is_some();
@@ -35,9 +35,9 @@ pub async fn run(
     if !paginate {
         let token = vec![args.key_marker.clone(), args.version_id_marker.clone()];
         let output = list(client, &redirector, args, token, max_keys).await?;
-        return Ok(response(&output, decodes(args, &output)));
+        return Ok(Responses::Value(response(&output, decodes(args, &output))));
     }
-    PAGINATOR
+    let pages = PAGINATOR
         .paginate(&args.pagination, |token| {
             let redirector = &redirector;
             async move {
@@ -46,7 +46,8 @@ pub async fn run(
                 Ok(page(&output, decodes(args, &output)))
             }
         })
-        .await
+        .await?;
+    Ok(Responses::Pages(pages))
 }
 
 async fn list(

@@ -174,12 +174,12 @@ fn head_object_errors() {
         "--key",
         "a.txt",
         "--output",
-        "text",
+        "table",
     ]);
     assert_eq!(result.code, 255);
     assert_eq!(
         result.stderr,
-        "\naws3: [ERROR]: --output text is not supported by the api command\n"
+        "\naws3: [ERROR]: --output table is not supported by the api command\n"
     );
 }
 
@@ -1486,4 +1486,101 @@ fn put_object_content_encoding_over_tls() {
     assert_eq!(encodings, ["gzip,aws-chunked"]);
     assert_eq!(header("x-amz-trailer"), "x-amz-checksum-crc64nvme");
     assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"hello");
+}
+
+#[test]
+fn output_text() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for (key, content) in [("a.txt", "abc"), ("b.txt", "x"), ("dir/c.txt", "hello")] {
+        env.object("bucket", key, content);
+    }
+    let run = |args: &[&str]| {
+        let mut command = vec!["api"];
+        command.extend(args);
+        command.extend(["--output", "text"]);
+        env.run(&command).success().stdout
+    };
+
+    // The scalars are written in the order of the keys, and the nested values
+    // follow with the upper-cased keys.
+    let stdout = run(&["list-objects-v2", "--bucket", "bucket", "--delimiter", "/"]);
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(lines[0], "None\tNone");
+    assert_eq!(lines[1], "COMMONPREFIXES\tdir/");
+    assert!(lines[2].starts_with("CONTENTS\ta.txt\t20"), "{stdout}");
+    assert!(lines[2].ends_with("\t3"), "{stdout}");
+    assert!(lines[3].starts_with("CONTENTS\tb.txt\t"), "{stdout}");
+    assert_eq!(lines.len(), 4);
+
+    // The pages are written one by one with the query, followed by the token
+    // to resume.
+    let stdout = run(&[
+        "list-objects-v2",
+        "--bucket",
+        "bucket",
+        "--page-size",
+        "2",
+        "--max-items",
+        "2",
+        "--query",
+        "Contents[].Key",
+    ]);
+    assert_eq!(stdout, "a.txt\tb.txt\nNone\n");
+    let stdout = run(&["list-objects-v2", "--bucket", "bucket", "--max-items", "1"]);
+    assert!(
+        stdout.ends_with(
+            "\nNEXTTOKEN\teyJDb250aW51YXRpb25Ub2tlbiI6IG51bGwsICJib3RvX3RydW5jYXRlX2Ftb3VudCI6IDF9\n"
+        ),
+        "{stdout}"
+    );
+
+    let stdout = run(&["get-bucket-location", "--bucket", "bucket"]);
+    assert_eq!(stdout, "None\n");
+}
+
+#[test]
+fn output_format() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let args = ["api", "get-bucket-location", "--bucket", "bucket"];
+    let json = "{\n    \"LocationConstraint\": null\n}\n";
+
+    // The format is of the option, the environment variable, or the config
+    // file of the profile.
+    let config = env.config("[default]\noutput = text\n[profile json]\noutput = json\n");
+    let config = config.to_str().unwrap();
+    let result = env
+        .run_with_env(&args, &[("AWS_CONFIG_FILE", config)])
+        .success();
+    assert_eq!(result.stdout, "None\n");
+    let mut with_profile = args.to_vec();
+    with_profile.extend(["--profile", "json"]);
+    let result = env
+        .run_with_env(&with_profile, &[("AWS_CONFIG_FILE", config)])
+        .success();
+    assert_eq!(result.stdout, json);
+    let result = env
+        .run_with_env(
+            &args,
+            &[("AWS_CONFIG_FILE", config), ("AWS_DEFAULT_OUTPUT", "json")],
+        )
+        .success();
+    assert_eq!(result.stdout, json);
+    let mut with_option = args.to_vec();
+    with_option.extend(["--output", "json"]);
+    let result = env
+        .run_with_env(&with_option, &[("AWS_DEFAULT_OUTPUT", "text")])
+        .success();
+    assert_eq!(result.stdout, json);
+    let mut with_off = args.to_vec();
+    with_off.extend(["--output", "off"]);
+    assert_eq!(env.run(&with_off).success().stdout, "");
+
+    let result = env.run_with_env(&args, &[("AWS_DEFAULT_OUTPUT", "TEXT")]);
+    assert_eq!(result.code, 255);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: Unknown output type: TEXT\n"
+    );
 }

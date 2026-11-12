@@ -9,7 +9,7 @@ use super::shape;
 use crate::cli::PaginationArgs;
 use crate::error::Error;
 use crate::transfer::decode_json;
-use crate::value::Value;
+use crate::value::{Value, insert};
 
 /// The values of the input tokens of a request, in the order of the tokens,
 /// where `None` is the token not to send.
@@ -73,7 +73,7 @@ impl Paginator {
         &self,
         args: &PaginationArgs,
         mut fetch: F,
-    ) -> Result<Value, Error>
+    ) -> Result<Pages, Error>
     where
         F: FnMut(Token) -> Fut,
         Fut: Future<Output = Result<Page, Error>>,
@@ -92,7 +92,7 @@ impl Paginator {
             Some((token, truncation)) => (token.clone(), *truncation),
             None => (vec![None; self.input_tokens.len()], 0),
         };
-        let mut results: Vec<Option<Vec<Value>>> = vec![None; self.result_keys.len()];
+        let mut pages = Vec::new();
         let mut non_aggregate = Vec::new();
         let mut resume_token = None;
         let mut previous_token = None;
@@ -125,11 +125,11 @@ impl Paginator {
                 if let Some(items) = &mut page.results[0] {
                     items.truncate(keep);
                 }
-                merge(&mut results, page.results);
+                pages.push(page.results);
                 resume_token = Some((next_token, Some(keep + starting_truncation)));
                 break;
             }
-            merge(&mut results, page.results);
+            pages.push(page.results);
             total_items += count;
             if page.next_token.iter().all(Option::is_none) {
                 break;
@@ -157,24 +157,13 @@ impl Paginator {
             next_token = page.next_token.clone();
             previous_token = Some(page.next_token);
         }
-        let mut response: Vec<(String, Value)> = self
-            .result_keys
-            .iter()
-            .zip(results)
-            .filter_map(|(key, items)| Some(((*key).to_owned(), Value::List(items?))))
-            .collect();
-        response.extend(
-            non_aggregate
-                .into_iter()
-                .map(|(key, value)| (key.to_owned(), value)),
-        );
-        if let Some((token, truncation)) = resume_token {
-            response.push((
-                "NextToken".to_owned(),
-                Value::Str(self.encode_token(&token, truncation)),
-            ));
-        }
-        Ok(Value::Map(response))
+        Ok(Pages {
+            result_keys: self.result_keys,
+            pages,
+            non_aggregate,
+            next_token: resume_token
+                .map(|(token, truncation)| self.encode_token(&token, truncation)),
+        })
     }
 
     /// Encodes the token in base64 of JSON, like `TokenEncoder` of botocore.
@@ -263,13 +252,72 @@ impl Paginator {
     }
 }
 
-/// Appends the items of a page to the results, like `build_full_result` of
-/// botocore.
-fn merge(results: &mut [Option<Vec<Value>>], page: Vec<Option<Vec<Value>>>) {
-    for (result, items) in results.iter_mut().zip(page) {
-        if let Some(items) = items {
-            result.get_or_insert_with(Vec::new).extend(items);
+/// The pages of the responses, which are merged into one response in JSON,
+/// and written page by page in text.
+pub struct Pages {
+    result_keys: &'static [&'static str],
+    /// The values of the result keys of the pages, which are `None` if absent.
+    pages: Vec<Vec<Option<Vec<Value>>>>,
+    non_aggregate: Vec<(&'static str, Value)>,
+    /// The token to resume the pagination, which is encoded.
+    next_token: Option<String>,
+}
+
+impl Pages {
+    /// Returns the merged response, like `build_full_result` of botocore.
+    pub fn merge(self) -> Value {
+        let mut results: Vec<Option<Vec<Value>>> = vec![None; self.result_keys.len()];
+        for page in self.pages {
+            for (result, items) in results.iter_mut().zip(page) {
+                if let Some(items) = items {
+                    result.get_or_insert_with(Vec::new).extend(items);
+                }
+            }
         }
+        let mut response: Vec<(String, Value)> = self
+            .result_keys
+            .iter()
+            .zip(results)
+            .filter_map(|(key, items)| Some(((*key).to_owned(), Value::List(items?))))
+            .collect();
+        response.extend(
+            self.non_aggregate
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value)),
+        );
+        if let Some(token) = self.next_token {
+            response.push(("NextToken".to_owned(), Value::Str(token)));
+        }
+        Value::Map(response)
+    }
+
+    /// Returns the responses of the pages for the text output, where the first
+    /// page includes the members recorded from it, and the token to resume
+    /// follows the pages, like `TextFormatter` of the AWS CLI.
+    pub fn into_pages(self) -> Vec<Value> {
+        let mut responses: Vec<Value> = Vec::new();
+        let mut non_aggregate = Some(self.non_aggregate);
+        for page in self.pages {
+            let mut response: Vec<(String, Value)> = non_aggregate
+                .take()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect();
+            for (key, items) in self.result_keys.iter().zip(page) {
+                insert(
+                    &mut response,
+                    (*key).to_owned(),
+                    items.map_or(Value::Null, Value::List),
+                );
+            }
+            responses.push(Value::Map(response));
+        }
+        if let Some(token) = self.next_token {
+            let token = Value::Map(vec![("NextToken".to_owned(), Value::Str(token))]);
+            responses.push(Value::Map(vec![("NextToken".to_owned(), token)]));
+        }
+        responses
     }
 }
 

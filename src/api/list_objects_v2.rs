@@ -9,7 +9,7 @@ use aws_sdk_s3::types::{
 
 use super::output::Response;
 use super::paginate::{Page, Paginator};
-use super::parse_int;
+use super::{Responses, parse_int};
 use crate::cli::{GlobalArgs, ListObjectsV2Args};
 use crate::error::Error;
 use crate::path::url_decode;
@@ -25,7 +25,7 @@ pub async fn run(
     client: &Client,
     args: &ListObjectsV2Args,
     global: &GlobalArgs,
-) -> Result<Value, Error> {
+) -> Result<Responses, Error> {
     let max_keys = parse_int(args.max_keys.as_deref())?;
     let manual = args.continuation_token.is_some() || max_keys.is_some();
     let paginate = Paginator::enabled(global.no_paginate, manual, &args.pagination)?;
@@ -39,9 +39,9 @@ pub async fn run(
             max_keys,
         )
         .await?;
-        return Ok(response(&output, decodes(args, &output)));
+        return Ok(Responses::Value(response(&output, decodes(args, &output))));
     }
-    PAGINATOR
+    let pages = PAGINATOR
         .paginate(&args.pagination, |token| {
             let redirector = &redirector;
             async move {
@@ -51,7 +51,8 @@ pub async fn run(
                 Ok(page(&output, decodes(args, &output)))
             }
         })
-        .await
+        .await?;
+    Ok(Responses::Pages(pages))
 }
 
 async fn list(

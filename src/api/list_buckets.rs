@@ -7,7 +7,7 @@ use aws_sdk_s3::types::Bucket;
 use super::list_objects_v2::owner_value;
 use super::output::Response;
 use super::paginate::{Page, Paginator, Token};
-use super::parse_int;
+use super::{Responses, parse_int};
 use crate::cli::{GlobalArgs, ListBucketsArgs};
 use crate::error::Error;
 use crate::value::Value;
@@ -21,21 +21,22 @@ pub async fn run(
     client: &Client,
     args: &ListBucketsArgs,
     global: &GlobalArgs,
-) -> Result<Value, Error> {
+) -> Result<Responses, Error> {
     let max_buckets = parse_int(args.max_buckets.as_deref())?;
     let manual = args.continuation_token.is_some() || max_buckets.is_some();
     let paginate = Paginator::enabled(global.no_paginate, manual, &args.pagination)?;
     if !paginate {
         let token = vec![args.continuation_token.clone()];
         let output = list(client, args, token, max_buckets).await?;
-        return Ok(response(&output));
+        return Ok(Responses::Value(response(&output)));
     }
-    PAGINATOR
+    let pages = PAGINATOR
         .paginate(&args.pagination, |token| async move {
             let output = list(client, args, token, args.pagination.page_size).await?;
             Ok(page(&output))
         })
-        .await
+        .await?;
+    Ok(Responses::Pages(pages))
 }
 
 async fn list(

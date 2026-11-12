@@ -29,6 +29,7 @@ mod put_bucket_versioning;
 mod put_object;
 mod put_public_access_block;
 mod shape;
+mod text;
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -44,23 +45,17 @@ use aws_smithy_types::base64;
 use clap::ValueEnum;
 use md5::{Digest, Md5};
 
-use crate::cli::{ApiArgs, ApiOperation, GlobalArgs, Output};
+use crate::cli::{ApiArgs, ApiOperation, GlobalArgs};
 use crate::client;
+use crate::config::ProfileConfig;
 use crate::error::Error;
 use crate::transfer::params;
 use crate::value::{Value, insert};
 use jmespath::Expression;
+use paginate::Pages;
 
 pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
-    if let Some(output) = global.output.filter(|output| *output != Output::Json) {
-        let name = output
-            .to_possible_value()
-            .map(|value| value.get_name().to_owned());
-        return Err(Error::new(format!(
-            "--output {} is not supported by the api command",
-            name.unwrap_or_default()
-        )));
-    }
+    let format = output_format(global)?;
     let query = global
         .query
         .as_deref()
@@ -72,65 +67,136 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         .transpose()?;
     let config = client::load_config(global).await?;
     let client = client::new_client(&config, None);
-    let response = match &args.operation {
-        ApiOperation::HeadObject(args) => head_object::run(&client, args).await?,
-        ApiOperation::GetObject(args) => get_object::run(&client, args).await?,
-        ApiOperation::PutObject(args) => put_object::run(&config, &client, args).await?,
-        ApiOperation::CopyObject(args) => copy_object::run(&client, args).await?,
-        ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?,
-        ApiOperation::DeleteObjects(args) => delete_objects::run(&client, args).await?,
+    let responses = match &args.operation {
+        ApiOperation::HeadObject(args) => head_object::run(&client, args).await?.into(),
+        ApiOperation::GetObject(args) => get_object::run(&client, args).await?.into(),
+        ApiOperation::PutObject(args) => put_object::run(&config, &client, args).await?.into(),
+        ApiOperation::CopyObject(args) => copy_object::run(&client, args).await?.into(),
+        ApiOperation::DeleteObject(args) => delete_object::run(&client, args).await?.into(),
+        ApiOperation::DeleteObjects(args) => delete_objects::run(&client, args).await?.into(),
         ApiOperation::ListObjectsV2(args) => list_objects_v2::run(&client, args, global).await?,
         ApiOperation::ListObjectVersions(args) => {
             list_object_versions::run(&client, args, global).await?
         }
         ApiOperation::ListBuckets(args) => list_buckets::run(&client, args, global).await?,
-        ApiOperation::HeadBucket(args) => head_bucket::run(&client, args).await?,
-        ApiOperation::GetBucketLocation(args) => get_bucket_location::run(&client, args).await?,
-        ApiOperation::CreateBucket(args) => create_bucket::run(&client, args).await?,
-        ApiOperation::DeleteBucket(args) => delete_bucket::run(&client, args).await?,
+        ApiOperation::HeadBucket(args) => head_bucket::run(&client, args).await?.into(),
+        ApiOperation::GetBucketLocation(args) => {
+            get_bucket_location::run(&client, args).await?.into()
+        }
+        ApiOperation::CreateBucket(args) => create_bucket::run(&client, args).await?.into(),
+        ApiOperation::DeleteBucket(args) => delete_bucket::run(&client, args).await?.into(),
         ApiOperation::GetBucketVersioning(args) => {
-            get_bucket_versioning::run(&client, args).await?
+            get_bucket_versioning::run(&client, args).await?.into()
         }
         ApiOperation::PutBucketVersioning(args) => {
-            put_bucket_versioning::run(&client, args).await?
+            put_bucket_versioning::run(&client, args).await?.into()
         }
         ApiOperation::GetPublicAccessBlock(args) => {
-            get_public_access_block::run(&client, args).await?
+            get_public_access_block::run(&client, args).await?.into()
         }
         ApiOperation::PutPublicAccessBlock(args) => {
-            put_public_access_block::run(&client, args).await?
+            put_public_access_block::run(&client, args).await?.into()
         }
-        ApiOperation::GetBucketPolicy(args) => get_bucket_policy::run(&client, args).await?,
-        ApiOperation::PutBucketPolicy(args) => put_bucket_policy::run(&client, args).await?,
+        ApiOperation::GetBucketPolicy(args) => get_bucket_policy::run(&client, args).await?.into(),
+        ApiOperation::PutBucketPolicy(args) => put_bucket_policy::run(&client, args).await?.into(),
         ApiOperation::GetBucketEncryption(args) => {
-            get_bucket_encryption::run(&client, args).await?
+            get_bucket_encryption::run(&client, args).await?.into()
         }
         ApiOperation::PutBucketEncryption(args) => {
-            put_bucket_encryption::run(&client, args).await?
+            put_bucket_encryption::run(&client, args).await?.into()
         }
         ApiOperation::GetBucketLifecycleConfiguration(args) => {
-            get_bucket_lifecycle_configuration::run(&client, args).await?
+            get_bucket_lifecycle_configuration::run(&client, args)
+                .await?
+                .into()
         }
         ApiOperation::PutBucketLifecycleConfiguration(args) => {
-            put_bucket_lifecycle_configuration::run(&client, args).await?
+            put_bucket_lifecycle_configuration::run(&client, args)
+                .await?
+                .into()
         }
     };
-    let response = match query {
-        Some(query) => query
-            .search(&response)
-            .map_err(|err| Error::new(err.to_string()))?,
-        None => response,
-    };
-    print(&response);
+    print(responses, format, query.as_ref())?;
     Ok(ExitCode::SUCCESS)
 }
 
-/// Prints the response in JSON, except for the empty objects, ignoring the
-/// errors of writing like the other outputs of the commands.
-fn print(response: &Value) {
-    if !matches!(response, Value::Map(pairs) if pairs.is_empty()) {
-        let _ = writeln!(io::stdout(), "{}", response.to_json_pretty());
+/// The responses of an operation, which are paginated for the list
+/// operations.
+pub enum Responses {
+    Value(Value),
+    Pages(Pages),
+}
+
+impl From<Value> for Responses {
+    fn from(value: Value) -> Self {
+        Self::Value(value)
     }
+}
+
+/// The formats of the outputs of `--output`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Json,
+    Text,
+    Off,
+}
+
+/// Returns the format of the outputs of the option, the environment variable
+/// or the config file, like the AWS CLI.
+fn output_format(global: &GlobalArgs) -> Result<Format, Error> {
+    let name = match global.output {
+        Some(output) => output
+            .to_possible_value()
+            .map(|value| value.get_name().to_owned())
+            .unwrap_or_default(),
+        None => std::env::var("AWS_DEFAULT_OUTPUT")
+            .ok()
+            .or_else(|| ProfileConfig::load(global.profile.as_deref()).output)
+            .unwrap_or_else(|| "json".to_owned()),
+    };
+    match name.as_str() {
+        "json" => Ok(Format::Json),
+        "text" => Ok(Format::Text),
+        "off" => Ok(Format::Off),
+        "table" | "yaml" | "yaml-stream" => Err(Error::new(format!(
+            "--output {name} is not supported by the api command"
+        ))),
+        _ => Err(Error::new(format!("Unknown output type: {name}"))),
+    }
+}
+
+/// Prints the responses in the format after applying the query, ignoring the
+/// errors of writing like the other outputs of the commands. The empty objects
+/// are not printed in JSON, and the pages are printed one by one in text.
+fn print(responses: Responses, format: Format, query: Option<&Expression>) -> Result<(), Error> {
+    let search = |value: Value| match query {
+        Some(query) => query
+            .search(&value)
+            .map_err(|err| Error::new(err.to_string())),
+        None => Ok(value),
+    };
+    match format {
+        Format::Json => {
+            let response = search(match responses {
+                Responses::Value(value) => value,
+                Responses::Pages(pages) => pages.merge(),
+            })?;
+            if !matches!(&response, Value::Map(pairs) if pairs.is_empty()) {
+                let _ = writeln!(io::stdout(), "{}", response.to_json_pretty());
+            }
+        }
+        Format::Text => {
+            let responses = match responses {
+                Responses::Value(value) => vec![value],
+                Responses::Pages(pages) => pages.into_pages(),
+            };
+            for response in responses {
+                let _ = io::stdout().write_all(text::format(&search(response)?)?.as_bytes());
+            }
+        }
+        Format::Off => {}
+    }
+    Ok(())
 }
 
 /// Parses the integer argument, failing with the same message as `int` of

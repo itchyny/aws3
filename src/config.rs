@@ -26,6 +26,8 @@ pub struct ProfileConfig {
     pub login_session: Option<String>,
     /// The format of the errors, e.g. `json`.
     pub cli_error_format: Option<String>,
+    /// The format of the outputs of the api commands, e.g. `text`.
+    pub output: Option<String>,
 }
 
 impl ProfileConfig {
@@ -81,6 +83,7 @@ impl ProfileConfig {
             s3,
             login_session: setting("login_session"),
             cli_error_format: setting("cli_error_format"),
+            output: setting("output"),
         }
     }
 }
