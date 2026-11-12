@@ -1428,3 +1428,11 @@ fn get_public_access_block() {
     let query = get_bucket_configuration(&env, "get-public-access-block", "GetPublicAccessBlock");
     assert_eq!(query, "publicAccessBlock");
 }
+
+#[test]
+fn get_bucket_policy() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "get-bucket-policy", "GetBucketPolicy");
+    assert_eq!(query, "policy");
+}
