@@ -378,7 +378,9 @@ fn expand_vars(path: &str) -> String {
 
 /// Parses the timestamp argument, which is an ISO 8601 date time, an RFC 2822
 /// date time or the epoch seconds. Date times without offsets are in UTC.
+/// The surrounding whitespaces are ignored like the parser of dateutil.
 pub fn parse_timestamp(value: &str) -> Result<DateTime, String> {
+    let value = value.trim();
     let date_time = chrono::DateTime::parse_from_rfc3339(value)
         .or_else(|_| chrono::DateTime::parse_from_rfc2822(value))
         .map(|date_time| date_time.to_utc())
@@ -713,6 +715,7 @@ Invalid type for parameter c, value: {}, type: map, valid types: string"#,
         assert_eq!(parse_timestamp("2014-10-01T20:30:00Z").unwrap(), expected);
         assert_eq!(parse_timestamp("2014-10-01T20:30:00").unwrap(), expected);
         assert_eq!(parse_timestamp("1412195400").unwrap(), expected);
+        assert_eq!(parse_timestamp(" 1412195400\n").unwrap(), expected);
         assert!(parse_timestamp("tomorrow").is_err());
     }
 }
