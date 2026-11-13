@@ -58,8 +58,9 @@ aws3 api put-object --bucket bucket --key file.txt --body file.txt --metadata ke
 aws3 api put-bucket-policy --bucket bucket --policy file://policy.json
 ```
 
-The structured arguments are accepted in the shorthand syntax and in JSON, also
-from the files of `file://`, and validated with the same error messages as the
+The structured arguments are accepted in the shorthand syntax and in JSON, and
+validated with the same error messages as the AWS CLI. The values of the
+arguments are also loaded from the files of `file://` and `fileb://` like the
 AWS CLI. The responses of the list operations are paginated automatically with
 `--page-size`, `--max-items`, `--starting-token` and `--no-paginate`, and
 filtered by the JMESPath expressions of `--query`.

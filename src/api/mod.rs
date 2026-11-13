@@ -32,6 +32,7 @@ mod list_objects_v2;
 mod members;
 mod output;
 mod paginate;
+mod paramfile;
 mod put_bucket_cors;
 mod put_bucket_encryption;
 mod put_bucket_lifecycle_configuration;
@@ -71,6 +72,8 @@ use jmespath::Expression;
 use paginate::Pages;
 
 pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
+    let loaded = paramfile::load()?;
+    let args = loaded.as_ref().unwrap_or(args);
     let format = output_format(global)?;
     let query = global
         .query

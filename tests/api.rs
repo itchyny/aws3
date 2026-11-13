@@ -2120,3 +2120,153 @@ fn restore_object() {
          the api command, use aws s3api restore-object instead\n"
     );
 }
+
+#[test]
+fn parameter_files() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "abc");
+    env.write("b.txt", "hello");
+    env.write("key.txt", "dir/b.txt\n");
+    env.write("type.txt", "text/plain");
+    env.write("one.txt", "1\n");
+    env.write("time.txt", "2000-01-01T00:00:00Z\n");
+    env.write("attributes.txt", "ab");
+
+    // The values of the strings are the contents of the files including the
+    // newlines.
+    env.run(&[
+        "api",
+        "put-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "file://key.txt",
+        "--body",
+        "b.txt",
+        "--content-type=file://type.txt",
+    ])
+    .success();
+    assert_eq!(
+        env.object_content("bucket", "dir/b.txt\n").unwrap(),
+        b"hello"
+    );
+    assert_eq!(
+        env.head("bucket", "dir/b.txt\n").content_type(),
+        Some("text/plain")
+    );
+
+    // The integers and the timestamps are parsed from the contents.
+    let stdout = env
+        .run(&[
+            "api",
+            "list-objects-v2",
+            "--bucket",
+            "bucket",
+            "--max-keys",
+            "file://one.txt",
+            "--query",
+            "Contents[].Key",
+            "--output",
+            "text",
+        ])
+        .success()
+        .stdout;
+    assert_eq!(stdout, "a.txt\n");
+    env.run(&[
+        "api",
+        "head-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "a.txt",
+        "--if-modified-since",
+        "file://time.txt",
+    ])
+    .success();
+    let requests = env.requests();
+    let header = |name: &str| {
+        let request = requests.last().unwrap();
+        request
+            .headers
+            .get(name)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(header("if-modified-since"), "Sat, 01 Jan 2000 00:00:00 GMT");
+
+    // The single value of a list is split into the characters like the AWS
+    // CLI.
+    env.run(&[
+        "api",
+        "list-objects-v2",
+        "--bucket",
+        "bucket",
+        "--optional-object-attributes",
+        "file://attributes.txt",
+        "--no-paginate",
+    ]);
+    let requests = env.requests();
+    let values: Vec<_> = requests
+        .last()
+        .unwrap()
+        .headers
+        .get_all("x-amz-optional-object-attributes")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_owned())
+        .collect();
+    // The values are sent in the separate lines, which are equivalent to the
+    // values separated by commas.
+    assert_eq!(values.join(","), "a,b");
+
+    for (args, message) in [
+        (
+            ["--key", "file://missing.txt"],
+            "Error parsing parameter '--key': Unable to load paramfile file://missing.txt: \
+             [Errno 2] No such file or directory: 'missing.txt'",
+        ),
+        (
+            ["--key", "fileb://key.txt"],
+            "Parameter validation failed:\nInvalid type for parameter Key, value: b'dir/b.txt\\n', \
+             type: <class 'bytes'>, valid types: <class 'str'>",
+        ),
+        (
+            ["--sse-customer-key-md5", "fileb://key.txt"],
+            "Parameter validation failed:\nInvalid type for parameter SSECustomerKeyMD5, \
+             value: b'dir/b.txt\\n', type: <class 'bytes'>, valid types: <class 'str'>",
+        ),
+    ] {
+        let mut command = vec!["api", "head-object", "--bucket", "bucket"];
+        command.extend(args);
+        if args[0] != "--key" {
+            command.extend(["--key", "a.txt"]);
+        }
+        let result = env.run(&command);
+        assert_eq!(result.code, 252, "{args:?}");
+        assert_eq!(
+            result.stderr,
+            format!("\naws3: [ERROR]: An error occurred (ParamValidation): {message}\n"),
+            "{args:?}"
+        );
+    }
+
+    // The parameter files of the long integers are not loaded.
+    let result = env.run(&[
+        "api",
+        "put-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "c.txt",
+        "--content-length",
+        "file://one.txt",
+    ]);
+    assert_eq!(result.code, 252);
+    assert!(
+        result.stderr.contains("file://one.txt"),
+        "{}",
+        result.stderr
+    );
+}
