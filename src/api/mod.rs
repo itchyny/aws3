@@ -1,6 +1,7 @@
 //! The api command, which calls the operations of the S3 API in the same way
 //! as `aws s3api`, and prints the responses in the same format.
 
+mod abort_multipart_upload;
 mod copy_object;
 mod create_bucket;
 mod delete_bucket;
@@ -30,6 +31,7 @@ mod head_bucket;
 mod head_object;
 mod jmespath;
 mod list_buckets;
+mod list_multipart_uploads;
 mod list_object_versions;
 mod list_objects_v2;
 mod members;
@@ -103,6 +105,12 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::ListObjectsV2(args) => list_objects_v2::run(&client, args, global).await?,
         ApiOperation::ListObjectVersions(args) => {
             list_object_versions::run(&client, args, global).await?
+        }
+        ApiOperation::ListMultipartUploads(args) => {
+            list_multipart_uploads::run(&client, args, global).await?
+        }
+        ApiOperation::AbortMultipartUpload(args) => {
+            abort_multipart_upload::run(&client, args).await?.into()
         }
         ApiOperation::ListBuckets(args) => list_buckets::run(&client, args, global).await?,
         ApiOperation::HeadBucket(args) => head_bucket::run(&client, args).await?.into(),

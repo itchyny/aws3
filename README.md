@@ -42,6 +42,7 @@ for the others.
 | --- | --- |
 | Objects | `head-object`, `get-object`, `put-object`, `copy-object`, `delete-object`, `delete-objects`, `restore-object` |
 | Object listing | `list-objects-v2`, `list-object-versions` |
+| Multipart uploads | `list-multipart-uploads`, `abort-multipart-upload` |
 | Buckets | `list-buckets`, `head-bucket`, `get-bucket-location`, `create-bucket`, `delete-bucket` |
 | Versioning | `get-bucket-versioning`, `put-bucket-versioning` |
 | Public access block | `get-public-access-block`, `put-public-access-block`, `delete-public-access-block` |

@@ -2125,6 +2125,49 @@ fn put_bucket_acl() {
     );
 }
 
+#[test]
+fn list_multipart_uploads() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "list-multipart-uploads", "ListMultipartUploads");
+    assert_eq!(query, "uploads");
+}
+
+#[test]
+fn abort_multipart_upload() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let result = env.run(&[
+        "api",
+        "abort-multipart-upload",
+        "--bucket",
+        "bucket",
+        "--key",
+        "dir/a.txt",
+        "--upload-id",
+        "u1",
+    ]);
+    assert_eq!(result.code, 254);
+    let requests = env.requests();
+    let request = requests.last().unwrap();
+    assert_eq!(request.method, http::Method::DELETE);
+    assert_eq!(request.uri.path(), "/bucket/dir/a.txt");
+    assert_eq!(
+        request.uri.query(),
+        Some("x-id=AbortMultipartUpload&uploadId=u1")
+    );
+
+    let result = env.run(&[
+        "api",
+        "abort-multipart-upload",
+        "--bucket",
+        "bucket",
+        "--key",
+        "dir/a.txt",
+    ]);
+    assert_eq!(result.code, 252);
+}
+
 /// Runs an operation on an object, which the fake server does not implement,
 /// and returns the method, the path and the query of the request.
 fn unimplemented_object_operation(

@@ -368,6 +368,10 @@ pub enum ApiOperation {
     ListObjectsV2(ListObjectsV2Args),
     /// List the versions of the objects in a bucket
     ListObjectVersions(ListObjectVersionsArgs),
+    /// List the in-progress multipart uploads in a bucket
+    ListMultipartUploads(ListMultipartUploadsArgs),
+    /// Abort a multipart upload
+    AbortMultipartUpload(AbortMultipartUploadArgs),
     /// List the buckets owned by the requester
     ListBuckets(ListBucketsArgs),
     /// Determine whether a bucket exists and you have permission to access it
@@ -713,6 +717,80 @@ pub struct ListObjectVersionsArgs {
 
     #[command(flatten)]
     pub pagination: PaginationArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct ListMultipartUploadsArgs {
+    /// The name of the bucket to list
+    #[arg(long)]
+    pub bucket: String,
+
+    /// A character to group the keys by, e.g. /
+    #[arg(long, value_name = "STRING")]
+    pub delimiter: Option<String>,
+
+    /// The encoding of the keys in the response, i.e. url
+    #[arg(long, value_name = "STRING")]
+    pub encoding_type: Option<String>,
+
+    /// The key to start listing from, which disables the pagination
+    #[arg(long, value_name = "STRING", hide = true)]
+    pub key_marker: Option<String>,
+
+    /// The maximum number of uploads in a response, which disables the pagination
+    #[arg(
+        long,
+        value_name = "INTEGER",
+        allow_negative_numbers = true,
+        hide = true
+    )]
+    pub max_uploads: Option<String>,
+
+    /// Limits the response to the keys that begin with the specified prefix
+    #[arg(long, value_name = "STRING")]
+    pub prefix: Option<String>,
+
+    /// The upload to start listing from, which disables the pagination
+    #[arg(long, value_name = "STRING", hide = true)]
+    pub upload_id_marker: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    #[command(flatten)]
+    pub pagination: PaginationArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct AbortMultipartUploadArgs {
+    /// The name of the bucket of the upload
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The key of the object of the upload
+    #[arg(long)]
+    pub key: String,
+
+    /// The ID of the upload to abort
+    #[arg(long, value_name = "STRING")]
+    pub upload_id: String,
+
+    /// Confirms that the requester knows that they will be charged for the request
+    #[arg(long, value_name = "STRING")]
+    pub request_payer: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    /// Abort the upload only if it was initiated at the time specified
+    #[arg(long, value_name = "TIMESTAMP")]
+    pub if_match_initiated_time: Option<String>,
 }
 
 #[derive(Debug, Args)]
