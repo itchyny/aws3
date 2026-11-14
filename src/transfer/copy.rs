@@ -427,38 +427,28 @@ async fn get_annotations(
     version_id: Option<&str>,
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut names = Vec::new();
-    let mut token = None;
+    let mut pages = ctx
+        .redirector
+        .paginate(&ctx.source_client, bucket, |client| {
+            client
+                .list_object_annotations()
+                .bucket(bucket)
+                .key(key)
+                .set_version_id(version_id.map(str::to_owned))
+                .set_request_payer(ctx.params.request_payer.clone())
+        });
     loop {
         let _permit = ctx.permit().await?;
-        let output = ctx
-            .redirector
-            .send(
-                &ctx.source_client,
-                bucket,
-                "ListObjectAnnotations",
-                |client| {
-                    client
-                        .list_object_annotations()
-                        .bucket(bucket)
-                        .key(key)
-                        .set_version_id(version_id.map(str::to_owned))
-                        .set_continuation_token(token.clone())
-                        .set_request_payer(ctx.params.request_payer.clone())
-                        .send()
-                },
-            )
-            .await
-            .map_err(|err| Error::sdk("ListObjectAnnotations", err).to_string())?;
+        let Some(result) = pages.next().await else {
+            break;
+        };
+        let output = result.map_err(|err| Error::sdk("ListObjectAnnotations", err).to_string())?;
         names.extend(
             output
                 .annotations()
                 .iter()
                 .map(|annotation| annotation.annotation_name().to_owned()),
         );
-        token = output.next_continuation_token().map(str::to_owned);
-        if token.is_none() {
-            break;
-        }
     }
     let mut annotations = Vec::new();
     for name in names {

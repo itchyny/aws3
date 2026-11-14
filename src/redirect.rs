@@ -8,6 +8,10 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_s3::operation::list_object_annotations::builders::ListObjectAnnotationsFluentBuilder;
+use aws_sdk_s3::operation::list_object_annotations::{
+    ListObjectAnnotationsError, ListObjectAnnotationsOutput,
+};
 use aws_sdk_s3::operation::list_objects_v2::builders::ListObjectsV2FluentBuilder;
 use aws_sdk_s3::operation::list_objects_v2::{ListObjectsV2Error, ListObjectsV2Output};
 
@@ -52,18 +56,19 @@ impl Redirector {
         }
     }
 
-    /// Returns the pages of the objects in the bucket, where each request of
-    /// the pages is redirected to the region of the bucket.
-    pub fn list_objects_v2<'a, F>(
+    /// Returns the pages of the requests built for the bucket, where each
+    /// request of the pages is redirected to the region of the bucket.
+    pub fn paginate<'a, B, F>(
         &'a self,
         client: &'a Client,
         bucket: &'a str,
         build: F,
-    ) -> ListPages<'a, F>
+    ) -> Pages<'a, F>
     where
-        F: Fn(&Client) -> ListObjectsV2FluentBuilder,
+        B: Paginated,
+        F: Fn(&Client) -> B,
     {
-        ListPages {
+        Pages {
             redirector: self,
             client,
             bucket,
@@ -97,9 +102,60 @@ impl Redirector {
     }
 }
 
-/// The pages of ListObjectsV2, which continue in the region of the bucket on
+/// The requests paginated by the continuation tokens.
+pub trait Paginated {
+    /// The name of the operation, which determines the redirects.
+    const OPERATION: &'static str;
+    type Output;
+    type Error: ProvideErrorMetadata;
+
+    /// Sends the request continued from the token.
+    fn send_page(
+        self,
+        token: Option<String>,
+    ) -> impl Future<Output = Result<Self::Output, SdkError<Self::Error, HttpResponse>>>;
+
+    /// Returns the token of the next page.
+    fn next_token(output: &Self::Output) -> Option<&str>;
+}
+
+macro_rules! impl_paginated {
+    ($builder:ty, $output:ty, $error:ty, $operation:literal) => {
+        impl Paginated for $builder {
+            const OPERATION: &'static str = $operation;
+            type Output = $output;
+            type Error = $error;
+
+            fn send_page(
+                self,
+                token: Option<String>,
+            ) -> impl Future<Output = Result<$output, SdkError<$error, HttpResponse>>> {
+                self.set_continuation_token(token).send()
+            }
+
+            fn next_token(output: &$output) -> Option<&str> {
+                output.next_continuation_token()
+            }
+        }
+    };
+}
+
+impl_paginated!(
+    ListObjectsV2FluentBuilder,
+    ListObjectsV2Output,
+    ListObjectsV2Error,
+    "ListObjectsV2"
+);
+impl_paginated!(
+    ListObjectAnnotationsFluentBuilder,
+    ListObjectAnnotationsOutput,
+    ListObjectAnnotationsError,
+    "ListObjectAnnotations"
+);
+
+/// The pages of the requests, which continue in the region of the bucket on
 /// redirects, unlike the paginator of the SDK bound to a client.
-pub struct ListPages<'a, F> {
+pub struct Pages<'a, F> {
     redirector: &'a Redirector,
     client: &'a Client,
     bucket: &'a str,
@@ -108,32 +164,27 @@ pub struct ListPages<'a, F> {
     done: bool,
 }
 
-impl<F> ListPages<'_, F>
+impl<B, F> Pages<'_, F>
 where
-    F: Fn(&Client) -> ListObjectsV2FluentBuilder,
+    B: Paginated,
+    F: Fn(&Client) -> B,
 {
     /// Returns the next page, which ends on the last page or on an error.
-    pub async fn next(
-        &mut self,
-    ) -> Option<Result<ListObjectsV2Output, SdkError<ListObjectsV2Error, HttpResponse>>> {
+    pub async fn next(&mut self) -> Option<Result<B::Output, SdkError<B::Error, HttpResponse>>> {
         if self.done {
             return None;
         }
         let token = self.token.clone();
         let result = self
             .redirector
-            .send(self.client, self.bucket, "ListObjectsV2", |client| {
-                (self.build)(&client)
-                    .set_continuation_token(token.clone())
-                    .send()
+            .send(self.client, self.bucket, B::OPERATION, |client| {
+                (self.build)(&client).send_page(token.clone())
             })
             .await;
         // The pages end without the next token or with the same token, like
         // the paginator of the SDK.
         let next = match &result {
-            Ok(output) => output
-                .next_continuation_token()
-                .filter(|next| !next.is_empty()),
+            Ok(output) => B::next_token(output).filter(|next| !next.is_empty()),
             Err(_) => None,
         };
         self.done = next.is_none() || next == token.as_deref();

@@ -103,7 +103,7 @@ impl Lister {
     ) -> Result<(), Error> {
         let client = client::new_client(config, None);
         let redirector = Redirector::default();
-        let mut pages = redirector.list_objects_v2(&client, bucket, |client| {
+        let mut pages = redirector.paginate(&client, bucket, |client| {
             client
                 .list_objects_v2()
                 .bucket(bucket)

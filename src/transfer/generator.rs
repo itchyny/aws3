@@ -226,7 +226,7 @@ async fn try_list_s3(
         let _ = tx.send(Item::File(stat)).await;
         return Ok(());
     }
-    let mut pages = redirector.list_objects_v2(client, bucket, |client| {
+    let mut pages = redirector.paginate(client, bucket, |client| {
         client
             .list_objects_v2()
             .bucket(bucket)
