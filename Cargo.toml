@@ -58,6 +58,7 @@ opt-level = "s"
 lto = true
 strip = true
 codegen-units = 1
+panic = "abort"
 
 [dev-dependencies]
 http-body-util = "0.1.5"
