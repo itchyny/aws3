@@ -412,6 +412,10 @@ pub enum ApiOperation {
     PutBucketCors(PutBucketCorsArgs),
     /// Delete the CORS configuration of a bucket
     DeleteBucketCors(BucketArgs),
+    /// Return the notification configuration of a bucket
+    GetBucketNotificationConfiguration(BucketArgs),
+    /// Set the notification configuration of a bucket
+    PutBucketNotificationConfiguration(PutBucketNotificationConfigurationArgs),
     /// Return the tags of a bucket
     GetBucketTagging(BucketArgs),
     /// Set the tags of a bucket
@@ -1494,6 +1498,50 @@ pub struct PutBucketCorsArgs {
     /// The account ID of the expected bucket owner
     #[arg(long, value_name = "STRING")]
     pub expected_bucket_owner: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketNotificationConfigurationArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The notification configuration, e.g. file://notification.json
+    #[arg(
+        long,
+        value_name = "TopicConfigurations=[{TopicArn=string,Events=[string,...]},...],..."
+    )]
+    pub notification_configuration: String,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+
+    #[command(flatten)]
+    pub skip_destination_validation: SkipDestinationValidationArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct SkipDestinationValidationArgs {
+    /// Skip the validation of the destinations of the notifications
+    #[arg(long, overrides_with = "no_skip_destination_validation")]
+    skip_destination_validation: bool,
+
+    /// Do not skip the validation of the destinations of the notifications
+    #[arg(long, overrides_with = "skip_destination_validation")]
+    no_skip_destination_validation: bool,
+}
+
+impl SkipDestinationValidationArgs {
+    pub fn value(&self) -> Option<bool> {
+        if self.skip_destination_validation {
+            Some(true)
+        } else if self.no_skip_destination_validation {
+            Some(false)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Args)]

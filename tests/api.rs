@@ -1949,6 +1949,65 @@ fn delete_bucket_tagging() {
     assert_eq!(query, "tagging");
 }
 
+#[test]
+fn get_bucket_notification_configuration() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(
+        &env,
+        "get-bucket-notification-configuration",
+        "GetBucketNotificationConfiguration",
+    );
+    assert_eq!(query, "notification");
+}
+
+#[test]
+fn put_bucket_notification_configuration() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.run(&[
+        "api",
+        "put-bucket-notification-configuration",
+        "--bucket",
+        "bucket",
+        "--notification-configuration",
+        "QueueConfigurations=[{Id=q,QueueArn=arn:aws:sqs:us-east-1:123456789012:q,\
+         Events=[s3:ObjectCreated:*],Filter={Key={FilterRules=[{Name=prefix,Value=logs/}]}}}],\
+         EventBridgeConfiguration={}",
+        "--skip-destination-validation",
+    ]);
+    let skip_destination_validation =
+        env.requests().last().unwrap().headers["x-amz-skip-destination-validation"].clone();
+    assert_eq!(skip_destination_validation, "true");
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<NotificationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+             <QueueConfiguration><Id>q</Id><Queue>arn:aws:sqs:us-east-1:123456789012:q</Queue>\
+             <Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name>\
+             <Value>logs/</Value></FilterRule></S3Key></Filter></QueueConfiguration>\
+             <EventBridgeConfiguration></EventBridgeConfiguration></NotificationConfiguration>"
+        ),
+        "{body}"
+    );
+    assert!(headers.is_empty(), "{headers:?}");
+
+    let result = env.run(&[
+        "api",
+        "put-bucket-notification-configuration",
+        "--bucket",
+        "bucket",
+        "--notification-configuration",
+        "TopicConfigurations=[{TopicArn=arn:aws:sns:us-east-1:123456789012:t}]",
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+         Missing required parameter in NotificationConfiguration.TopicConfigurations[0]: \"Events\"\n"
+    );
+}
+
 /// Runs an operation on an object, which the fake server does not implement,
 /// and returns the method, the path and the query of the request.
 fn unimplemented_object_operation(

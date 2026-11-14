@@ -17,6 +17,7 @@ mod get_bucket_cors;
 mod get_bucket_encryption;
 mod get_bucket_lifecycle_configuration;
 mod get_bucket_location;
+mod get_bucket_notification_configuration;
 mod get_bucket_policy;
 mod get_bucket_tagging;
 mod get_bucket_versioning;
@@ -36,6 +37,7 @@ mod paramfile;
 mod put_bucket_cors;
 mod put_bucket_encryption;
 mod put_bucket_lifecycle_configuration;
+mod put_bucket_notification_configuration;
 mod put_bucket_policy;
 mod put_bucket_tagging;
 mod put_bucket_versioning;
@@ -151,6 +153,16 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::PutBucketCors(args) => put_bucket_cors::run(&client, args).await?.into(),
         ApiOperation::DeleteBucketCors(args) => {
             delete_bucket_cors::run(&client, args).await?.into()
+        }
+        ApiOperation::GetBucketNotificationConfiguration(args) => {
+            get_bucket_notification_configuration::run(&client, args)
+                .await?
+                .into()
+        }
+        ApiOperation::PutBucketNotificationConfiguration(args) => {
+            put_bucket_notification_configuration::run(&client, args)
+                .await?
+                .into()
         }
         ApiOperation::GetBucketTagging(args) => {
             get_bucket_tagging::run(&client, args).await?.into()
