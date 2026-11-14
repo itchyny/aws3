@@ -412,6 +412,10 @@ pub enum ApiOperation {
     PutBucketCors(PutBucketCorsArgs),
     /// Delete the CORS configuration of a bucket
     DeleteBucketCors(BucketArgs),
+    /// Return the access control list of a bucket
+    GetBucketAcl(BucketArgs),
+    /// Set the access control list of a bucket
+    PutBucketAcl(PutBucketAclArgs),
     /// Return the notification configuration of a bucket
     GetBucketNotificationConfiguration(BucketArgs),
     /// Set the notification configuration of a bucket
@@ -1498,6 +1502,56 @@ pub struct PutBucketCorsArgs {
     /// The algorithm used to create the checksum of the request
     #[arg(long, value_name = "STRING")]
     pub checksum_algorithm: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketAclArgs {
+    /// The canned ACL to apply to the bucket
+    #[arg(long, value_name = "STRING")]
+    pub acl: Option<String>,
+
+    /// The access control list, e.g. file://acl.json
+    #[arg(
+        long,
+        value_name = "Grants=[{Grantee={Type=string,...},Permission=string},...],Owner={...}"
+    )]
+    pub access_control_policy: Option<String>,
+
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// Allows the grantee the read, write, read ACP, and write ACP permissions on the bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_full_control: Option<String>,
+
+    /// Allows the grantee to list the objects in the bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_read: Option<String>,
+
+    /// Allows the grantee to read the bucket ACL
+    #[arg(long, value_name = "STRING")]
+    pub grant_read_acp: Option<String>,
+
+    /// Allows the grantee to create new objects in the bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_write: Option<String>,
+
+    /// Allows the grantee to write the ACL for the applicable bucket
+    #[arg(long, value_name = "STRING")]
+    pub grant_write_acp: Option<String>,
 
     /// The account ID of the expected bucket owner
     #[arg(long, value_name = "STRING")]

@@ -2,27 +2,17 @@
 
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::{
-    BucketLoggingStatus, BucketLogsPermission, Grantee, LoggingEnabled, PartitionDateSource,
-    PartitionedPrefix, SimplePrefix, TargetGrant, TargetObjectKeyFormat, Type,
+    BucketLoggingStatus, BucketLogsPermission, LoggingEnabled, PartitionDateSource,
+    PartitionedPrefix, SimplePrefix, TargetGrant, TargetObjectKeyFormat,
 };
 
+use super::put_bucket_acl::{GRANTEE, grantee};
 use super::shape::{Shape, Structure, parse_structure};
 use super::{members, required_checksum_algorithm};
 use crate::cli::PutBucketLoggingArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;
 use crate::value::Value;
-
-static GRANTEE: Structure = Structure {
-    members: &[
-        ("DisplayName", Shape::String { min: 0 }),
-        ("EmailAddress", Shape::String { min: 0 }),
-        ("ID", Shape::String { min: 0 }),
-        ("Type", Shape::String { min: 0 }),
-        ("URI", Shape::String { min: 0 }),
-    ],
-    required: &["Type"],
-};
 
 static TARGET_GRANT: Structure = Structure {
     members: &[
@@ -109,22 +99,7 @@ fn status(value: &Value) -> Result<BucketLoggingStatus, Error> {
                     members::list(logging, "TargetGrants")
                         .iter()
                         .map(|grant| {
-                            let grantee = grant
-                                .get("Grantee")
-                                .map(|grantee| {
-                                    Grantee::builder()
-                                        .set_display_name(members::str(grantee, "DisplayName"))
-                                        .set_email_address(members::str(grantee, "EmailAddress"))
-                                        .set_id(members::str(grantee, "ID"))
-                                        .set_type(
-                                            members::str(grantee, "Type")
-                                                .map(|value| Type::from(value.as_str())),
-                                        )
-                                        .set_uri(members::str(grantee, "URI"))
-                                        .build()
-                                        .map_err(error)
-                                })
-                                .transpose()?;
+                            let grantee = grant.get("Grantee").map(grantee).transpose()?;
                             Ok(TargetGrant::builder()
                                 .set_grantee(grantee)
                                 .set_permission(

@@ -13,6 +13,7 @@ mod delete_object;
 mod delete_object_tagging;
 mod delete_objects;
 mod delete_public_access_block;
+mod get_bucket_acl;
 mod get_bucket_cors;
 mod get_bucket_encryption;
 mod get_bucket_lifecycle_configuration;
@@ -35,6 +36,7 @@ mod members;
 mod output;
 mod paginate;
 mod paramfile;
+mod put_bucket_acl;
 mod put_bucket_cors;
 mod put_bucket_encryption;
 mod put_bucket_lifecycle_configuration;
@@ -156,6 +158,8 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         ApiOperation::DeleteBucketCors(args) => {
             delete_bucket_cors::run(&client, args).await?.into()
         }
+        ApiOperation::GetBucketAcl(args) => get_bucket_acl::run(&client, args).await?.into(),
+        ApiOperation::PutBucketAcl(args) => put_bucket_acl::run(&client, args).await?.into(),
         ApiOperation::GetBucketNotificationConfiguration(args) => {
             get_bucket_notification_configuration::run(&client, args)
                 .await?

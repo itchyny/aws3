@@ -3,6 +3,7 @@
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::{LoggingEnabled, TargetGrant, TargetObjectKeyFormat};
 
+use super::get_bucket_acl::grantee_value;
 use super::output::Response;
 use crate::cli::BucketArgs;
 use crate::error::Error;
@@ -47,13 +48,7 @@ fn logging_value(logging: &LoggingEnabled) -> Value {
 fn grant_value(grant: &TargetGrant) -> Value {
     let mut response = Response::default();
     if let Some(grantee) = grant.grantee() {
-        let mut grantee_response = Response::default();
-        grantee_response.str("DisplayName", grantee.display_name());
-        grantee_response.str("EmailAddress", grantee.email_address());
-        grantee_response.str("ID", grantee.id());
-        grantee_response.str("Type", Some(grantee.r#type().as_str()));
-        grantee_response.str("URI", grantee.uri());
-        response.value("Grantee", grantee_response.build());
+        response.value("Grantee", grantee_value(grantee));
     }
     response.str(
         "Permission",
