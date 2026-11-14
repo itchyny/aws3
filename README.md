@@ -110,6 +110,24 @@ To install the latest development version:
 cargo install --git https://github.com/itchyny/aws3
 ```
 
+### Docker
+
+The images for `linux/amd64` and `linux/arm64` are published to the
+[GitHub Container Registry](https://github.com/itchyny/aws3/pkgs/container/aws3).
+
+```sh
+docker run --rm -v ~/.aws:/home/nonroot/.aws:ro ghcr.io/itchyny/aws3 ls s3://bucket/
+```
+
+The image is based on `distroless/static` and runs as the `nonroot` user, so
+mount the AWS configuration directory to `/home/nonroot/.aws`, or pass the
+credentials with the environment variables such as `AWS_ACCESS_KEY_ID`. To
+add the command to another image:
+
+```dockerfile
+COPY --from=ghcr.io/itchyny/aws3 /aws3 /usr/local/bin/aws3
+```
+
 ## Benchmark
 
 The commands were run against S3 in `ap-northeast-1` over HTTPS from a home

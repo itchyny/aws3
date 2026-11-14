@@ -13,6 +13,12 @@ permissions:
 
 env:
   NAME: ${{ github.event.repository.name }}
+  VERSION: |-
+    ${{ case(
+      startsWith(github.ref, 'refs/tags/v'), github.ref_name,
+      github.event_name == 'pull_request', github.event.pull_request.head.sha,
+      github.sha
+    ) }}
 
 defaults:
   run:
@@ -41,7 +47,6 @@ jobs:
     env:
       OS: ${{ matrix.os }}
       TARGETS: ${{ matrix.targets }}
-      VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7.0.1
@@ -95,6 +100,80 @@ jobs:
           name: ${{ env.NAME }}_${{ matrix.os }}
           path: '*.zip'
           if-no-files-found: error
+
+  docker:
+    name: Docker
+    needs: build
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: ${{ env.NAME }}_linux-*
+          path: artifacts
+          merge-multiple: true
+      - name: Extract executables
+        run: |
+          mkdir docker
+          for arch in amd64:x86_64 arm64:aarch64; do
+            unzip -j "artifacts/$NAME-$VERSION-${arch#*:}-unknown-linux-musl.zip" \
+              "*/$NAME" -d "docker/${arch%:*}"
+          done
+      - name: Generate Dockerfile
+        run: |
+          cat > docker/Dockerfile <<EOF
+          FROM gcr.io/distroless/static-debian13:nonroot
+          ARG TARGETARCH
+          COPY --chmod=755 \${TARGETARCH}/$NAME /
+          ENTRYPOINT ["/$NAME"]
+          CMD ["--help"]
+          EOF
+      - name: Docker metadata
+        uses: docker/metadata-action@v6.2.0
+        id: metadata
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,format=long,enable=${{ !startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.4.1
+      - name: Login to GitHub Container Registry
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: docker
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          provenance: false
+          platforms: linux/amd64, linux/arm64
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          annotations: ${{ steps.metadata.outputs.annotations }}
+        env:
+          DOCKER_BUILD_SUMMARY: false
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest@v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
   release:
     name: Release
