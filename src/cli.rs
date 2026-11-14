@@ -416,6 +416,10 @@ pub enum ApiOperation {
     GetBucketNotificationConfiguration(BucketArgs),
     /// Set the notification configuration of a bucket
     PutBucketNotificationConfiguration(PutBucketNotificationConfigurationArgs),
+    /// Return the logging status of a bucket
+    GetBucketLogging(BucketArgs),
+    /// Set the logging status of a bucket
+    PutBucketLogging(PutBucketLoggingArgs),
     /// Return the tags of a bucket
     GetBucketTagging(BucketArgs),
     /// Set the tags of a bucket
@@ -1542,6 +1546,32 @@ impl SkipDestinationValidationArgs {
             None
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub struct PutBucketLoggingArgs {
+    /// The name of the bucket
+    #[arg(long)]
+    pub bucket: String,
+
+    /// The logging status, e.g. file://logging.json
+    #[arg(
+        long,
+        value_name = "LoggingEnabled={TargetBucket=string,TargetPrefix=string,...}"
+    )]
+    pub bucket_logging_status: String,
+
+    /// The base64-encoded 128-bit MD5 digest of the request body
+    #[arg(long, value_name = "STRING")]
+    pub content_md5: Option<String>,
+
+    /// The algorithm used to create the checksum of the request
+    #[arg(long, value_name = "STRING")]
+    pub checksum_algorithm: Option<String>,
+
+    /// The account ID of the expected bucket owner
+    #[arg(long, value_name = "STRING")]
+    pub expected_bucket_owner: Option<String>,
 }
 
 #[derive(Debug, Args)]

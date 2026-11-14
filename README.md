@@ -50,6 +50,7 @@ for the others.
 | Lifecycle | `get-bucket-lifecycle-configuration`, `put-bucket-lifecycle-configuration`, `delete-bucket-lifecycle` |
 | CORS | `get-bucket-cors`, `put-bucket-cors`, `delete-bucket-cors` |
 | Notification | `get-bucket-notification-configuration`, `put-bucket-notification-configuration` |
+| Logging | `get-bucket-logging`, `put-bucket-logging` |
 | Tagging | `get-bucket-tagging`, `put-bucket-tagging`, `delete-bucket-tagging`, `get-object-tagging`, `put-object-tagging`, `delete-object-tagging` |
 
 ```sh

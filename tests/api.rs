@@ -2008,6 +2008,56 @@ fn put_bucket_notification_configuration() {
     );
 }
 
+#[test]
+fn get_bucket_logging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let query = get_bucket_configuration(&env, "get-bucket-logging", "GetBucketLogging");
+    assert_eq!(query, "logging");
+}
+
+#[test]
+fn put_bucket_logging() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.run(&[
+        "api",
+        "put-bucket-logging",
+        "--bucket",
+        "bucket",
+        "--bucket-logging-status",
+        "LoggingEnabled={TargetBucket=logs,TargetPrefix=bucket/,\
+         TargetObjectKeyFormat={PartitionedPrefix={PartitionDateSource=EventTime}}}",
+    ]);
+    let (body, headers) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<BucketLoggingStatus xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+             <LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>bucket/</TargetPrefix>\
+             <TargetObjectKeyFormat><PartitionedPrefix><PartitionDateSource>EventTime\
+             </PartitionDateSource></PartitionedPrefix></TargetObjectKeyFormat></LoggingEnabled>\
+             </BucketLoggingStatus>"
+        ),
+        "{body}"
+    );
+    assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
+
+    let result = env.run(&[
+        "api",
+        "put-bucket-logging",
+        "--bucket",
+        "bucket",
+        "--bucket-logging-status",
+        "LoggingEnabled={TargetBucket=logs,TargetPrefix=x,TargetGrants=[{Grantee={ID=x}}]}",
+    ]);
+    assert_eq!(result.code, 252);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
+         Missing required parameter in BucketLoggingStatus.LoggingEnabled.TargetGrants[0].Grantee: \"Type\"\n"
+    );
+}
+
 /// Runs an operation on an object, which the fake server does not implement,
 /// and returns the method, the path and the query of the request.
 fn unimplemented_object_operation(
