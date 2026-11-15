@@ -8,12 +8,14 @@ use std::time::SystemTime;
 
 use tokio::sync::mpsc;
 
+use super::context::Context;
+use super::execute::{Operation, Submitter, Task};
 use super::filter::Filters;
 use super::generator::{FileStat, Item};
+use super::options::CommandName;
 use super::paths::{self, Endpoint};
-use super::{
-    CommandName, Context, Operation, PathsType, Submitter, Task, create_filters, spawn_generator,
-};
+use super::plan::PathsType;
+use super::{create_filters, spawn_generator};
 use crate::cli::CaseConflict;
 
 /// How a file at both the source and the destination is synced.

@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use aws_sdk_s3::config::Region;
 use regex_lite::Regex;
 
-use super::is_same_path;
+use super::plan::is_same_path;
 use crate::cli::GlobalArgs;
 use crate::client;
 use crate::error::Error;

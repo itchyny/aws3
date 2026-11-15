@@ -8,11 +8,13 @@ use aws_sdk_s3::types::{
 };
 use tokio::task::JoinSet;
 
+use super::context::Context;
 use super::download::etag_mismatch;
+use super::execute::Outcome;
 use super::generator::ObjectProps;
 use super::params::{set_copy_source_sse_c, set_object_params, set_sse_c};
+use super::printer::TransferId;
 use super::upload::{MultipartUpload, adjust_chunk_size};
-use super::{Context, Outcome, TransferId};
 use crate::cli::CopyProps;
 use crate::error::{Error, has_error_code};
 use crate::path::{url_encode, validate_bucket_name};
