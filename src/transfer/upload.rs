@@ -15,10 +15,10 @@ use tokio::io::AsyncReadExt;
 use tokio::task::JoinSet;
 
 use super::context::Context;
-use super::execute::Outcome;
 use super::mime::guess_content_type;
 use super::params::{set_object_params, set_sse_c};
 use super::printer::TransferId;
+use super::task::Outcome;
 use crate::client::merge_content_encodings;
 use crate::error::{Error, has_error_code};
 use crate::path::validate_bucket_name;

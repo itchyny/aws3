@@ -11,10 +11,10 @@ use tokio::task::JoinSet;
 
 use super::checksum::FullObjectChecksum;
 use super::context::Context;
-use super::execute::Outcome;
 use super::generator::ObjectProps;
 use super::params::set_sse_c;
 use super::printer::TransferId;
+use super::task::Outcome;
 use crate::error::{Error, has_error_code};
 use crate::path::validate_bucket_name;
 

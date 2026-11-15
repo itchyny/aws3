@@ -9,13 +9,14 @@ use std::time::SystemTime;
 use tokio::sync::mpsc;
 
 use super::context::Context;
-use super::execute::{Operation, Submitter, Task};
+use super::execute::Submitter;
 use super::filter::Filters;
 use super::generator::{FileStat, Item};
 use super::options::CommandName;
 use super::paths::{self, Endpoint};
 use super::plan::PathsType;
-use super::{create_filters, spawn_generator};
+use super::source::{create_filters, spawn_generator};
+use super::task::{CaseConflictKeys, Operation, Task};
 use crate::cli::CaseConflict;
 
 /// How a file at both the source and the destination is synced.
@@ -27,9 +28,6 @@ enum AtBoth {
     Never,
     Always,
 }
-
-/// The keys of the downloads, in lowercase, to detect case conflicts.
-pub type CaseConflictKeys = Arc<Mutex<HashSet<String>>>;
 
 /// Returns whether the recursive downloads of cp and mv are compared with
 /// the local files to handle case conflicts.

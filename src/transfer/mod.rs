@@ -15,15 +15,16 @@ mod paths;
 mod plan;
 mod printer;
 mod samepath;
+mod source;
 mod sync;
+mod task;
 mod upload;
 
-use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::{Semaphore, mpsc, watch};
+use tokio::sync::{Semaphore, watch};
 
 use crate::cli::{CaseConflict, GlobalArgs};
 use crate::client;
@@ -31,14 +32,14 @@ use crate::error::Error;
 use crate::path::{is_s3express_bucket, split_bucket_key};
 use crate::redirect::Redirector;
 use context::Context;
-use execute::{Operation, Submitter, Task};
-use filter::Filters;
-use generator::{Item, ListOptions};
+use execute::Submitter;
+use generator::Item;
 pub use options::{CommandName, Options};
 pub use params::{RequestParams, Unpacked};
-use paths::Endpoint;
 use plan::{PathsType, Plan};
 use printer::{PrintMode, Printer};
+use source::{create_filters, spawn_generator};
+use task::{Operation, Task};
 
 /// Runs the transfer command with the options and the request parameters.
 pub async fn run(
@@ -210,74 +211,6 @@ async fn run_files(ctx: &Arc<Context>, submitter: &mut Submitter) {
             }
         }
     }
-}
-
-/// Creates the filters rooted at the source and the destination.
-fn create_filters(ctx: &Context) -> Filters {
-    let dir_op = ctx.options.dir_op;
-    let root = |path: &str| {
-        if let Some(path) = path.strip_prefix("s3://") {
-            let (bucket, key) = split_bucket_key(path);
-            let key = if !dir_op && !key.ends_with('/') {
-                key.rsplit_once('/').map_or("", |(dir, _)| dir)
-            } else {
-                key
-            };
-            format!("{bucket}/{key}")
-        } else if dir_op {
-            paths::abspath(path)
-        } else {
-            let parent = Path::new(path)
-                .parent()
-                .map(|parent| parent.to_string_lossy().into_owned());
-            paths::abspath(
-                parent
-                    .as_deref()
-                    .filter(|parent| !parent.is_empty())
-                    .unwrap_or("."),
-            )
-        }
-    };
-    Filters::new(
-        &ctx.options.filters,
-        &root(&ctx.plan.src),
-        &root(&ctx.plan.dest),
-    )
-}
-
-/// Spawns the generator of the files or objects at the endpoint.
-fn spawn_generator(
-    ctx: &Arc<Context>,
-    endpoint: &Endpoint,
-    is_delete: bool,
-) -> mpsc::Receiver<Item> {
-    let (tx, rx) = mpsc::channel(ctx.config.max_queue_size);
-    let path = endpoint.path.clone();
-    let dir_op = ctx.options.dir_op;
-    if endpoint.is_s3 {
-        let ctx = ctx.clone();
-        tokio::spawn(async move {
-            let options = ListOptions {
-                page_size: ctx.options.page_size,
-                request_payer: ctx.params.request_payer.clone(),
-                sse_c: if ctx.plan.paths_type == PathsType::S3S3 {
-                    ctx.params.sse_c_copy_source.clone()
-                } else {
-                    ctx.params.sse_c.clone()
-                },
-                checksum_mode: ctx.params.checksum_mode.clone(),
-                is_delete,
-            };
-            let client = &ctx.source_client;
-            generator::list_s3(client, &ctx.redirector, &path, dir_op, &options, &tx).await;
-        });
-    } else {
-        let follow_symlinks = ctx.options.follow_symlinks;
-        tokio::task::spawn_blocking(move || {
-            generator::list_local(&path, dir_op, follow_symlinks, &tx)
-        });
-    }
-    rx
 }
 
 /// Creates the task of streaming from the standard input or to the standard
