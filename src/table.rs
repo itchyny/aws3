@@ -30,7 +30,7 @@ struct Section {
 }
 
 impl MultiTable {
-    pub fn new_section(&mut self, title: &str, indent_level: usize) {
+    fn new_section(&mut self, title: &str, indent_level: usize) {
         self.sections.push(Section {
             title: title.to_owned(),
             indent_level,
@@ -38,7 +38,7 @@ impl MultiTable {
         });
     }
 
-    pub fn add_row_header(&mut self, headers: Vec<String>) {
+    fn add_row_header(&mut self, headers: Vec<String>) {
         let section = self.current();
         section.update_max_widths(&headers);
         section.num_cols.get_or_insert(headers.len());
@@ -46,7 +46,7 @@ impl MultiTable {
     }
 
     /// Adds the row, which fails if the number of the columns differs.
-    pub fn add_row(&mut self, row: Vec<String>) -> Result<(), String> {
+    fn add_row(&mut self, row: Vec<String>) -> Result<(), String> {
         let section = self.current();
         let num_cols = *section.num_cols.get_or_insert(row.len());
         if row.len() != num_cols {
@@ -460,7 +460,7 @@ fn align_left(
 
 /// Returns the width of the text, where the wide, fullwidth and ambiguous
 /// characters are counted as two like `get_text_length` of the AWS CLI.
-pub fn text_length(text: &str) -> usize {
+fn text_length(text: &str) -> usize {
     text.chars()
         .map(|ch| {
             let code = ch as u32;

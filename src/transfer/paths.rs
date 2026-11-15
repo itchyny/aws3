@@ -79,7 +79,7 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    pub fn separator(&self) -> char {
+    fn separator(&self) -> char {
         if self.is_s3 { '/' } else { SEP }
     }
 }

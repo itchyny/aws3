@@ -57,7 +57,7 @@ fn join(root: &str, pattern: &str) -> String {
 
 /// Matches the name against the shell-style pattern in the same way as
 /// `fnmatch.fnmatchcase` of Python, where `*` also matches `/`.
-pub fn fnmatch(name: &str, pattern: &str) -> bool {
+fn fnmatch(name: &str, pattern: &str) -> bool {
     let name: Vec<char> = name.chars().collect();
     let pattern: Vec<char> = pattern.chars().collect();
     let (mut n, mut p) = (0, 0);

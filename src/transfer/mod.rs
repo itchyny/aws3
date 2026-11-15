@@ -391,7 +391,7 @@ enum Outcome {
 }
 
 /// The shared state of the transfers.
-pub struct Context {
+struct Context {
     client: Client,
     source_client: Client,
     params: RequestParams,

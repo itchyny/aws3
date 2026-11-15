@@ -146,7 +146,7 @@ pub async fn upload_stdin(
 
 /// The body of an upload, with the checksum computed before sending if the
 /// payloads are not signed.
-pub struct UploadBody {
+struct UploadBody {
     stream: ByteStream,
     checksum: Option<String>,
 }
@@ -425,7 +425,7 @@ impl Drop for AbortGuard {
     }
 }
 
-pub type PartResult = Result<CompletedPart, String>;
+type PartResult = Result<CompletedPart, String>;
 
 fn join_part(result: Option<Result<PartResult, tokio::task::JoinError>>) -> Option<PartResult> {
     result.map(|result| result.map_err(|err| err.to_string()).and_then(|part| part))
@@ -529,7 +529,7 @@ impl MultipartUpload {
 
     /// Waits for the parts and completes the upload, or aborts the upload if
     /// any of the parts failed.
-    pub async fn finish(
+    async fn finish(
         &self,
         ctx: &Context,
         completed: Vec<CompletedPart>,
@@ -630,12 +630,7 @@ impl MultipartUpload {
 
     /// Cancels the remaining parts and aborts the upload, and returns the
     /// error of the failure.
-    pub async fn fail(
-        &self,
-        ctx: &Context,
-        parts: &mut JoinSet<PartResult>,
-        err: String,
-    ) -> String {
+    async fn fail(&self, ctx: &Context, parts: &mut JoinSet<PartResult>, err: String) -> String {
         parts.abort_all();
         self.abort(ctx).await;
         err

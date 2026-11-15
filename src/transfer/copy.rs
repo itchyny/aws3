@@ -549,7 +549,7 @@ fn serialize_tags(tags: &[Tag]) -> String {
 }
 
 /// Returns the copy source of the object, where the key is URL encoded.
-pub fn copy_source(bucket: &str, key: &str) -> String {
+fn copy_source(bucket: &str, key: &str) -> String {
     format!("{bucket}/{}", url_encode(key, true))
 }
 
