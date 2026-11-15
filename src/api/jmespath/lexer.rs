@@ -1,6 +1,6 @@
 //! The lexer of JMESPath expressions, ported from `jmespath.lexer` of Python.
 
-use super::Error;
+use super::error::Error;
 use crate::json::decode as decode_json;
 use crate::value::Value;
 
@@ -87,7 +87,7 @@ pub struct Token {
 impl Token {
     /// Returns the value of the token, which is in JSON unless a string.
     pub fn text(&self) -> String {
-        super::text(&self.value)
+        super::error::text(&self.value)
     }
 }
 

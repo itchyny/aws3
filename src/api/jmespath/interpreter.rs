@@ -5,8 +5,8 @@
 
 use std::cmp::Ordering;
 
+use super::error::{Error, text};
 use super::parser::{Comparator, Node};
-use super::{Error, text};
 use crate::value::{Value, ascii_json_string, insert, python_float};
 
 pub fn search(node: &Node, value: &Value) -> Result<Value, Error> {

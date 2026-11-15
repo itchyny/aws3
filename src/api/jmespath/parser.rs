@@ -1,7 +1,7 @@
 //! The parser of JMESPath expressions, ported from `jmespath.parser` of
 //! Python, which is a Pratt parser.
 
-use super::Error;
+use super::error::Error;
 use super::lexer::{Kind, Token, tokenize};
 use crate::value::Value;
 
