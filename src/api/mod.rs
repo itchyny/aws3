@@ -396,8 +396,7 @@ fn parse_timestamp(member: &str, value: Option<&str>) -> Result<Option<DateTime>
 }
 
 /// Parses the `--metadata` argument, whose values must be ASCII strings like
-/// `validate_ascii_metadata` of botocore, which fails on other types before
-/// validating the parameters.
+/// `validate_ascii_metadata` of botocore.
 fn parse_metadata(value: Option<&str>) -> Result<Option<HashMap<String, String>>, Error> {
     let Some(value) = value else {
         return Ok(None);
@@ -406,8 +405,10 @@ fn parse_metadata(value: Option<&str>) -> Result<Option<HashMap<String, String>>
     let mut metadata = HashMap::new();
     for (key, value) in pairs {
         let Value::Str(value) = value else {
-            return Err(Error::new(format!(
-                "'{}' object has no attribute 'encode'",
+            return Err(Error::param_validation(format!(
+                "Parameter validation failed:\nInvalid type for parameter Metadata.{key}, \
+                 value: {}, type: <class '{}'>, valid types: <class 'str'>",
+                shape::str(&value),
                 shape::type_name(&value)
             )));
         };

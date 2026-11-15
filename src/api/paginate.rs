@@ -218,10 +218,7 @@ impl Paginator {
             return self.parse_deprecated_starting_token(value);
         };
         let Value::Map(pairs) = decoded else {
-            return Err(Error::new(format!(
-                "'{}' object has no attribute 'pop'",
-                shape::type_name(&decoded)
-            )));
+            return Err(Error::new(format!("Bad starting token: {value}")));
         };
         let mut token = vec![None; self.input_tokens.len()];
         let mut truncation = 0;
@@ -446,6 +443,13 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "Bad starting token: a___b___c"
+        );
+        assert_eq!(
+            PAGINATOR
+                .parse_starting_token("WzFd")
+                .unwrap_err()
+                .to_string(),
+            "Bad starting token: WzFd"
         );
     }
 

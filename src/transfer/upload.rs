@@ -50,7 +50,7 @@ pub async fn upload_file(
         .await
         .map_err(|err| err.to_string())?;
     if metadata.is_dir() {
-        return Err(format!("[Errno 21] Is a directory: '{path}'"));
+        return Err("Is a directory".to_owned());
     }
     let size = metadata.len();
     let content_type = content_type(ctx, path);

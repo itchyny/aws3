@@ -48,20 +48,9 @@ pub async fn run(client: &Client, args: &GetObjectArgs) -> Result<Value, Error> 
 }
 
 /// Writes the body to the file, which is created after the response is
-/// received, failing with the same messages as `open` of Python.
+/// received.
 async fn write_body(output: GetObjectOutput, path: &Path) -> Result<(), Error> {
-    let os_error = |err: std::io::Error| {
-        let mut message = err.to_string();
-        if let Some(code) = err.raw_os_error() {
-            let suffix = format!(" (os error {code})");
-            message = format!(
-                "[Errno {code}] {}: '{}'",
-                message.strip_suffix(&suffix).unwrap_or(&message),
-                path.display()
-            );
-        }
-        Error::new(message)
-    };
+    let os_error = |err: std::io::Error| Error::new(format!("{}: {err}", path.display()));
     let mut file = tokio::fs::File::create(path).await.map_err(os_error)?;
     let mut body = output.body;
     while let Some(bytes) = body

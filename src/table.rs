@@ -149,13 +149,10 @@ impl MultiTable {
         let mut headers = Vec::new();
         let mut more = Vec::new();
         for value in values {
-            // The errors of grouping the keys of the other values in Python.
             let Value::Map(pairs) = value else {
-                return Err(match value {
-                    Value::Str(_) => "string indices must be integers, not 'str'".to_owned(),
-                    Value::List(_) => "list indices must be integers or slices, not str".to_owned(),
-                    value => format!("'{}' object is not iterable", shape::type_name(value)),
-                });
+                return Err(
+                    "Cannot format a list of objects mixed with other values in table".to_owned(),
+                );
             };
             let (h, m) = group_scalar_keys(pairs);
             headers.extend(h);

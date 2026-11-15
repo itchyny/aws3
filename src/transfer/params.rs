@@ -307,18 +307,8 @@ pub fn load_string(name: &str, value: &str) -> Result<Value, Error> {
 /// Reads the parameter file of the value with the prefix, whose path is
 /// expanded like `get_file` of the AWS CLI.
 fn read_paramfile(value: &str, path: &str) -> Result<Vec<u8>, String> {
-    std::fs::read(expand_path(path)).map_err(|err| {
-        let mut message = err.to_string();
-        if let Some(code) = err.raw_os_error() {
-            let suffix = format!(" (os error {code})");
-            message = format!(
-                "[Errno {code}] {}: '{}'",
-                message.strip_suffix(&suffix).unwrap_or(&message),
-                expand_path(path)
-            );
-        }
-        format!("Unable to load paramfile {value}: {message}")
-    })
+    std::fs::read(expand_path(path))
+        .map_err(|err| format!("Unable to load paramfile {value}: {err}"))
 }
 
 /// Reads the parameter file of the text, whose newlines are translated like
@@ -424,14 +414,10 @@ pub fn parse_map_argument(name: &str, value: &str) -> Result<(Vec<(String, Value
     let value = if let Some(path) = value.strip_prefix("file://") {
         contents = read_text_paramfile(value, path).map_err(error)?;
         &contents
-    } else if let Some(path) = value.strip_prefix("fileb://") {
-        // The binary contents are not supported by the shorthand parser.
-        let contents = read_paramfile(value, path).map_err(error)?;
-        return Err(Error::new(if contents.is_empty() {
-            "a bytes-like object is required, not 'str'"
-        } else {
-            "'in <string>' requires string as left operand, not int"
-        }));
+    } else if value.starts_with("fileb://") {
+        return Err(error(
+            "Binary file is not supported, use file:// instead".to_owned(),
+        ));
     } else {
         value
     };
@@ -640,6 +626,11 @@ mod tests {
         assert_eq!(params.validate_ascii_metadata(), Ok(()));
         let mut errors = vec![
             (
+                "fileb://a.json",
+                "Error parsing parameter '--metadata': \
+                 Binary file is not supported, use file:// instead",
+            ),
+            (
                 "a",
                 "Error parsing parameter '--metadata': Expected: '=', received: 'EOF' for input:\n a\n ^",
             ),
@@ -673,12 +664,12 @@ Invalid type for parameter c, value: {}, type: map, valid types: string"#,
                 (
                     "file:///nonexistent",
                     "Error parsing parameter '--metadata': Unable to load paramfile \
-                     file:///nonexistent: [Errno 2] No such file or directory: '/nonexistent'",
+                     file:///nonexistent: No such file or directory (os error 2)",
                 ),
                 (
                     "a@=file:///nonexistent",
                     "Unable to load paramfile file:///nonexistent: \
-                     [Errno 2] No such file or directory: '/nonexistent'",
+                     No such file or directory (os error 2)",
                 ),
             ]);
         }

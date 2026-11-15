@@ -431,8 +431,10 @@ fn put_object_errors() {
         ),
         (
             &["--body", "a.txt", "--metadata", r#"{"n":1}"#],
-            255,
-            "'int' object has no attribute 'encode'",
+            252,
+            "An error occurred (ParamValidation): Parameter validation failed:\n\
+             Invalid type for parameter Metadata.n, value: 1, type: <class 'int'>, \
+             valid types: <class 'str'>",
         ),
         (
             &["--body", "a.txt", "--metadata", "foo=\u{e9}"],
@@ -650,12 +652,12 @@ fn get_object_errors() {
             254,
             "An error occurred (NoSuchKey) when calling the GetObject operation: Unknown",
         ),
-        ("a.txt", "dir", 255, "[Errno 21] Is a directory: 'dir'"),
+        ("a.txt", "dir", 255, "dir: Is a directory (os error 21)"),
         (
             "a.txt",
             "missing/out.txt",
             255,
-            "[Errno 2] No such file or directory: 'missing/out.txt'",
+            "missing/out.txt: No such file or directory (os error 2)",
         ),
     ] {
         let result = env.run(&[
@@ -1276,7 +1278,7 @@ fn put_bucket_policy() {
     assert!(
         result.stderr.starts_with(
             "\naws3: [ERROR]: An error occurred (ParamValidation): Error parsing parameter \
-             '--policy': Unable to load paramfile file://missing.json: [Errno 2] No such file or directory: "
+             '--policy': Unable to load paramfile file://missing.json: No such file or directory (os error 2)"
         ),
         "{}",
         result.stderr
@@ -1788,7 +1790,7 @@ fn output_table() {
     assert_eq!(result.code, 255);
     assert_eq!(
         result.stderr,
-        "\naws3: [ERROR]: string indices must be integers, not 'str'\n"
+        "\naws3: [ERROR]: Cannot format a list of objects mixed with other values in table\n"
     );
 }
 
@@ -2444,7 +2446,7 @@ fn parameter_files() {
         (
             ["--key", "file://missing.txt"],
             "Error parsing parameter '--key': Unable to load paramfile file://missing.txt: \
-             [Errno 2] No such file or directory: 'missing.txt'",
+             No such file or directory (os error 2)",
         ),
         (
             ["--key", "fileb://key.txt"],

@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::value::Value;
 
 /// Formats the value, which fails on the lists of the maps and the other
-/// values like the AWS CLI.
+/// values.
 pub fn format(value: &Value) -> Result<String, Error> {
     let mut buf = String::new();
     format_value(value, &mut buf, None, None)?;
@@ -131,10 +131,9 @@ fn scalar_keys(values: &[Value]) -> Result<Vec<String>, Error> {
     let mut keys = Vec::new();
     for value in values {
         let Value::Map(pairs) = value else {
-            return Err(Error::new(format!(
-                "'{}' object has no attribute 'items'",
-                shape::type_name(value)
-            )));
+            return Err(Error::new(
+                "Cannot format a list of objects mixed with other values in text",
+            ));
         };
         for (key, value) in pairs {
             if !is_container(value) {
@@ -175,7 +174,7 @@ mod tests {
         );
         assert_eq!(
             text(r#"{"l": [1, [2, 3], {"a": 4}]}"#),
-            "'int' object has no attribute 'items'"
+            "Cannot format a list of objects mixed with other values in text"
         );
         assert_eq!(text(r#"[[1, 2], 3, [4]]"#), "3\n1\t2\n4\n");
     }
