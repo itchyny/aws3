@@ -373,6 +373,25 @@ fn human_readable_to_int(value: &str) -> Result<i64, String> {
     .ok_or_else(|| format!("Invalid size value: {value}"))
 }
 
+/// Formats the size in base-2 units, in the same way as the AWS CLI.
+pub fn human_readable_size(size: i64) -> String {
+    const BASE: f64 = 1024.0;
+    const SUFFIXES: [&str; 6] = ["KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+    let bytes = size as f64;
+    if size == 1 {
+        return "1 Byte".to_owned();
+    } else if bytes < BASE {
+        return format!("{size} Bytes");
+    }
+    for (i, suffix) in SUFFIXES.into_iter().enumerate() {
+        let unit = BASE.powi(i as i32 + 2);
+        if (bytes / unit * BASE).round_ties_even() < BASE || i == SUFFIXES.len() - 1 {
+            return format!("{:.1} {suffix}", BASE * bytes / unit);
+        }
+    }
+    unreachable!()
+}
+
 /// Parses the integer in the same way as `int` of Python, which allows the
 /// surrounding whitespaces, the sign and the underscores between the digits.
 fn python_int(value: &str) -> Option<i64> {
@@ -472,6 +491,20 @@ ca_bundle = /etc/other.pem
             human_readable_to_int("99999999999999999999kb"),
             Err("Invalid size value: 99999999999999999999kb".to_owned())
         );
+    }
+
+    #[test]
+    fn human_readable() {
+        assert_eq!(human_readable_size(0), "0 Bytes");
+        assert_eq!(human_readable_size(1), "1 Byte");
+        assert_eq!(human_readable_size(1023), "1023 Bytes");
+        assert_eq!(human_readable_size(1024), "1.0 KiB");
+        assert_eq!(human_readable_size(1536000), "1.5 MiB");
+        assert_eq!(human_readable_size(1024 * 1024 - 1), "1.0 MiB");
+        assert_eq!(human_readable_size(1024 * 1024 - 512), "1.0 MiB");
+        assert_eq!(human_readable_size(1024 * 1024 - 513), "1023.5 KiB");
+        assert_eq!(human_readable_size(5 << 40), "5.0 TiB");
+        assert_eq!(human_readable_size(i64::MAX), "8.0 EiB");
     }
 
     #[test]

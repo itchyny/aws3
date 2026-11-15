@@ -1,7 +1,7 @@
 //! The lexer of JMESPath expressions, ported from `jmespath.lexer` of Python.
 
 use super::Error;
-use crate::transfer::decode_json;
+use crate::json::decode as decode_json;
 use crate::value::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

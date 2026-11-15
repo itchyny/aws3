@@ -6,8 +6,8 @@ use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 
 use crate::cli::ErrorFormat;
 use crate::client;
-use crate::errorformat;
-use crate::table;
+use crate::value::Value;
+use crate::{table, yaml};
 
 /// Exit code of the AWS CLI on parameter validation errors.
 const EXIT_PARAM_VALIDATION: u8 = 252;
@@ -218,12 +218,10 @@ impl Error {
             // The legacy format omits the code except for the client errors.
             ErrorFormat::Legacy if info.kind == ErrorKind::Client => plain(&self.message),
             ErrorFormat::Legacy => plain(message.unwrap_or(&self.message)),
-            ErrorFormat::Json => errorformat::json(code, message),
-            ErrorFormat::Yaml => errorformat::yaml(code, message),
-            ErrorFormat::Text => errorformat::text(code, message),
-            ErrorFormat::Table => {
-                errorformat::table(code, message, table::terminal_width(), colored)
-            }
+            ErrorFormat::Json => format_json(code, message),
+            ErrorFormat::Yaml => format_yaml(code, message),
+            ErrorFormat::Text => format_text(code, message),
+            ErrorFormat::Table => format_table(code, message, table::terminal_width(), colored),
         }
     }
 
@@ -340,7 +338,10 @@ fn reason_phrase(status: u16) -> &'static str {
 
 fn hex_sha256(value: &str) -> String {
     use sha2::{Digest, Sha256};
-    crate::presign::hex(&Sha256::digest(value))
+    Sha256::digest(value)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn is_no_credentials(err: &(dyn std::error::Error + 'static)) -> bool {
@@ -460,5 +461,82 @@ impl fmt::Display for Chain<'_> {
             source = err.source();
         }
         Ok(())
+    }
+}
+
+/// Formats the error in JSON, in the same way as `json.dump` with the indent
+/// of four spaces.
+fn format_json(code: &str, message: Option<&str>) -> String {
+    format!("{}\n", error_value(code, message).to_json_pretty())
+}
+
+/// Formats the error in the text format, where the values are separated by
+/// tabs in the order of the keys.
+fn format_text(code: &str, message: Option<&str>) -> String {
+    match message {
+        Some(message) => format!("{code}\t{message}\n"),
+        None => format!("{code}\n"),
+    }
+}
+
+/// Formats the error in YAML, in the same way as the emitter of libyaml used
+/// by the AWS CLI.
+fn format_yaml(code: &str, message: Option<&str>) -> String {
+    yaml::dump(&error_value(code, message))
+}
+
+/// Formats the error in the table format, in the same way as `MultiTable` of
+/// the AWS CLI, which is converted to the vertical table if it is wider than
+/// the terminal. The values are colored if `colored` is true.
+fn format_table(code: &str, message: Option<&str>, terminal_width: usize, colored: bool) -> String {
+    match table::build("error", &error_value(code, message)) {
+        Ok(Some(table)) => table.render(terminal_width, colored, false),
+        _ => String::new(),
+    }
+}
+
+/// Returns the error with the code and the message, which is absent if the
+/// error response has no message like botocore.
+fn error_value(code: &str, message: Option<&str>) -> Value {
+    let mut pairs = vec![("Code".to_owned(), Value::Str(code.to_owned()))];
+    if let Some(message) = message {
+        pairs.push(("Message".to_owned(), Value::Str(message.to_owned())));
+    }
+    Value::Map(pairs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats() {
+        // The expected outputs are of the formatters of the AWS CLI.
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/error_formats.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            let code = case["code"].as_str().unwrap();
+            let message = case["message"].as_str();
+            assert_eq!(
+                format_json(code, message),
+                case["json"].as_str().unwrap(),
+                "{message:?}"
+            );
+            assert_eq!(
+                format_text(code, message),
+                case["text"].as_str().unwrap(),
+                "{message:?}"
+            );
+            assert_eq!(
+                format_yaml(code, message),
+                case["yaml"].as_str().unwrap(),
+                "{message:?}"
+            );
+            assert_eq!(
+                format_table(code, message, 80, false),
+                case["table"].as_str().unwrap(),
+                "{message:?}"
+            );
+        }
     }
 }

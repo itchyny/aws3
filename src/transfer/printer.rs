@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use crate::ls::human_readable_size;
+use crate::config::human_readable_size;
 
 /// How the results of transfers are printed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

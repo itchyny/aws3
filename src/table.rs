@@ -2,9 +2,8 @@
 //! render the sections of the titles, the column headers and the rows, where
 //! the nested sections are indented.
 
-use crate::api::shape;
 use crate::east_asian_width::WIDE_RANGES;
-use crate::value::Value;
+use crate::value::{Value, python_str};
 
 /// Builds the table of the value, whose title is the name of the operation,
 /// like `TableFormatter` of the AWS CLI. Returns `None` for the false values,
@@ -81,7 +80,7 @@ impl MultiTable {
                 for value in values {
                     match value {
                         Value::List(elements) if elements.iter().all(is_scalar) => {
-                            self.add_row(elements.iter().map(shape::str).collect())?;
+                            self.add_row(elements.iter().map(python_str).collect())?;
                         }
                         // The keys of the maps are scalars like Python.
                         Value::Map(pairs) => {
@@ -90,7 +89,7 @@ impl MultiTable {
                         Value::List(_) => {
                             self.build(None, value, 0)?;
                         }
-                        value => self.add_row(vec![shape::str(value)])?,
+                        value => self.add_row(vec![python_str(value)])?,
                     }
                 }
             }
@@ -113,7 +112,7 @@ impl MultiTable {
                 .map(|(_, value)| value);
             self.add_row(vec![
                 header.clone(),
-                value.map(shape::str).unwrap_or_default(),
+                value.map(python_str).unwrap_or_default(),
             ])?;
         } else if !headers.is_empty() {
             let row = headers
@@ -122,7 +121,7 @@ impl MultiTable {
                     pairs
                         .iter()
                         .find(|(key, _)| key == header)
-                        .map_or_else(String::new, |(_, value)| shape::str(value))
+                        .map_or_else(String::new, |(_, value)| python_str(value))
                 })
                 .collect();
             self.add_row_header(headers);
@@ -177,7 +176,7 @@ impl MultiTable {
                     pairs
                         .iter()
                         .find(|(key, _)| key == header)
-                        .map_or_else(String::new, |(_, value)| shape::str(value))
+                        .map_or_else(String::new, |(_, value)| python_str(value))
                 })
                 .collect();
             self.add_row(row)?;

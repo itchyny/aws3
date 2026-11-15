@@ -22,6 +22,7 @@ use aws_smithy_runtime_api::client::orchestrator::HttpRequest;
 use aws_smithy_runtime_api::client::result::ConnectorError;
 use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::retries::classifiers::{ClassifyRetry, RetryAction};
+use aws_smithy_runtime_api::http::Headers;
 use aws_smithy_types::retry::RetryConfig;
 use hyper_util::client::proxy::matcher::Matcher;
 
@@ -298,6 +299,20 @@ impl HttpConnector for RequestUrlConnector {
                 }
             })
         })
+    }
+}
+
+/// Merges the content encodings into one header, where the SDK appends
+/// aws-chunked as another header after the content encoding of the argument,
+/// which S3-compatible storage may reject. The encodings are joined with commas
+/// like the AWS CLI, e.g. `gzip,aws-chunked`.
+pub fn merge_content_encodings(headers: &mut Headers) {
+    let encodings: Vec<String> = headers
+        .get_all("content-encoding")
+        .map(str::to_owned)
+        .collect();
+    if encodings.len() > 1 {
+        headers.insert("content-encoding", encodings.join(","));
     }
 }
 

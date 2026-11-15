@@ -8,8 +8,8 @@ use aws_smithy_types::base64;
 use super::shape;
 use crate::cli::PaginationArgs;
 use crate::error::Error;
-use crate::transfer::decode_json;
-use crate::value::{Value, ascii_json_string, insert};
+use crate::json::decode as decode_json;
+use crate::value::{Value, ascii_json_string, insert, python_str};
 
 /// The values of the input tokens of a request, in the order of the tokens,
 /// where `None` is the token not to send.
@@ -239,7 +239,7 @@ impl Paginator {
                     return Err(Error::param_validation(format!(
                         "Parameter validation failed:\nInvalid type for parameter {key}, value: {}, \
                          type: <class '{}'>, valid types: <class 'str'>",
-                        shape::str(&value),
+                        python_str(&value),
                         shape::type_name(&value)
                     )));
                 }

@@ -18,9 +18,9 @@ use super::output::Response;
 use super::{parse_int, parse_metadata, parse_timestamp, sse_customer_key};
 use crate::cli::PutObjectArgs;
 use crate::client::Config;
+use crate::client::merge_content_encodings;
 use crate::error::Error;
 use crate::redirect::Redirector;
-use crate::transfer::merge_content_encodings;
 use crate::value::Value;
 
 pub async fn run(config: &Config, client: &Client, args: &PutObjectArgs) -> Result<Value, Error> {

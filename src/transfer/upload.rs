@@ -8,17 +8,17 @@ use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadOut
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use aws_sdk_s3::types::{ChecksumAlgorithm, CompletedMultipartUpload, CompletedPart};
 use aws_smithy_checksums::ChecksumAlgorithm as Checksums;
-use aws_smithy_runtime_api::http::Headers;
 use aws_smithy_types::body::{Error as BoxError, SdkBody};
 use bytes::Bytes;
 use http_body::{Body, Frame, SizeHint};
 use tokio::io::AsyncReadExt;
 use tokio::task::JoinSet;
 
+use super::mime::guess_content_type;
 use super::params::{set_object_params, set_sse_c};
 use super::{Context, Outcome, TransferId};
+use crate::client::merge_content_encodings;
 use crate::error::{Error, has_error_code};
-use crate::mime::guess_content_type;
 use crate::path::validate_bucket_name;
 
 /// The number of the parts of the standard input in the memory, which is
@@ -382,20 +382,6 @@ async fn put_object(
             Ok(Outcome::Skipped)
         }
         Err(err) => Err(Error::sdk("PutObject", err).to_string()),
-    }
-}
-
-/// Merges the content encodings into one header, where the SDK appends
-/// aws-chunked as another header after the content encoding of the argument,
-/// which S3-compatible storage may reject. The encodings are joined with commas
-/// like the AWS CLI, e.g. `gzip,aws-chunked`.
-pub fn merge_content_encodings(headers: &mut Headers) {
-    let encodings: Vec<String> = headers
-        .get_all("content-encoding")
-        .map(str::to_owned)
-        .collect();
-    if encodings.len() > 1 {
-        headers.insert("content-encoding", encodings.join(","));
     }
 }
 

@@ -15,7 +15,7 @@ use super::upload::{MultipartUpload, adjust_chunk_size};
 use super::{Context, Outcome, TransferId};
 use crate::cli::CopyProps;
 use crate::error::{Error, has_error_code};
-use crate::path::validate_bucket_name;
+use crate::path::{url_encode, validate_bucket_name};
 
 /// Sets the properties replaced by the REPLACE metadata directive, taking
 /// those not specified from the HeadObject response of the source object.
@@ -551,21 +551,6 @@ fn serialize_tags(tags: &[Tag]) -> String {
 /// Returns the copy source of the object, where the key is URL encoded.
 pub fn copy_source(bucket: &str, key: &str) -> String {
     format!("{bucket}/{}", url_encode(key, true))
-}
-
-/// Encodes the string, keeping unreserved characters and optionally slashes.
-pub fn url_encode(value: &str, keep_slash: bool) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char)
-            }
-            b'/' if keep_slash => encoded.push('/'),
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 #[cfg(test)]

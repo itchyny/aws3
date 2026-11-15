@@ -10,11 +10,10 @@ use std::ffi::OsString;
 
 use clap::{Arg, CommandFactory, Parser};
 
-use super::shape;
 use crate::cli::{ApiArgs, Cli, Command};
 use crate::error::Error;
-use crate::transfer::params::load_string;
-use crate::value::Value;
+use crate::param::load_string;
+use crate::value::{Value, python_repr};
 
 /// Loads the parameter files of the arguments of the operation, and returns
 /// the arguments parsed again with the contents, or `None` without them.
@@ -186,7 +185,7 @@ fn load_values(arg: &Arg, name: &str, values: &[String]) -> Result<Option<Vec<St
                 vec![format!(
                     "Invalid type for parameter {member}, value: {}, type: <class 'bytes'>, \
                      valid types: <class 'str'>",
-                    shape::repr(&Value::Bytes(contents))
+                    python_repr(&Value::Bytes(contents))
                 )]
             };
             Err(Error::param_validation(format!(

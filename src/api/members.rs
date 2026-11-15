@@ -3,7 +3,7 @@
 
 use aws_sdk_s3::primitives::DateTime;
 
-use crate::transfer::params::parse_timestamp;
+use crate::param::parse_timestamp;
 use crate::value::Value;
 
 pub fn str(value: &Value, key: &str) -> Option<String> {

@@ -147,6 +147,21 @@ pub fn is_s3express_bucket(bucket: &str) -> bool {
     bucket.ends_with("--x-s3")
 }
 
+/// Encodes the string, keeping unreserved characters and optionally slashes.
+pub fn url_encode(value: &str, keep_slash: bool) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            b'/' if keep_slash => encoded.push('/'),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 /// Decodes the URL-encoded key of a listing in the same way as
 /// `urllib.parse.unquote_plus` of Python, which the AWS CLI uses. The keys are
 /// requested to be encoded since XML cannot contain some characters.

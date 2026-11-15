@@ -72,9 +72,9 @@ use crate::cli::{ApiArgs, ApiOperation, Color, GlobalArgs};
 use crate::client;
 use crate::config::ProfileConfig;
 use crate::error::Error;
+use crate::param;
 use crate::table;
-use crate::transfer::params;
-use crate::value::{Value, insert};
+use crate::value::{Value, insert, python_str};
 use crate::yaml;
 use jmespath::Expression;
 use paginate::Pages;
@@ -382,7 +382,7 @@ fn required_checksum_algorithm(value: Option<&str>) -> ChecksumAlgorithm {
 fn parse_timestamp(member: &str, value: Option<&str>) -> Result<Option<DateTime>, Error> {
     value
         .map(|value| {
-            params::parse_timestamp(value).map_err(|_| {
+            param::parse_timestamp(value).map_err(|_| {
                 Error::param_validation(format!(
                     "Parameter validation failed:\nInvalid type for parameter {member}, \
                      value: {value}, type: <class 'str'>, \
@@ -399,14 +399,14 @@ fn parse_metadata(value: Option<&str>) -> Result<Option<HashMap<String, String>>
     let Some(value) = value else {
         return Ok(None);
     };
-    let (pairs, _) = params::parse_map_argument("--metadata", value)?;
+    let (pairs, _) = param::parse_map_argument("--metadata", value)?;
     let mut metadata = HashMap::new();
     for (key, value) in pairs {
         let Value::Str(value) = value else {
             return Err(Error::param_validation(format!(
                 "Parameter validation failed:\nInvalid type for parameter Metadata.{key}, \
                  value: {}, type: <class '{}'>, valid types: <class 'str'>",
-                shape::str(&value),
+                python_str(&value),
                 shape::type_name(&value)
             )));
         };
@@ -431,7 +431,7 @@ fn sse_customer_key(
     key_md5: Option<&str>,
 ) -> Result<(Option<String>, Option<String>), Error> {
     let key_md5 = key_md5.map(str::to_owned);
-    let Some(key) = params::load_key(option, key)? else {
+    let Some(key) = param::load_key(option, key)? else {
         return Ok((None, key_md5));
     };
     Ok(match key_md5 {

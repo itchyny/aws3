@@ -178,6 +178,65 @@ pub fn is_space(c: char) -> bool {
     c.is_whitespace() || ('\x1c'..='\x1f').contains(&c)
 }
 
+/// Returns the value like `str` of Python, which is the same as `repr`
+/// except for the strings.
+pub fn python_str(value: &Value) -> String {
+    match value {
+        Value::Str(string) => string.clone(),
+        value => python_repr(value),
+    }
+}
+
+/// Returns the value like `repr` of Python.
+pub fn python_repr(value: &Value) -> String {
+    match value {
+        Value::Str(string) => repr_string(string, ""),
+        Value::Bytes(bytes) => repr_string(&String::from_utf8_lossy(bytes), "b"),
+        Value::Int(digits) => digits.clone(),
+        Value::Float(value) => python_float(*value),
+        Value::Bool(true) => "True".to_owned(),
+        Value::Bool(false) => "False".to_owned(),
+        Value::Null => "None".to_owned(),
+        Value::List(values) => {
+            let values: Vec<_> = values.iter().map(python_repr).collect();
+            format!("[{}]", values.join(", "))
+        }
+        Value::Map(pairs) => {
+            let pairs: Vec<_> = pairs
+                .iter()
+                .map(|(key, value)| format!("{}: {}", repr_string(key, ""), python_repr(value)))
+                .collect();
+            format!("{{{}}}", pairs.join(", "))
+        }
+    }
+}
+
+/// Quotes the string like `repr` of Python, which prefers single quotes.
+fn repr_string(string: &str, prefix: &str) -> String {
+    let quote = if string.contains('\'') && !string.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
+    let mut buf = format!("{prefix}{quote}");
+    for c in string.chars() {
+        match c {
+            '\\' => buf.push_str("\\\\"),
+            '\n' => buf.push_str("\\n"),
+            '\r' => buf.push_str("\\r"),
+            '\t' => buf.push_str("\\t"),
+            c if c == quote => {
+                buf.push('\\');
+                buf.push(c);
+            }
+            c if c.is_control() => buf.push_str(&format!("\\x{:02x}", c as u32)),
+            c => buf.push(c),
+        }
+    }
+    buf.push(quote);
+    buf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

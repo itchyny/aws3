@@ -93,7 +93,7 @@ impl fmt::Display for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transfer::decode_json;
+    use crate::json::decode as decode_json;
 
     fn search(expression: &str, data: &str) -> Result<String, String> {
         let data = decode_json(data).unwrap();

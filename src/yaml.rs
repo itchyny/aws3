@@ -431,7 +431,7 @@ fn is_implicit_non_string(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transfer::decode_json;
+    use crate::json::decode as decode_json;
 
     fn yaml(json: &str) -> String {
         dump(&decode_json(json).unwrap())

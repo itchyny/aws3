@@ -2,9 +2,8 @@
 //! CLI, which writes the scalars separated by tabs, where the nested values
 //! are written on the following lines with the upper-cased keys.
 
-use super::shape;
 use crate::error::Error;
-use crate::value::Value;
+use crate::value::{Value, python_str};
 
 /// Formats the value, which fails on the lists of the maps and the other
 /// values.
@@ -24,7 +23,7 @@ fn format_value(
         Value::Map(pairs) => format_map(pairs, buf, identifier, keys)?,
         Value::List(values) => format_list(values, buf, identifier)?,
         value => {
-            buf.push_str(&shape::str(value));
+            buf.push_str(&python_str(value));
             buf.push('\n');
         }
     }
@@ -61,12 +60,12 @@ fn format_scalars(values: &[&Value], buf: &mut String, identifier: Option<&str>)
                 buf.push_str(&format!(
                     "{}\t{}\n",
                     identifier.to_uppercase(),
-                    shape::str(value)
+                    python_str(value)
                 ));
             }
         }
         None => {
-            let values: Vec<_> = values.iter().map(|value| shape::str(value)).collect();
+            let values: Vec<_> = values.iter().map(|value| python_str(value)).collect();
             buf.push_str(&values.join("\t"));
             buf.push('\n');
         }
@@ -89,7 +88,7 @@ fn format_map(
                 .into_iter()
                 .partition(|(_, value)| !is_container(value));
             (
-                scalars.iter().map(|(_, value)| shape::str(value)).collect(),
+                scalars.iter().map(|(_, value)| python_str(value)).collect(),
                 nested
                     .iter()
                     .map(|(key, value)| (key.as_str(), value))
@@ -102,7 +101,7 @@ fn format_map(
                     pairs
                         .iter()
                         .find(|(k, _)| k == key)
-                        .map_or_else(String::new, |(_, value)| shape::str(value))
+                        .map_or_else(String::new, |(_, value)| python_str(value))
                 })
                 .collect(),
             sorted
@@ -153,7 +152,7 @@ fn is_container(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transfer::decode_json;
+    use crate::json::decode as decode_json;
 
     fn text(json: &str) -> String {
         format(&decode_json(json).unwrap()).unwrap_or_else(|err| err.to_string())

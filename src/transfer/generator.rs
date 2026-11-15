@@ -12,9 +12,8 @@ use aws_sdk_s3::types::{ChecksumMode, EncodingType, RequestPayer};
 use tokio::sync::mpsc::Sender;
 
 use super::params::{SseCustomerKey, set_sse_c};
-use super::paths::split_bucket_key;
 use crate::error::{Error, has_status_code};
-use crate::path::{url_decode, validate_bucket_name};
+use crate::path::{split_bucket_key, url_decode, validate_bucket_name};
 use crate::redirect::Redirector;
 
 /// A file or an object listed by the generator.

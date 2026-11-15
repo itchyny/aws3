@@ -188,7 +188,7 @@ fn resign(url: &str, expires_in: i64, access_key: &str, secret: &str) -> Option<
 }
 
 /// Encodes the bytes in lowercase hexadecimal digits.
-pub fn hex(bytes: &[u8]) -> String {
+fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

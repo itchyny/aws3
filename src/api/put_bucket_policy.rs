@@ -6,9 +6,9 @@ use super::required_checksum_algorithm;
 use super::shape;
 use crate::cli::PutBucketPolicyArgs;
 use crate::error::Error;
+use crate::param::load_string;
 use crate::redirect::Redirector;
-use crate::transfer::params::load_string;
-use crate::value::Value;
+use crate::value::{Value, python_str};
 
 pub async fn run(client: &Client, args: &PutBucketPolicyArgs) -> Result<Value, Error> {
     let policy = match load_string("--policy", &args.policy)? {
@@ -17,7 +17,7 @@ pub async fn run(client: &Client, args: &PutBucketPolicyArgs) -> Result<Value, E
             return Err(Error::param_validation(format!(
                 "Parameter validation failed:\nInvalid type for parameter Policy, value: {}, \
                  type: <class '{}'>, valid types: <class 'str'>",
-                shape::str(&value),
+                python_str(&value),
                 shape::type_name(&value)
             )));
         }

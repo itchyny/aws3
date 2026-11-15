@@ -14,8 +14,8 @@ use super::output::Response;
 use super::{parse_int, parse_metadata, parse_timestamp};
 use crate::cli::CopyObjectArgs;
 use crate::error::Error;
+use crate::path::url_encode;
 use crate::redirect::Redirector;
-use crate::transfer::url_encode;
 use crate::value::Value;
 
 static VERSION_ID_SUFFIX: LazyLock<Regex> =

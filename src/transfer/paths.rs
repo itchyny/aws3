@@ -69,11 +69,6 @@ fn relpath(path: &str, start: &str) -> String {
     }
 }
 
-/// Splits `bucket/key` into the bucket and the key.
-pub fn split_bucket_key(path: &str) -> (&str, &str) {
-    crate::path::split_bucket_key(path)
-}
-
 /// The source or destination of a transfer, formatted like `FileFormat` of
 /// the AWS CLI. Local paths are absolute, and S3 paths are `bucket/key`.
 /// A directory path ends with the separator.

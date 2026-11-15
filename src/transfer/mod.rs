@@ -5,13 +5,13 @@ mod bandwidth;
 mod checksum;
 mod copy;
 mod download;
+mod filter;
 mod generator;
-mod json;
-pub mod params;
+mod mime;
+mod params;
 mod paths;
 mod printer;
 mod samepath;
-mod shorthand;
 mod sync;
 mod upload;
 
@@ -31,16 +31,13 @@ use crate::cli::{
 use crate::client;
 use crate::config::S3Config;
 use crate::error::Error;
-use crate::filter::Filters;
-use crate::path::{is_s3express_bucket, validate_bucket_name};
+use crate::path::{is_s3express_bucket, split_bucket_key, validate_bucket_name};
 use crate::redirect::Redirector;
-pub use copy::url_encode;
+use filter::Filters;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
-pub use json::decode as decode_json;
 use params::{RequestParams, Unpacked};
-use paths::{Endpoint, relative_path, split_bucket_key};
+use paths::{Endpoint, relative_path};
 use printer::{PrintMode, Printer, TransferId};
-pub use upload::merge_content_encodings;
 
 /// The maximum size of an object of S3.
 const MAX_UPLOAD_SIZE: u64 = 5 * 1024 * 1024 * 1024 * 1024;

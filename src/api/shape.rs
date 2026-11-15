@@ -4,8 +4,8 @@
 use std::num::{IntErrorKind, ParseIntError};
 
 use crate::error::Error;
-use crate::transfer::params;
-use crate::value::{Value, python_float};
+use crate::param;
+use crate::value::{Value, python_str};
 
 /// The shape of a member, a subset of the types of the models of botocore.
 #[derive(Debug)]
@@ -38,7 +38,7 @@ pub fn parse_structure(
     value: &str,
     structure: &'static Structure,
 ) -> Result<Value, Error> {
-    let (pairs, shorthand) = params::parse_map_argument(option, value)?;
+    let (pairs, shorthand) = param::parse_map_argument(option, value)?;
     let shape = Shape::Structure(structure);
     let mut value = Value::Map(pairs);
     if shorthand {
@@ -117,7 +117,7 @@ fn validate(value: &Value, shape: &Shape, name: &str, errors: &mut Vec<String>) 
     let mut invalid_type = |valid_types: &str| {
         errors.push(format!(
             "Invalid type for parameter {name}, value: {}, type: <class '{}'>, valid types: {valid_types}",
-            str(value),
+            python_str(value),
             type_name(value)
         ));
     };
@@ -135,7 +135,7 @@ fn validate(value: &Value, shape: &Shape, name: &str, errors: &mut Vec<String>) 
         (Shape::Boolean, _) => invalid_type("<class 'bool'>"),
         (Shape::Long, _) => invalid_type("<class 'int'>"),
         (Shape::Timestamp, Value::Int(_) | Value::Float(_)) => {}
-        (Shape::Timestamp, Value::Str(string)) if params::parse_timestamp(string).is_ok() => {}
+        (Shape::Timestamp, Value::Str(string)) if param::parse_timestamp(string).is_ok() => {}
         (Shape::Timestamp, _) => invalid_type("<class 'datetime.datetime'>, timestamp-string"),
         (Shape::List(member), Value::List(values)) => {
             for (i, value) in values.iter().enumerate() {
@@ -186,65 +186,6 @@ pub fn type_name(value: &Value) -> &'static str {
         Value::List(_) => "list",
         Value::Map(_) => "dict",
     }
-}
-
-/// Returns the value like `str` of Python, which is the same as `repr`
-/// except for the strings.
-pub fn str(value: &Value) -> String {
-    match value {
-        Value::Str(string) => string.clone(),
-        value => repr(value),
-    }
-}
-
-/// Returns the value like `repr` of Python.
-pub fn repr(value: &Value) -> String {
-    match value {
-        Value::Str(string) => repr_string(string, ""),
-        Value::Bytes(bytes) => repr_string(&String::from_utf8_lossy(bytes), "b"),
-        Value::Int(digits) => digits.clone(),
-        Value::Float(value) => python_float(*value),
-        Value::Bool(true) => "True".to_owned(),
-        Value::Bool(false) => "False".to_owned(),
-        Value::Null => "None".to_owned(),
-        Value::List(values) => {
-            let values: Vec<_> = values.iter().map(repr).collect();
-            format!("[{}]", values.join(", "))
-        }
-        Value::Map(pairs) => {
-            let pairs: Vec<_> = pairs
-                .iter()
-                .map(|(key, value)| format!("{}: {}", repr_string(key, ""), repr(value)))
-                .collect();
-            format!("{{{}}}", pairs.join(", "))
-        }
-    }
-}
-
-/// Quotes the string like `repr` of Python, which prefers single quotes.
-fn repr_string(string: &str, prefix: &str) -> String {
-    let quote = if string.contains('\'') && !string.contains('"') {
-        '"'
-    } else {
-        '\''
-    };
-    let mut buf = format!("{prefix}{quote}");
-    for c in string.chars() {
-        match c {
-            '\\' => buf.push_str("\\\\"),
-            '\n' => buf.push_str("\\n"),
-            '\r' => buf.push_str("\\r"),
-            '\t' => buf.push_str("\\t"),
-            c if c == quote => {
-                buf.push('\\');
-                buf.push(c);
-            }
-            c if c.is_control() => buf.push_str(&format!("\\x{:02x}", c as u32)),
-            c => buf.push(c),
-        }
-    }
-    buf.push(quote);
-    buf
 }
 
 #[cfg(test)]
