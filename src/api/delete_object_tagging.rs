@@ -2,7 +2,7 @@
 
 use aws_sdk_s3::Client;
 
-use super::output::Response;
+use super::response::Response;
 use crate::cli::DeleteObjectTaggingArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

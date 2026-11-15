@@ -3,9 +3,9 @@
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::RequestPayer;
 
-use super::output::Response;
+use super::args::required_checksum_algorithm;
 use super::put_bucket_tagging::{TAGGING, tagging};
-use super::required_checksum_algorithm;
+use super::response::Response;
 use super::shape::parse_structure;
 use crate::cli::PutObjectTaggingArgs;
 use crate::error::Error;

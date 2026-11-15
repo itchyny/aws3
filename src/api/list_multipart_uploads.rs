@@ -4,10 +4,10 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::list_multipart_uploads::ListMultipartUploadsOutput;
 use aws_sdk_s3::types::{EncodingType, MultipartUpload, RequestPayer};
 
+use super::args::parse_int;
 use super::list_objects_v2::{common_prefixes, owner_value};
-use super::output::Response;
 use super::paginate::{Page, Paginator, Token};
-use super::{Responses, parse_int};
+use super::response::{Response, Responses};
 use crate::cli::{GlobalArgs, ListMultipartUploadsArgs};
 use crate::error::Error;
 use crate::redirect::Redirector;

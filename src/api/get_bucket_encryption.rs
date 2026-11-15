@@ -3,7 +3,7 @@
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::ServerSideEncryptionRule;
 
-use super::output::Response;
+use super::response::Response;
 use crate::cli::BucketArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

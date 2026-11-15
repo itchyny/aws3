@@ -9,9 +9,8 @@ use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::ChecksumMode;
 use tokio::io::AsyncWriteExt;
 
-use super::ResponseHeaders;
 use super::head_object::{ObjectRequest, set_object_request};
-use super::output::Response;
+use super::response::{Response, ResponseHeaders};
 use crate::cli::GetObjectArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

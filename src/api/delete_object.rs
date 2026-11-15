@@ -3,8 +3,8 @@
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::RequestPayer;
 
-use super::output::Response;
-use super::parse_timestamp;
+use super::args::parse_timestamp;
+use super::response::Response;
 use crate::cli::DeleteObjectArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

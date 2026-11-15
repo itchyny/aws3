@@ -5,8 +5,9 @@ use aws_sdk_s3::types::{
     AccessControlPolicy, BucketCannedAcl, Grant, Grantee, Owner, Permission, Type,
 };
 
+use super::args::required_checksum_algorithm;
+use super::members;
 use super::shape::{Shape, Structure, parse_structure};
-use super::{members, required_checksum_algorithm};
 use crate::cli::PutBucketAclArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

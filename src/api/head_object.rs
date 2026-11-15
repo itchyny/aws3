@@ -5,8 +5,8 @@ use aws_sdk_s3::operation::head_object::HeadObjectOutput;
 use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::ChecksumMode;
 
-use super::output::Response;
-use super::{ResponseHeaders, parse_int, parse_timestamp, sse_customer_key};
+use super::args::{parse_int, parse_timestamp, sse_customer_key};
+use super::response::{Response, ResponseHeaders};
 use crate::cli::ObjectArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

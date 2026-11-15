@@ -2,7 +2,7 @@
 
 use aws_sdk_s3::Client;
 
-use super::required_checksum_algorithm;
+use super::args::required_checksum_algorithm;
 use super::shape;
 use crate::cli::PutBucketPolicyArgs;
 use crate::error::Error;

@@ -6,8 +6,9 @@ use aws_sdk_s3::types::{
     ServerSideEncryptionConfiguration, ServerSideEncryptionRule,
 };
 
+use super::args::required_checksum_algorithm;
+use super::members;
 use super::shape::{Shape, Structure, parse_structure};
-use super::{members, required_checksum_algorithm};
 use crate::cli::PutBucketEncryptionArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

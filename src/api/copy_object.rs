@@ -10,8 +10,8 @@ use aws_sdk_s3::types::{
 };
 use regex_lite::Regex;
 
-use super::output::Response;
-use super::{parse_int, parse_metadata, parse_timestamp};
+use super::args::{parse_int, parse_metadata, parse_timestamp};
+use super::response::Response;
 use crate::cli::CopyObjectArgs;
 use crate::error::Error;
 use crate::path::url_encode;
@@ -41,16 +41,17 @@ pub async fn run(client: &Client, args: &CopyObjectArgs) -> Result<Value, Error>
         parse_int(args.object_lock_event_hold_duration_days.as_deref())?;
     let object_lock_event_hold_duration_years =
         parse_int(args.object_lock_event_hold_duration_years.as_deref())?;
-    let (sse_customer_key, sse_customer_key_md5) = super::sse_customer_key(
+    let (sse_customer_key, sse_customer_key_md5) = super::args::sse_customer_key(
         "--sse-customer-key",
         args.sse_customer_key.as_deref(),
         args.sse_customer_key_md5.as_deref(),
     )?;
-    let (copy_source_sse_customer_key, copy_source_sse_customer_key_md5) = super::sse_customer_key(
-        "--copy-source-sse-customer-key",
-        args.copy_source_sse_customer_key.as_deref(),
-        args.copy_source_sse_customer_key_md5.as_deref(),
-    )?;
+    let (copy_source_sse_customer_key, copy_source_sse_customer_key_md5) =
+        super::args::sse_customer_key(
+            "--copy-source-sse-customer-key",
+            args.copy_source_sse_customer_key.as_deref(),
+            args.copy_source_sse_customer_key_md5.as_deref(),
+        )?;
     let output = Redirector::default()
         .send(client, &args.bucket, "CopyObject", |client| {
             client

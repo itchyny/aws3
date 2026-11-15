@@ -7,7 +7,7 @@ use aws_sdk_s3::types::{
 };
 
 use super::members;
-use super::output::Response;
+use super::response::Response;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::CreateBucketArgs;
 use crate::error::Error;

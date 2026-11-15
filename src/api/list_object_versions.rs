@@ -6,12 +6,12 @@ use aws_sdk_s3::types::{
     DeleteMarkerEntry, EncodingType, ObjectVersion, OptionalObjectAttributes, RequestPayer,
 };
 
+use super::args::parse_int;
 use super::list_objects_v2::{
     checksum_algorithms, common_prefixes, decoded, owner_value, restore_status_value,
 };
-use super::output::Response;
 use super::paginate::{Page, Paginator, Token};
-use super::{Responses, parse_int};
+use super::response::{Response, Responses};
 use crate::cli::{GlobalArgs, ListObjectVersionsArgs};
 use crate::error::Error;
 use crate::redirect::Redirector;

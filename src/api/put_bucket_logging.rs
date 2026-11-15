@@ -6,9 +6,10 @@ use aws_sdk_s3::types::{
     PartitionedPrefix, SimplePrefix, TargetGrant, TargetObjectKeyFormat,
 };
 
+use super::args::required_checksum_algorithm;
+use super::members;
 use super::put_bucket_acl::{GRANTEE, grantee};
 use super::shape::{Shape, Structure, parse_structure};
-use super::{members, required_checksum_algorithm};
 use crate::cli::PutBucketLoggingArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

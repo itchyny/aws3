@@ -4,7 +4,7 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::types::RequestPayer;
 
 use super::get_bucket_tagging::tag_set;
-use super::output::Response;
+use super::response::Response;
 use crate::cli::GetObjectTaggingArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

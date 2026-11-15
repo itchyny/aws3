@@ -14,8 +14,8 @@ use aws_smithy_checksums::ChecksumAlgorithm as Checksums;
 use aws_smithy_types::base64;
 use aws_smithy_types::body::SdkBody;
 
-use super::output::Response;
-use super::{parse_int, parse_metadata, parse_timestamp, sse_customer_key};
+use super::args::{parse_int, parse_metadata, parse_timestamp, sse_customer_key};
+use super::response::Response;
 use crate::cli::PutObjectArgs;
 use crate::client::Config;
 use crate::client::merge_content_encodings;

@@ -3,8 +3,9 @@
 use aws_sdk_s3::Client;
 use aws_sdk_s3::types::{Tag, Tagging};
 
+use super::args::required_checksum_algorithm;
+use super::members;
 use super::shape::{Shape, Structure, parse_structure};
-use super::{members, required_checksum_algorithm};
 use crate::cli::PutBucketTaggingArgs;
 use crate::error::Error;
 use crate::redirect::Redirector;

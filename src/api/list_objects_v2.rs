@@ -7,9 +7,9 @@ use aws_sdk_s3::types::{
     RequestPayer, RestoreStatus,
 };
 
-use super::output::Response;
+use super::args::parse_int;
 use super::paginate::{Page, Paginator};
-use super::{Responses, parse_int};
+use super::response::{Response, Responses};
 use crate::cli::{GlobalArgs, ListObjectsV2Args};
 use crate::error::Error;
 use crate::path::url_decode;
