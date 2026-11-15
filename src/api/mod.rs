@@ -54,7 +54,6 @@ mod put_public_access_block;
 mod response;
 mod restore_object;
 pub mod shape;
-mod text;
 
 use std::io::{self, IsTerminal};
 use std::process::ExitCode;

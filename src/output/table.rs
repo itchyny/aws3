@@ -2,7 +2,7 @@
 //! render the sections of the titles, the column headers and the rows, where
 //! the nested sections are indented.
 
-use crate::east_asian_width::WIDE_RANGES;
+use super::east_asian_width::WIDE_RANGES;
 use crate::value::{Value, python_str};
 
 /// Builds the table of the value, whose title is the name of the operation,

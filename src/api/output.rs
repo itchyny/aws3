@@ -7,13 +7,11 @@ use clap::ValueEnum;
 
 use super::jmespath::Expression;
 use super::response::Responses;
-use super::text;
 use crate::cli::{ApiOperation, GlobalArgs};
 use crate::config::ProfileConfig;
 use crate::error::Error;
-use crate::table;
+use crate::output::{table, text, yaml};
 use crate::value::Value;
-use crate::yaml;
 
 /// The formats of the outputs of `--output`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,19 +4,17 @@ mod client;
 mod cmd;
 mod config;
 mod debug;
-mod east_asian_width;
 mod error;
 mod insecure;
 mod json;
+mod output;
 mod param;
 mod path;
 mod redirect;
 mod shorthand;
-mod table;
 mod tls;
 mod transfer;
 mod value;
-mod yaml;
 
 use std::process::ExitCode;
 
