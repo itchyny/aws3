@@ -361,14 +361,12 @@ fn yaml(response: &Value) -> String {
     }
 }
 
-/// Parses the integer argument, failing with the same message as `int` of
-/// Python.
+/// Parses the integer argument.
 fn parse_int(value: Option<&str>) -> Result<Option<i32>, Error> {
     value
         .map(|value| {
-            i32::try_from(shape::python_int(value)?).map_err(|_| {
-                Error::new(format!("invalid literal for int() with base 10: '{value}'"))
-            })
+            i32::try_from(shape::python_int(value)?)
+                .map_err(|_| Error::new(format!("Integer value out of range: {}", value.trim())))
         })
         .transpose()
 }

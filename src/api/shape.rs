@@ -1,6 +1,8 @@
 //! The shapes of the structured arguments, which are converted from the
 //! shorthand syntax and validated in the same way as the AWS CLI and botocore.
 
+use std::num::{IntErrorKind, ParseIntError};
+
 use crate::error::Error;
 use crate::transfer::params;
 use crate::value::{Value, python_float};
@@ -95,13 +97,17 @@ fn convert(value: &mut Value, shape: &Shape) -> Result<(), Error> {
     Ok(())
 }
 
-/// Parses the integer like `int` of Python, failing with the same message.
+/// Parses the integer, which allows the surrounding whitespaces like `int` of
+/// Python.
 pub fn python_int(value: &str) -> Result<i64, Error> {
-    value.trim().parse().map_err(|_| {
-        Error::new(format!(
-            "invalid literal for int() with base 10: {}",
-            repr(&Value::Str(value.to_owned()))
-        ))
+    let value = value.trim();
+    value.parse().map_err(|err: ParseIntError| {
+        Error::new(match err.kind() {
+            IntErrorKind::PosOverflow | IntErrorKind::NegOverflow => {
+                format!("Integer value out of range: {value}")
+            }
+            _ => format!("Invalid integer value: {value}"),
+        })
     })
 }
 
@@ -280,7 +286,11 @@ mod tests {
         );
         assert_eq!(
             parse("Objects=[{Key=a,Size=x}]"),
-            Err("invalid literal for int() with base 10: 'x'".to_owned())
+            Err("Invalid integer value: x".to_owned())
+        );
+        assert_eq!(
+            parse("Objects=[{Key=a,Size=99999999999999999999}]"),
+            Err("Integer value out of range: 99999999999999999999".to_owned())
         );
         assert_eq!(
             parse("Objects=a,Quiet=x"),

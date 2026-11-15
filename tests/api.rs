@@ -164,9 +164,22 @@ fn head_object_errors() {
         "x",
     ]);
     assert_eq!(result.code, 255);
+    assert_eq!(result.stderr, "\naws3: [ERROR]: Invalid integer value: x\n");
+
+    let result = env.run(&[
+        "api",
+        "head-object",
+        "--bucket",
+        "bucket",
+        "--key",
+        "a.txt",
+        "--part-number",
+        "4294967296",
+    ]);
+    assert_eq!(result.code, 255);
     assert_eq!(
         result.stderr,
-        "\naws3: [ERROR]: invalid literal for int() with base 10: 'x'\n"
+        "\naws3: [ERROR]: Integer value out of range: 4294967296\n"
     );
 }
 
@@ -299,7 +312,7 @@ fn delete_objects_errors() {
         (
             "Objects=[{Key=a,Size=x}]",
             255,
-            "\naws3: [ERROR]: invalid literal for int() with base 10: 'x'\n",
+            "\naws3: [ERROR]: Invalid integer value: x\n",
         ),
         (
             "Objects=[{Key=a}",
@@ -458,7 +471,7 @@ fn put_object_errors() {
                 "x",
             ],
             255,
-            "invalid literal for int() with base 10: 'x'",
+            "Invalid integer value: x",
         ),
     ] {
         let mut command = vec!["api", "put-object", "--bucket", "bucket", "--key", "k"];
@@ -1384,7 +1397,7 @@ fn put_bucket_lifecycle_configuration() {
         (
             "Rules=[{Status=Enabled,Expiration={Days=x}}]",
             255,
-            "invalid literal for int() with base 10: 'x'",
+            "Invalid integer value: x",
         ),
     ] {
         let result = env.run(&[

@@ -217,7 +217,6 @@ impl S3Config {
             get(name)
                 .map(|value| {
                     python_int(value)
-                        .ok()
                         .filter(|&value| value > 0)
                         .map(|value| value as u64)
                         .ok_or_else(|| positive_error(name, value))
@@ -323,7 +322,7 @@ fn parse_rate(value: &str) -> Result<i64, String> {
     // `1024B/s`, or without `/s` otherwise, e.g. `10MB` of `10MB/s`.
     let rate_to_int = |value: &str| {
         let size = &value[..value.len() - 3];
-        if python_int(size).is_ok() {
+        if python_int(size).is_some() {
             human_readable_to_int(size)
         } else {
             human_readable_to_int(&value[..value.len() - 2])
@@ -333,7 +332,7 @@ fn parse_rate(value: &str) -> Result<i64, String> {
         rate_to_int(value)
     } else if value.ends_with("b/s") {
         rate_to_int(value).map(|bits| bits / 8)
-    } else if let Ok(rate) = python_int(value) {
+    } else if let Some(rate) = python_int(value) {
         Ok(rate)
     } else {
         Err(format!(
@@ -369,21 +368,14 @@ fn human_readable_to_int(value: &str) -> Result<i64, String> {
         Some((_, multiplier)) if value.chars().count() >= 2 => {
             python_int(&value[..start]).map(|number| number.saturating_mul(*multiplier))
         }
-        _ => python_int(&value).map_err(|_| format!("Invalid size value: {value}")),
+        _ => python_int(&value),
     }
+    .ok_or_else(|| format!("Invalid size value: {value}"))
 }
 
 /// Parses the integer in the same way as `int` of Python, which allows the
 /// surrounding whitespaces, the sign and the underscores between the digits.
-fn python_int(value: &str) -> Result<i64, String> {
-    let error = || {
-        let quote = if value.contains('\'') && !value.contains('"') {
-            '"'
-        } else {
-            '\''
-        };
-        format!("invalid literal for int() with base 10: {quote}{value}{quote}")
-    };
+fn python_int(value: &str) -> Option<i64> {
     let trimmed = value.trim();
     let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
     if digits.is_empty()
@@ -394,9 +386,9 @@ fn python_int(value: &str) -> Result<i64, String> {
             .bytes()
             .all(|byte| byte.is_ascii_digit() || byte == b'_')
     {
-        return Err(error());
+        return None;
     }
-    trimmed.replace('_', "").parse().map_err(|_| error())
+    trimmed.replace('_', "").parse().ok()
 }
 
 #[cfg(test)]
@@ -466,7 +458,7 @@ ca_bundle = /etc/other.pem
         );
         assert_eq!(
             human_readable_to_int("1.5MB"),
-            Err("invalid literal for int() with base 10: '1.5'".to_owned())
+            Err("Invalid size value: 1.5mb".to_owned())
         );
         assert_eq!(
             human_readable_to_int("5b"),
@@ -474,7 +466,11 @@ ca_bundle = /etc/other.pem
         );
         assert_eq!(
             human_readable_to_int("kb"),
-            Err("invalid literal for int() with base 10: ''".to_owned())
+            Err("Invalid size value: kb".to_owned())
+        );
+        assert_eq!(
+            human_readable_to_int("99999999999999999999kb"),
+            Err("Invalid size value: 99999999999999999999kb".to_owned())
         );
     }
 
