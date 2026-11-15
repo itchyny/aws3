@@ -9,7 +9,7 @@ use super::shape;
 use crate::cli::PaginationArgs;
 use crate::error::Error;
 use crate::transfer::decode_json;
-use crate::value::{Value, insert};
+use crate::value::{Value, ascii_json_string, insert};
 
 /// The values of the input tokens of a request, in the order of the tokens,
 /// where `None` is the token not to send.
@@ -198,10 +198,10 @@ impl Paginator {
             .map(|(name, token)| {
                 format!(
                     "{}: {}",
-                    python_json_string(name),
+                    ascii_json_string(name),
                     token
                         .as_deref()
-                        .map_or("null".to_owned(), python_json_string)
+                        .map_or("null".to_owned(), ascii_json_string)
                 )
             })
             .collect();
@@ -364,32 +364,6 @@ fn decode_token(value: &str) -> Option<Value> {
     decode_json(std::str::from_utf8(&bytes).ok()?).ok()
 }
 
-/// Quotes the string in JSON like `json.dumps` of Python, which escapes the
-/// non-ASCII characters.
-fn python_json_string(value: &str) -> String {
-    let mut buf = String::from('"');
-    for c in value.chars() {
-        match c {
-            '"' => buf.push_str("\\\""),
-            '\\' => buf.push_str("\\\\"),
-            '\n' => buf.push_str("\\n"),
-            '\r' => buf.push_str("\\r"),
-            '\t' => buf.push_str("\\t"),
-            '\u{8}' => buf.push_str("\\b"),
-            '\u{c}' => buf.push_str("\\f"),
-            c if c.is_ascii() && !c.is_ascii_control() || c == '\u{7f}' => buf.push(c),
-            c => {
-                let mut units = [0; 2];
-                for unit in c.encode_utf16(&mut units) {
-                    buf.push_str(&format!("\\u{unit:04x}"));
-                }
-            }
-        }
-    }
-    buf.push('"');
-    buf
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,14 +424,6 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "Bad starting token: WzFd"
-        );
-    }
-
-    #[test]
-    fn python_json_string() {
-        assert_eq!(
-            super::python_json_string("a\"\\\n\u{1}\u{7f}é😀"),
-            "\"a\\\"\\\\\\n\\u0001\u{7f}\\u00e9\\ud83d\\ude00\""
         );
     }
 }

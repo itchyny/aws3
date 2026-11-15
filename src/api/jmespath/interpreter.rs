@@ -7,7 +7,7 @@ use std::cmp::Ordering;
 
 use super::parser::{Comparator, Node};
 use super::{Error, text};
-use crate::value::{Value, insert, python_float};
+use crate::value::{Value, ascii_json_string, insert, python_float};
 
 pub fn search(node: &Node, value: &Value) -> Result<Value, Error> {
     Ok(match node {
@@ -612,7 +612,7 @@ fn call_function(name: &str, args: Vec<Arg<'_>>) -> Result<Value, Error> {
         },
         "to_string" => match next() {
             Value::Str(value) => Value::Str(value),
-            value => Value::Str(python_json(&value)),
+            value => Value::Str(ascii_json(&value)),
         },
         "type" => Value::Str(type_of(&next()).to_owned()),
         _ => Value::Null,
@@ -661,36 +661,14 @@ fn to_number(value: &str) -> Value {
     }
 }
 
-/// Returns the value in JSON like `json.dumps` of Python with the compact
-/// separators, which escapes the non-ASCII characters.
-fn python_json(value: &Value) -> String {
+/// Returns the value in JSON with the compact separators, which escapes the
+/// non-ASCII characters and formats the floats like Python.
+fn ascii_json(value: &Value) -> String {
     match value {
-        Value::Str(value) => {
-            let mut buf = String::from('"');
-            for c in value.chars() {
-                match c {
-                    '"' => buf.push_str("\\\""),
-                    '\\' => buf.push_str("\\\\"),
-                    '\n' => buf.push_str("\\n"),
-                    '\r' => buf.push_str("\\r"),
-                    '\t' => buf.push_str("\\t"),
-                    '\u{8}' => buf.push_str("\\b"),
-                    '\u{c}' => buf.push_str("\\f"),
-                    c if (' '..='\u{7f}').contains(&c) => buf.push(c),
-                    c => {
-                        let mut units = [0; 2];
-                        for unit in c.encode_utf16(&mut units) {
-                            buf.push_str(&format!("\\u{unit:04x}"));
-                        }
-                    }
-                }
-            }
-            buf.push('"');
-            buf
-        }
+        Value::Str(value) => ascii_json_string(value),
         Value::Float(value) if value.is_finite() => python_float(*value),
         Value::List(values) => {
-            let values: Vec<_> = values.iter().map(python_json).collect();
+            let values: Vec<_> = values.iter().map(ascii_json).collect();
             format!("[{}]", values.join(","))
         }
         Value::Map(pairs) => {
@@ -699,8 +677,8 @@ fn python_json(value: &Value) -> String {
                 .map(|(key, value)| {
                     format!(
                         "{}:{}",
-                        python_json(&Value::Str(key.clone())),
-                        python_json(value)
+                        ascii_json(&Value::Str(key.clone())),
+                        ascii_json(value)
                     )
                 })
                 .collect();

@@ -118,6 +118,31 @@ impl Value {
     }
 }
 
+/// Quotes the string in JSON, which escapes the non-ASCII characters.
+pub fn ascii_json_string(value: &str) -> String {
+    let mut buf = String::from('"');
+    for c in value.chars() {
+        match c {
+            '"' => buf.push_str("\\\""),
+            '\\' => buf.push_str("\\\\"),
+            '\n' => buf.push_str("\\n"),
+            '\r' => buf.push_str("\\r"),
+            '\t' => buf.push_str("\\t"),
+            '\u{8}' => buf.push_str("\\b"),
+            '\u{c}' => buf.push_str("\\f"),
+            c if c.is_ascii() && !c.is_ascii_control() || c == '\u{7f}' => buf.push(c),
+            c => {
+                let mut units = [0; 2];
+                for unit in c.encode_utf16(&mut units) {
+                    buf.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    buf.push('"');
+    buf
+}
+
 /// Formats the float like `repr` of Python, which uses the exponent for the
 /// large or small numbers.
 pub fn python_float(value: f64) -> String {
@@ -178,6 +203,14 @@ mod tests {
         assert_eq!(
             value.to_json(),
             r#"{"a":["x\"\n","y",1,1.5,1e16,-Infinity,true,null],"b":{}}"#
+        );
+    }
+
+    #[test]
+    fn ascii_json_string() {
+        assert_eq!(
+            super::ascii_json_string("a\"\\\n\u{1}\u{7f}é😀"),
+            "\"a\\\"\\\\\\n\\u0001\u{7f}\\u00e9\\ud83d\\ude00\""
         );
     }
 
