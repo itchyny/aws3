@@ -402,7 +402,7 @@ impl Parser<'_> {
             kind => {
                 let token = self.lookahead_token(0).clone();
                 let message = format!(
-                    "Expecting: ['quoted_identifier', 'unquoted_identifier', 'lbracket', 'lbrace'], got: {}",
+                    "Expecting: quoted_identifier, unquoted_identifier, lbracket or lbrace, got: {}",
                     kind.name()
                 );
                 Err(self.parse_error(&token, message))

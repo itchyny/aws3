@@ -1131,8 +1131,8 @@ fn query() {
     assert_eq!(result.code, 255);
     assert_eq!(
         result.stderr,
-        "\naws3: [ERROR]: In function length(), invalid type for value: 1, expected one of: \
-         ['string', 'array', 'object'], received: \"number\"\n"
+        "\naws3: [ERROR]: In function length(), invalid type for value: 1, expected \
+         string, array or object, received: \"number\"\n"
     );
 }
 

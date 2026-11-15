@@ -1,12 +1,12 @@
 //! The interpreter of JMESPath expressions, ported from `jmespath.visitor`
 //! and `jmespath.functions` of Python, whose values are compared and
-//! formatted in the same way as Python.
+//! formatted in the same way as Python, but the comparisons of the values of
+//! different types result in null like the specification of JMESPath.
 
 use std::cmp::Ordering;
 
-use super::Error;
 use super::parser::{Comparator, Node};
-use crate::api::shape;
+use super::{Error, text};
 use crate::value::{Value, insert, python_float};
 
 pub fn search(node: &Node, value: &Value) -> Result<Value, Error> {
@@ -292,18 +292,11 @@ fn compare(comparator: Comparator, left: &Value, right: &Value) -> Result<Value,
         Comparator::Eq => return Ok(Value::Bool(equals(left, right))),
         Comparator::Ne => return Ok(Value::Bool(!equals(left, right))),
         _ => {
-            let comparable =
-                |value: &Value| matches!(value, Value::Str(_)) || number(value).is_some();
-            if !comparable(left) || !comparable(right) {
+            let comparable = |value: &Value| matches!(type_of(value), "number" | "string");
+            if !comparable(left) || type_of(left) != type_of(right) {
                 return Ok(Value::Null);
             }
-            let operator = match comparator {
-                Comparator::Lt => "<",
-                Comparator::Lte => "<=",
-                Comparator::Gt => ">",
-                _ => ">=",
-            };
-            python_cmp(left, right, operator)?
+            cmp(left, right)
         }
     };
     Ok(Value::Bool(match (comparator, ordering) {
@@ -315,19 +308,24 @@ fn compare(comparator: Comparator, left: &Value, right: &Value) -> Result<Value,
     }))
 }
 
-/// Compares the numbers or the strings like Python, which fails on comparing
-/// a string with a number.
-fn python_cmp(left: &Value, right: &Value, operator: &str) -> Result<Option<Ordering>, Error> {
+/// Compares the numbers or the strings, which returns `None` for the values
+/// of the other types.
+fn cmp(left: &Value, right: &Value) -> Option<Ordering> {
     match (left, right) {
-        (Value::Str(left), Value::Str(right)) => Ok(Some(left.cmp(right))),
-        _ => match (number(left), number(right)) {
-            (Some(left), Some(right)) => Ok(left.partial_cmp(right)),
-            _ => Err(Error::Runtime(format!(
-                "'{operator}' not supported between instances of '{}' and '{}'",
-                shape::type_name(left),
-                shape::type_name(right)
-            ))),
-        },
+        (Value::Str(left), Value::Str(right)) => Some(left.cmp(right)),
+        _ => number(left)?.partial_cmp(number(right)?),
+    }
+}
+
+/// Returns the name of the type of the value in JMESPath.
+fn type_of(value: &Value) -> &'static str {
+    match value {
+        Value::Str(_) => "string",
+        Value::Bool(_) => "boolean",
+        Value::List(_) => "array",
+        Value::Map(_) => "object",
+        Value::Int(_) | Value::Float(_) => "number",
+        Value::Null | Value::Bytes(_) => "null",
     }
 }
 
@@ -337,18 +335,17 @@ enum Arg<'a> {
 }
 
 impl Arg<'_> {
-    /// Returns the name of the type in Python.
     fn type_name(&self) -> &'static str {
         match self {
-            Self::Value(value) => shape::type_name(value),
-            Self::Expref(_) => "_Expression",
+            Self::Value(value) => type_of(value),
+            Self::Expref(_) => "expref",
         }
     }
 
     fn text(&self) -> String {
         match self {
-            Self::Value(value) => shape::str(value),
-            Self::Expref(_) => "<jmespath.visitor._Expression object>".to_owned(),
+            Self::Value(value) => text(value),
+            Self::Expref(_) => "<expref>".to_owned(),
         }
     }
 
@@ -357,35 +354,6 @@ impl Arg<'_> {
             Self::Value(value) => value,
             Self::Expref(_) => Value::Null,
         }
-    }
-}
-
-/// Returns the name of the type in JMESPath of the name of the type in
-/// Python.
-fn jmespath_type(type_name: &str) -> &'static str {
-    match type_name {
-        "bool" => "boolean",
-        "list" => "array",
-        "dict" => "object",
-        "NoneType" => "null",
-        "str" => "string",
-        "float" | "int" => "number",
-        "_Expression" => "expref",
-        _ => "unknown",
-    }
-}
-
-/// Returns the names of the types in Python of the type in JMESPath.
-fn python_types(jmespath_type: &str) -> &'static [&'static str] {
-    match jmespath_type {
-        "boolean" => &["bool"],
-        "array" => &["list", "_Projection"],
-        "object" => &["dict", "OrderedDict"],
-        "null" => &["NoneType"],
-        "string" => &["unicode", "str"],
-        "number" => &["float", "int", "long"],
-        "expref" => &["_Expression"],
-        _ => &[],
     }
 }
 
@@ -414,15 +382,13 @@ fn signature(name: &str) -> Option<(&'static [&'static [&'static str]], bool)> {
 
 fn type_error(function: &str, value: &str, actual: &str, types: &[&str]) -> Error {
     Error::Runtime(format!(
-        "In function {function}(), invalid type for value: {value}, expected one of: {}, \
+        "In function {function}(), invalid type for value: {value}, expected {}, \
          received: \"{actual}\"",
-        python_list(types)
+        match types {
+            [init @ .., last] if !init.is_empty() => format!("{} or {last}", init.join(", ")),
+            _ => types.join(""),
+        }
     ))
-}
-
-fn python_list(values: &[&str]) -> String {
-    let values: Vec<_> = values.iter().map(|value| format!("'{value}'")).collect();
-    format!("[{}]", values.join(", "))
 }
 
 /// Validates the arguments like `_validate_arguments` of Python.
@@ -455,40 +421,37 @@ fn validate(name: &str, args: &[Arg<'_>]) -> Result<(), Error> {
         for t in *types {
             match t.split_once('-') {
                 Some((t, subtype)) => {
-                    allowed.extend(python_types(t));
-                    subtypes.push(python_types(subtype));
+                    allowed.push(t);
+                    subtypes.push(subtype);
                 }
-                None => allowed.extend(python_types(t)),
+                None => allowed.push(t),
             }
         }
         let actual = arg.type_name();
         if !allowed.contains(&actual) {
-            return Err(type_error(name, &arg.text(), jmespath_type(actual), types));
+            return Err(type_error(name, &arg.text(), actual, types));
         }
         let Arg::Value(Value::List(elements)) = arg else {
             continue;
         };
         let allowed = match subtypes.as_slice() {
             [] => continue,
-            [subtypes] => *subtypes,
+            [subtype] => *subtype,
             subtypes => {
                 let Some(first) = elements.first() else {
                     continue;
                 };
-                let first_type = shape::type_name(first);
-                match subtypes
-                    .iter()
-                    .find(|subtypes| subtypes.contains(&first_type))
-                {
-                    Some(subtypes) => *subtypes,
-                    None => return Err(type_error(name, &shape::str(first), first_type, types)),
+                let first_type = type_of(first);
+                if !subtypes.contains(&first_type) {
+                    return Err(type_error(name, &text(first), first_type, types));
                 }
+                first_type
             }
         };
         for element in elements {
-            let actual = shape::type_name(element);
-            if !allowed.contains(&actual) {
-                return Err(type_error(name, &shape::str(element), actual, types));
+            let actual = type_of(element);
+            if actual != allowed {
+                return Err(type_error(name, &text(element), actual, types));
             }
         }
     }
@@ -529,14 +492,12 @@ fn call_function(name: &str, args: Vec<Arg<'_>>) -> Result<Value, Error> {
                 } else {
                     value.floor()
                 };
-                if !rounded.is_finite() {
-                    return Err(Error::Runtime(if rounded.is_nan() {
-                        "cannot convert float NaN to integer".to_owned()
-                    } else {
-                        "cannot convert float infinity to integer".to_owned()
-                    }));
+                // The non-finite numbers are not rounded to the integers.
+                if rounded.is_finite() {
+                    Value::Int(format!("{rounded:.0}"))
+                } else {
+                    Value::Float(rounded)
                 }
-                Value::Int(format!("{rounded:.0}"))
             }
             Some(number) => number.value(),
             None => Value::Null,
@@ -547,12 +508,7 @@ fn call_function(name: &str, args: Vec<Arg<'_>>) -> Result<Value, Error> {
                 (Value::Str(subject), Value::Str(search)) => {
                     Value::Bool(subject.contains(search.as_str()))
                 }
-                (Value::Str(_), search) => {
-                    return Err(Error::Runtime(format!(
-                        "'in <string>' requires string as left operand, not {}",
-                        shape::type_name(search)
-                    )));
-                }
+                (Value::Str(_), _) => Value::Bool(false),
                 (Value::List(values), search) => {
                     Value::Bool(values.iter().any(|value| python_eq(value, search)))
                 }
@@ -569,10 +525,7 @@ fn call_function(name: &str, args: Vec<Arg<'_>>) -> Result<Value, Error> {
         },
         "join" => match next() {
             Value::Str(separator) => {
-                let values: Vec<_> = list(next())
-                    .into_iter()
-                    .map(|value| shape::str(&value))
-                    .collect();
+                let values: Vec<_> = list(next()).into_iter().map(|value| text(&value)).collect();
                 Value::Str(values.join(&separator))
             }
             _ => Value::Null,
@@ -600,13 +553,12 @@ fn call_function(name: &str, args: Vec<Arg<'_>>) -> Result<Value, Error> {
         },
         "max" | "min" => {
             let values = list(next());
-            let operator = if name == "max" { ">" } else { "<" };
             let mut best: Option<Value> = None;
             for value in values {
                 best = Some(match best {
                     None => value,
                     Some(current) => {
-                        let ordering = python_cmp(&value, &current, operator)?;
+                        let ordering = cmp(&value, &current);
                         let better = if name == "max" {
                             ordering == Some(Ordering::Greater)
                         } else {
@@ -645,17 +597,7 @@ fn call_function(name: &str, args: Vec<Arg<'_>>) -> Result<Value, Error> {
         },
         "sort" => {
             let mut values = list(next());
-            let mut error = None;
-            values.sort_by(|left, right| match python_cmp(left, right, "<") {
-                Ok(ordering) => ordering.unwrap_or(Ordering::Equal),
-                Err(err) => {
-                    error.get_or_insert(err);
-                    Ordering::Equal
-                }
-            });
-            if let Some(err) = error {
-                return Err(err);
-            }
+            values.sort_by(|left, right| cmp(left, right).unwrap_or(Ordering::Equal));
             Value::List(values)
         }
         "sum" => sum(&list(next())).value(),
@@ -672,17 +614,7 @@ fn call_function(name: &str, args: Vec<Arg<'_>>) -> Result<Value, Error> {
             Value::Str(value) => Value::Str(value),
             value => Value::Str(python_json(&value)),
         },
-        "type" => Value::Str(
-            match next() {
-                Value::Str(_) => "string",
-                Value::Bool(_) => "boolean",
-                Value::List(_) => "array",
-                Value::Map(_) => "object",
-                Value::Int(_) | Value::Float(_) => "number",
-                _ => "null",
-            }
-            .to_owned(),
-        ),
+        "type" => Value::Str(type_of(&next()).to_owned()),
         _ => Value::Null,
     })
 }
@@ -803,65 +735,49 @@ fn call_expref_function(
     })
 }
 
-/// Returns the key of the expression reference, which must be of the types.
-fn key(function: &str, expref: &Node, value: &Value, types: &[&str]) -> Result<Value, Error> {
-    let key = search(expref, value)?;
-    let actual = jmespath_type(shape::type_name(&key));
-    if !types.contains(&actual) {
-        return Err(type_error(function, &shape::str(&key), actual, types));
-    }
-    Ok(key)
+/// Returns the keys of the expression reference paired with the values,
+/// where the keys must be numbers or strings of the same type.
+fn keys<'a>(
+    function: &str,
+    expref: &Node,
+    values: &'a [Value],
+    types: &[&str],
+) -> Result<Vec<(Value, &'a Value)>, Error> {
+    let mut required = None;
+    values
+        .iter()
+        .map(|value| {
+            let key = search(expref, value)?;
+            let actual = type_of(&key);
+            let required = *required.get_or_insert(actual);
+            if !matches!(required, "number" | "string") {
+                return Err(type_error(function, &text(value), actual, types));
+            } else if actual != required {
+                return Err(type_error(function, &text(&key), actual, &[required]));
+            }
+            Ok((key, value))
+        })
+        .collect()
 }
 
 fn sort_by(expref: &Node, values: &[Value]) -> Result<Value, Error> {
-    let Some(first) = values.first() else {
-        return Ok(Value::List(Vec::new()));
-    };
-    let required = jmespath_type(shape::type_name(&search(expref, first)?));
-    if !matches!(required, "number" | "string") {
-        return Err(type_error(
-            "sort_by",
-            &shape::str(first),
-            required,
-            &["string", "number"],
-        ));
-    }
-    let mut keyed = values
-        .iter()
-        .map(|value| Ok((key("sort_by", expref, value, &[required])?, value.clone())))
-        .collect::<Result<Vec<_>, Error>>()?;
-    keyed.sort_by(|(left, _), (right, _)| {
-        python_cmp(left, right, "<")
-            .ok()
-            .flatten()
-            .unwrap_or(Ordering::Equal)
-    });
+    let mut keyed = keys("sort_by", expref, values, &["string", "number"])?;
+    keyed.sort_by(|(left, _), (right, _)| cmp(left, right).unwrap_or(Ordering::Equal));
     Ok(Value::List(
-        keyed.into_iter().map(|(_, value)| value).collect(),
+        keyed.into_iter().map(|(_, value)| value.clone()).collect(),
     ))
 }
 
 fn min_max_by(name: &str, expref: &Node, values: &[Value]) -> Result<Value, Error> {
-    let operator = if name == "max_by" { ">" } else { "<" };
-    let mut best: Option<(Value, &Value)> = None;
-    for value in values {
-        let key = key(name, expref, value, &["number", "string"])?;
-        best = Some(match best {
-            None => (key, value),
-            Some((best_key, best_value)) => {
-                let ordering = python_cmp(&key, &best_key, operator)?;
-                let better = if name == "max_by" {
-                    ordering == Some(Ordering::Greater)
-                } else {
-                    ordering == Some(Ordering::Less)
-                };
-                if better {
-                    (key, value)
-                } else {
-                    (best_key, best_value)
-                }
-            }
-        });
-    }
+    let keyed = keys(name, expref, values, &["number", "string"])?;
+    let best = keyed.into_iter().reduce(|best, current| {
+        let ordering = cmp(&current.0, &best.0);
+        let better = if name == "max_by" {
+            ordering == Some(Ordering::Greater)
+        } else {
+            ordering == Some(Ordering::Less)
+        };
+        if better { current } else { best }
+    });
     Ok(best.map_or(Value::Null, |(_, value)| value.clone()))
 }
