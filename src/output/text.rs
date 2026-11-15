@@ -2,12 +2,11 @@
 //! CLI, which writes the scalars separated by tabs, where the nested values
 //! are written on the following lines with the upper-cased keys.
 
-use crate::error::Error;
 use crate::value::{Value, python_str};
 
 /// Formats the value, which fails on the lists of the maps and the other
 /// values.
-pub fn format(value: &Value) -> Result<String, Error> {
+pub fn format(value: &Value) -> Result<String, String> {
     let mut buf = String::new();
     format_value(value, &mut buf, None, None)?;
     Ok(buf)
@@ -18,7 +17,7 @@ fn format_value(
     buf: &mut String,
     identifier: Option<&str>,
     keys: Option<&[String]>,
-) -> Result<(), Error> {
+) -> Result<(), String> {
     match value {
         Value::Map(pairs) => format_map(pairs, buf, identifier, keys)?,
         Value::List(values) => format_list(values, buf, identifier)?,
@@ -30,7 +29,7 @@ fn format_value(
     Ok(())
 }
 
-fn format_list(values: &[Value], buf: &mut String, identifier: Option<&str>) -> Result<(), Error> {
+fn format_list(values: &[Value], buf: &mut String, identifier: Option<&str>) -> Result<(), String> {
     if values.iter().any(|value| matches!(value, Value::Map(_))) {
         let keys = scalar_keys(values)?;
         for value in values {
@@ -79,7 +78,7 @@ fn format_map(
     buf: &mut String,
     identifier: Option<&str>,
     keys: Option<&[String]>,
-) -> Result<(), Error> {
+) -> Result<(), String> {
     let mut sorted: Vec<&(String, Value)> = pairs.iter().collect();
     sorted.sort_by(|(left, _), (right, _)| left.cmp(right));
     let (mut scalars, nested): (Vec<String>, Vec<(&str, &Value)>) = match keys {
@@ -126,13 +125,13 @@ fn format_map(
 
 /// Returns the sorted keys of the scalars in the maps, which fails on the
 /// other values.
-fn scalar_keys(values: &[Value]) -> Result<Vec<String>, Error> {
+fn scalar_keys(values: &[Value]) -> Result<Vec<String>, String> {
     let mut keys = Vec::new();
     for value in values {
         let Value::Map(pairs) = value else {
-            return Err(Error::new(
-                "Cannot format a list of objects mixed with other values in text",
-            ));
+            return Err(
+                "Cannot format a list of objects mixed with other values in text".to_owned(),
+            );
         };
         for (key, value) in pairs {
             if !is_container(value) {

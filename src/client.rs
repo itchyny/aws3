@@ -30,7 +30,7 @@ use crate::cli::GlobalArgs;
 use aws_types::service_config::ServiceConfigKey;
 
 use crate::config::{AddressingStyle, ProfileConfig, S3Config};
-use crate::error::Error;
+use crate::error::{ConnectionError, Error, Retries};
 use crate::{insecure, tls};
 
 /// The region the AWS CLI uses for S3 when no region is configured.
@@ -135,14 +135,6 @@ impl Intercept for UnsignedPayload {
     }
 }
 
-/// The retries of a request, which is added to the extensions of the last
-/// response to report the errors like `(reached max retries: 2)`.
-#[derive(Debug, Clone, Copy)]
-pub struct Retries {
-    pub retries: u32,
-    pub max_attempts_reached: bool,
-}
-
 /// Records the retries of the requests to the responses.
 #[derive(Debug)]
 struct RecordRetries;
@@ -191,29 +183,6 @@ impl ClassifyRetry for Retry200Errors {
 
     fn name(&self) -> &'static str {
         "Retry200Errors"
-    }
-}
-
-/// The error of the connection of a request with its URL, which the AWS CLI
-/// reports, e.g. `Could not connect to the endpoint URL: "https://..."`, and
-/// the URL of the proxy of the request, e.g. `Failed to connect to proxy URL:
-/// "http://..."`.
-#[derive(Debug)]
-pub struct ConnectionError {
-    pub url: String,
-    pub proxy_url: Option<String>,
-    source: BoxError,
-}
-
-impl std::fmt::Display for ConnectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.source.fmt(f)
-    }
-}
-
-impl std::error::Error for ConnectionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.source.as_ref())
     }
 }
 

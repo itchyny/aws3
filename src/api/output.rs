@@ -92,7 +92,11 @@ pub fn print(
                 Responses::Pages(pages) => pages.into_pages(),
             };
             for response in responses {
-                let _ = io::stdout().write_all(text::format(&search(response)?)?.as_bytes());
+                let _ = io::stdout().write_all(
+                    text::format(&search(response)?)
+                        .map_err(Error::new)?
+                        .as_bytes(),
+                );
             }
         }
         Format::Table => {

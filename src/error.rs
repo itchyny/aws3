@@ -3,9 +3,9 @@ use std::process::ExitCode;
 
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+use aws_smithy_runtime_api::box_error::BoxError;
 
 use crate::cli::ErrorFormat;
-use crate::client;
 use crate::output::{table, yaml};
 use crate::value::Value;
 
@@ -92,7 +92,7 @@ impl Error {
                     _ => (status.to_string(), Some(reason_phrase(status).to_owned())),
                 };
                 let retries = raw
-                    .extension::<client::Retries>()
+                    .extension::<Retries>()
                     .filter(|retries| retries.max_attempts_reached && retries.retries > 0)
                     .filter(|_| is_retryable(status, &code))
                     .map(|retries| format!(" (reached max retries: {})", retries.retries))
@@ -126,7 +126,7 @@ impl Error {
                 }),
             },
             SdkError::DispatchFailure(failure) if failure.is_io() || failure.is_timeout() => {
-                match find_source::<client::ConnectionError>(&err) {
+                match find_source::<ConnectionError>(&err) {
                     Some(connection) => {
                         let tls = find_source::<rustls::Error>(&err);
                         match (&connection.proxy_url, tls) {
@@ -239,6 +239,37 @@ impl fmt::Display for Error {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Self::new(err.to_string())
+    }
+}
+
+/// The retries of a request, which is added to the extensions of the last
+/// response to report the errors like `(reached max retries: 2)`.
+#[derive(Debug, Clone, Copy)]
+pub struct Retries {
+    pub retries: u32,
+    pub max_attempts_reached: bool,
+}
+
+/// The error of the connection of a request with its URL, which the AWS CLI
+/// reports, e.g. `Could not connect to the endpoint URL: "https://..."`, and
+/// the URL of the proxy of the request, e.g. `Failed to connect to proxy URL:
+/// "http://..."`.
+#[derive(Debug)]
+pub struct ConnectionError {
+    pub url: String,
+    pub proxy_url: Option<String>,
+    pub source: BoxError,
+}
+
+impl std::fmt::Display for ConnectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.source.fmt(f)
+    }
+}
+
+impl std::error::Error for ConnectionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
     }
 }
 
