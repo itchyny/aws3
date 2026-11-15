@@ -149,8 +149,8 @@ fn head_object_errors() {
     assert_eq!(
         result.stderr,
         "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
-         Invalid type for parameter IfModifiedSince, value: x, type: <class 'str'>, \
-         valid types: <class 'datetime.datetime'>, timestamp-string\n"
+         Invalid type for parameter IfModifiedSince, value: \"x\", type: string, \
+         valid types: timestamp\n"
     );
 
     let result = env.run(&[
@@ -232,7 +232,7 @@ fn delete_object() {
     assert!(
         result
             .stderr
-            .contains("Invalid type for parameter IfMatchLastModifiedTime, value: x,")
+            .contains("Invalid type for parameter IfMatchLastModifiedTime, value: \"x\",")
     );
 }
 
@@ -307,7 +307,7 @@ fn delete_objects_errors() {
             "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
              Unknown parameter in Delete: \"Bar\", must be one of: Objects, Quiet\n\
              Unknown parameter in Delete.Objects[0]: \"Foo\", must be one of: Key, VersionId, ETag, LastModifiedTime, Size\n\
-             Invalid type for parameter Delete.Objects[0].Size, value: 3, type: <class 'str'>, valid types: <class 'int'>\n",
+             Invalid type for parameter Delete.Objects[0].Size, value: \"3\", type: string, valid types: integer\n",
         ),
         (
             "Objects=[{Key=a,Size=x}]",
@@ -446,8 +446,8 @@ fn put_object_errors() {
             &["--body", "a.txt", "--metadata", r#"{"n":1}"#],
             252,
             "An error occurred (ParamValidation): Parameter validation failed:\n\
-             Invalid type for parameter Metadata.n, value: 1, type: <class 'int'>, \
-             valid types: <class 'str'>",
+             Invalid type for parameter Metadata.n, value: 1, type: integer, \
+             valid types: string",
         ),
         (
             &["--body", "a.txt", "--metadata", "foo=\u{e9}"],
@@ -460,8 +460,8 @@ fn put_object_errors() {
             &["--body", "a.txt", "--expires", "x"],
             252,
             "An error occurred (ParamValidation): Parameter validation failed:\n\
-             Invalid type for parameter Expires, value: x, type: <class 'str'>, \
-             valid types: <class 'datetime.datetime'>, timestamp-string",
+             Invalid type for parameter Expires, value: \"x\", type: string, \
+             valid types: timestamp",
         ),
         (
             &[
@@ -1254,8 +1254,8 @@ fn put_public_access_block() {
     assert_eq!(
         result.stderr,
         "\naws3: [ERROR]: An error occurred (ParamValidation): Parameter validation failed:\n\
-         Invalid type for parameter PublicAccessBlockConfiguration.BlockPublicAcls, value: true, \
-         type: <class 'str'>, valid types: <class 'bool'>\n"
+         Invalid type for parameter PublicAccessBlockConfiguration.BlockPublicAcls, value: \"true\", \
+         type: string, valid types: boolean\n"
     );
 }
 
@@ -2463,13 +2463,13 @@ fn parameter_files() {
         ),
         (
             ["--key", "fileb://key.txt"],
-            "Parameter validation failed:\nInvalid type for parameter Key, value: b'dir/b.txt\\n', \
-             type: <class 'bytes'>, valid types: <class 'str'>",
+            "Parameter validation failed:\nInvalid type for parameter Key, value: \"dir/b.txt\\n\", \
+             type: bytes, valid types: string",
         ),
         (
             ["--sse-customer-key-md5", "fileb://key.txt"],
             "Parameter validation failed:\nInvalid type for parameter SSECustomerKeyMD5, \
-             value: b'dir/b.txt\\n', type: <class 'bytes'>, valid types: <class 'str'>",
+             value: \"dir/b.txt\\n\", type: bytes, valid types: string",
         ),
     ] {
         let mut command = vec!["api", "head-object", "--bucket", "bucket"];

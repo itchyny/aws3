@@ -5,7 +5,7 @@ use std::num::{IntErrorKind, ParseIntError};
 
 use crate::error::Error;
 use crate::param;
-use crate::value::{Value, python_str};
+use crate::value::{Value, invalid_type};
 
 /// The shape of a member, a subset of the types of the models of botocore.
 #[derive(Debug)]
@@ -111,16 +111,10 @@ pub fn python_int(value: &str) -> Result<i64, Error> {
     })
 }
 
-/// Validates the value of the shape, collecting the errors with the same
-/// messages as botocore.
+/// Validates the value of the shape, collecting the errors like the parameter
+/// validation of botocore.
 fn validate(value: &Value, shape: &Shape, name: &str, errors: &mut Vec<String>) {
-    let mut invalid_type = |valid_types: &str| {
-        errors.push(format!(
-            "Invalid type for parameter {name}, value: {}, type: <class '{}'>, valid types: {valid_types}",
-            python_str(value),
-            type_name(value)
-        ));
-    };
+    let mut invalid = |valid_types: &str| errors.push(invalid_type(name, value, valid_types));
     match (shape, value) {
         (Shape::String { min }, Value::Str(string)) => {
             let length = string.chars().count();
@@ -130,19 +124,19 @@ fn validate(value: &Value, shape: &Shape, name: &str, errors: &mut Vec<String>) 
                 ));
             }
         }
-        (Shape::String { .. }, _) => invalid_type("<class 'str'>"),
+        (Shape::String { .. }, _) => invalid("string"),
         (Shape::Boolean, Value::Bool(_)) | (Shape::Long, Value::Int(_)) => {}
-        (Shape::Boolean, _) => invalid_type("<class 'bool'>"),
-        (Shape::Long, _) => invalid_type("<class 'int'>"),
+        (Shape::Boolean, _) => invalid("boolean"),
+        (Shape::Long, _) => invalid("integer"),
         (Shape::Timestamp, Value::Int(_) | Value::Float(_)) => {}
         (Shape::Timestamp, Value::Str(string)) if param::parse_timestamp(string).is_ok() => {}
-        (Shape::Timestamp, _) => invalid_type("<class 'datetime.datetime'>, timestamp-string"),
+        (Shape::Timestamp, _) => invalid("timestamp"),
         (Shape::List(member), Value::List(values)) => {
             for (i, value) in values.iter().enumerate() {
                 validate(value, member, &format!("{name}[{i}]"), errors);
             }
         }
-        (Shape::List(_), _) => invalid_type("<class 'list'>, <class 'tuple'>"),
+        (Shape::List(_), _) => invalid("list"),
         (Shape::Structure(structure), Value::Map(pairs)) => {
             for required in structure.required {
                 if !pairs.iter().any(|(key, _)| key == required) {
@@ -169,22 +163,8 @@ fn validate(value: &Value, shape: &Shape, name: &str, errors: &mut Vec<String>) 
                 validate(value, shape, &format!("{name}.{key}"), errors);
             }
         }
-        (Shape::Structure(_), _) => invalid_type("<class 'dict'>"),
+        (Shape::Structure(_), _) => invalid("map"),
         (Shape::Any, _) => {}
-    }
-}
-
-/// Returns the name of the type of the value in Python.
-pub fn type_name(value: &Value) -> &'static str {
-    match value {
-        Value::Str(_) => "str",
-        Value::Bytes(_) => "bytes",
-        Value::Int(_) => "int",
-        Value::Float(_) => "float",
-        Value::Bool(_) => "bool",
-        Value::Null => "NoneType",
-        Value::List(_) => "list",
-        Value::Map(_) => "dict",
     }
 }
 
@@ -236,8 +216,8 @@ mod tests {
         assert_eq!(
             parse("Objects=a,Quiet=x"),
             Err("An error occurred (ParamValidation): Parameter validation failed:\n\
-                 Invalid type for parameter Delete.Objects[0], value: a, type: <class 'str'>, valid types: <class 'dict'>\n\
-                 Invalid type for parameter Delete.Quiet, value: x, type: <class 'str'>, valid types: <class 'bool'>"
+                 Invalid type for parameter Delete.Objects[0], value: \"a\", type: string, valid types: map\n\
+                 Invalid type for parameter Delete.Quiet, value: \"x\", type: string, valid types: boolean"
                 .to_owned())
         );
     }
@@ -254,15 +234,15 @@ mod tests {
                  Unknown parameter in Delete: \"Bar\", must be one of: Objects, Quiet\n\
                  Unknown parameter in Delete.Objects[0]: \"Foo\", must be one of: Key, Size, Time\n\
                  Invalid length for parameter Delete.Objects[0].Key, value: 0, valid min length: 1\n\
-                 Invalid type for parameter Delete.Objects[0].Size, value: 1, type: <class 'str'>, valid types: <class 'int'>\n\
-                 Invalid type for parameter Delete.Objects[0].Time, value: x, type: <class 'str'>, valid types: <class 'datetime.datetime'>, timestamp-string"
+                 Invalid type for parameter Delete.Objects[0].Size, value: \"1\", type: string, valid types: integer\n\
+                 Invalid type for parameter Delete.Objects[0].Time, value: \"x\", type: string, valid types: timestamp"
                 .to_owned())
         );
         assert_eq!(
             parse(r#"{"Objects":{"x":[1,2.5,1e20,true,null,"'"]}}"#),
             Err("An error occurred (ParamValidation): Parameter validation failed:\n\
-                 Invalid type for parameter Delete.Objects, value: {'x': [1, 2.5, 1e+20, True, None, \"'\"]}, \
-                 type: <class 'dict'>, valid types: <class 'list'>, <class 'tuple'>"
+                 Invalid type for parameter Delete.Objects, value: {\"x\":[1,2.5,1e20,true,null,\"'\"]}, \
+                 type: map, valid types: list"
                 .to_owned())
         );
         assert_eq!(

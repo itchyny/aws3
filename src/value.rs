@@ -118,6 +118,16 @@ impl Value {
     }
 }
 
+/// Returns the validation error of the parameter whose value is not of the
+/// valid types.
+pub fn invalid_type(name: &str, value: &Value, valid_types: &str) -> String {
+    format!(
+        "Invalid type for parameter {name}, value: {}, type: {}, valid types: {valid_types}",
+        value.to_json(),
+        value.type_name()
+    )
+}
+
 /// Quotes the string in JSON, which escapes the non-ASCII characters.
 pub fn ascii_json_string(value: &str) -> String {
     let mut buf = String::from('"');
@@ -188,7 +198,7 @@ pub fn python_str(value: &Value) -> String {
 }
 
 /// Returns the value like `repr` of Python.
-pub fn python_repr(value: &Value) -> String {
+fn python_repr(value: &Value) -> String {
     match value {
         Value::Str(string) => repr_string(string, ""),
         Value::Bytes(bytes) => repr_string(&String::from_utf8_lossy(bytes), "b"),

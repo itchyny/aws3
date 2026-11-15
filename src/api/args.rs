@@ -10,7 +10,7 @@ use md5::{Digest, Md5};
 use super::shape;
 use crate::error::Error;
 use crate::param;
-use crate::value::{Value, python_str};
+use crate::value::{Value, invalid_type};
 
 /// Parses the integer argument.
 pub fn parse_int(value: Option<&str>) -> Result<Option<i32>, Error> {
@@ -28,16 +28,15 @@ pub fn required_checksum_algorithm(value: Option<&str>) -> ChecksumAlgorithm {
     value.map_or(ChecksumAlgorithm::Crc64Nvme, ChecksumAlgorithm::from)
 }
 
-/// Parses the timestamp argument of the member, failing with the same message
-/// as the parameter validation of botocore.
+/// Parses the timestamp argument of the member, failing like the parameter
+/// validation of botocore.
 pub fn parse_timestamp(member: &str, value: Option<&str>) -> Result<Option<DateTime>, Error> {
     value
         .map(|value| {
             param::parse_timestamp(value).map_err(|_| {
                 Error::param_validation(format!(
-                    "Parameter validation failed:\nInvalid type for parameter {member}, \
-                     value: {value}, type: <class 'str'>, \
-                     valid types: <class 'datetime.datetime'>, timestamp-string"
+                    "Parameter validation failed:\n{}",
+                    invalid_type(member, &Value::Str(value.to_owned()), "timestamp")
                 ))
             })
         })
@@ -55,10 +54,8 @@ pub fn parse_metadata(value: Option<&str>) -> Result<Option<HashMap<String, Stri
     for (key, value) in pairs {
         let Value::Str(value) = value else {
             return Err(Error::param_validation(format!(
-                "Parameter validation failed:\nInvalid type for parameter Metadata.{key}, \
-                 value: {}, type: <class '{}'>, valid types: <class 'str'>",
-                python_str(&value),
-                shape::type_name(&value)
+                "Parameter validation failed:\n{}",
+                invalid_type(&format!("Metadata.{key}"), &value, "string")
             )));
         };
         if !key.is_ascii() || !value.is_ascii() {

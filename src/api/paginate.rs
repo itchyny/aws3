@@ -5,11 +5,10 @@ use std::io::{self, Write};
 
 use aws_smithy_types::base64;
 
-use super::shape;
 use crate::cli::PaginationArgs;
 use crate::error::Error;
 use crate::json::decode as decode_json;
-use crate::value::{Value, ascii_json_string, insert, python_str};
+use crate::value::{Value, ascii_json_string, insert, invalid_type};
 
 /// The values of the input tokens of a request, in the order of the tokens,
 /// where `None` is the token not to send.
@@ -237,10 +236,8 @@ impl Paginator {
                 Value::Str(_) | Value::Null => None,
                 value => {
                     return Err(Error::param_validation(format!(
-                        "Parameter validation failed:\nInvalid type for parameter {key}, value: {}, \
-                         type: <class '{}'>, valid types: <class 'str'>",
-                        python_str(&value),
-                        shape::type_name(&value)
+                        "Parameter validation failed:\n{}",
+                        invalid_type(&key, &value, "string")
                     )));
                 }
             };

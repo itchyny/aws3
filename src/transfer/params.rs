@@ -15,7 +15,7 @@ use crate::cli::{self, TransferArgs};
 use crate::error::Error;
 use crate::param::{load_key, parse_map_argument, parse_timestamp};
 use crate::path::url_encode;
-use crate::value::Value;
+use crate::value::{Value, invalid_type};
 
 /// The customer-provided key of server-side encryption.
 #[derive(Debug, Clone)]
@@ -281,11 +281,7 @@ fn parse_metadata(value: &str) -> Result<Vec<(String, String)>, Error> {
             Value::Str(value) => {
                 metadata.push((key, value));
             }
-            value => errors.push(format!(
-                "Invalid type for parameter {key}, value: {}, type: {}, valid types: string",
-                value.to_json(),
-                value.type_name()
-            )),
+            value => errors.push(invalid_type(&key, &value, "string")),
         }
     }
     if !errors.is_empty() {

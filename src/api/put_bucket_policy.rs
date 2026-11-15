@@ -3,22 +3,19 @@
 use aws_sdk_s3::Client;
 
 use super::args::required_checksum_algorithm;
-use super::shape;
 use crate::cli::PutBucketPolicyArgs;
 use crate::error::Error;
 use crate::param::load_string;
 use crate::redirect::Redirector;
-use crate::value::{Value, python_str};
+use crate::value::{Value, invalid_type};
 
 pub async fn run(client: &Client, args: &PutBucketPolicyArgs) -> Result<Value, Error> {
     let policy = match load_string("--policy", &args.policy)? {
         Value::Str(policy) => policy,
         value => {
             return Err(Error::param_validation(format!(
-                "Parameter validation failed:\nInvalid type for parameter Policy, value: {}, \
-                 type: <class '{}'>, valid types: <class 'str'>",
-                python_str(&value),
-                shape::type_name(&value)
+                "Parameter validation failed:\n{}",
+                invalid_type("Policy", &value, "string")
             )));
         }
     };

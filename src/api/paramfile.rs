@@ -13,7 +13,7 @@ use clap::{Arg, CommandFactory, Parser};
 use crate::cli::{ApiArgs, Cli, Command};
 use crate::error::Error;
 use crate::param::load_string;
-use crate::value::{Value, python_repr};
+use crate::value::{Value, invalid_type};
 
 /// Loads the parameter files of the arguments of the operation, and returns
 /// the arguments parsed again with the contents, or `None` without them.
@@ -175,18 +175,12 @@ fn load_values(arg: &Arg, name: &str, values: &[String]) -> Result<Option<Vec<St
                     .iter()
                     .enumerate()
                     .map(|(index, byte)| {
-                        format!(
-                            "Invalid type for parameter {member}[{index}], value: {byte}, \
-                             type: <class 'int'>, valid types: <class 'str'>"
-                        )
+                        let value = Value::Int(byte.to_string());
+                        invalid_type(&format!("{member}[{index}]"), &value, "string")
                     })
                     .collect()
             } else {
-                vec![format!(
-                    "Invalid type for parameter {member}, value: {}, type: <class 'bytes'>, \
-                     valid types: <class 'str'>",
-                    python_repr(&Value::Bytes(contents))
-                )]
+                vec![invalid_type(&member, &Value::Bytes(contents), "string")]
             };
             Err(Error::param_validation(format!(
                 "Parameter validation failed:\n{}",
