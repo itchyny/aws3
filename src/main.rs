@@ -1,17 +1,15 @@
 mod api;
-mod bucket;
 mod cli;
 mod client;
+mod cmd;
 mod config;
 mod debug;
 mod east_asian_width;
 mod error;
 mod insecure;
 mod json;
-mod ls;
 mod param;
 mod path;
-mod presign;
 mod redirect;
 mod shorthand;
 mod table;
@@ -100,16 +98,16 @@ fn check_resources(command: &Command) -> Result<(), error::Error> {
 
 async fn run_command(cli: &Cli) -> Result<ExitCode, error::Error> {
     match &cli.command {
-        Command::Ls(args) => ls::run(args, &cli.global).await,
-        Command::Cp(args) => transfer::cp(args, &cli.global).await,
-        Command::Mv(args) => transfer::mv(args, &cli.global).await,
-        Command::Rm(args) => transfer::rm(args, &cli.global).await,
-        Command::Sync(args) => transfer::sync(args, &cli.global).await,
-        Command::Mb(args) => bucket::mb(args, &cli.global).await,
-        Command::Rb(args) => bucket::rb(args, &cli.global).await,
-        Command::Website(args) => bucket::website(args, &cli.global).await,
-        Command::Presign(args) => presign::run(args, &cli.global).await,
+        Command::Ls(args) => cmd::ls::run(args, &cli.global).await,
+        Command::Cp(args) => cmd::cp::run(args, &cli.global).await,
+        Command::Mv(args) => cmd::mv::run(args, &cli.global).await,
+        Command::Rm(args) => cmd::rm::run(args, &cli.global).await,
+        Command::Sync(args) => cmd::sync::run(args, &cli.global).await,
+        Command::Mb(args) => cmd::mb::run(args, &cli.global).await,
+        Command::Rb(args) => cmd::rb::run(args, &cli.global).await,
+        Command::Website(args) => cmd::website::run(args, &cli.global).await,
+        Command::Presign(args) => cmd::presign::run(args, &cli.global).await,
         Command::Api(args) => api::run(args, &cli.global).await,
-        Command::Completion(args) => Ok(args.run()),
+        Command::Completion(args) => Ok(cmd::completion::run(args)),
     }
 }

@@ -1,4 +1,4 @@
-//! The transfer commands, i.e. cp, mv, rm and sync, in the same way as the
+//! The transfers of the cp, mv, rm and sync commands, in the same way as the
 //! `CommandArchitecture` of the AWS CLI.
 
 mod bandwidth;
@@ -25,9 +25,7 @@ use aws_sdk_s3::Client;
 use tokio::sync::{Semaphore, SemaphorePermit, mpsc, watch};
 use tokio::task::{JoinHandle, JoinSet};
 
-use crate::cli::{
-    CaseConflict, CopyProps, CpArgs, Filter, GlobalArgs, MvArgs, RmArgs, SyncArgs, TransferArgs,
-};
+use crate::cli::{CaseConflict, CopyProps, Filter, GlobalArgs, TransferArgs};
 use crate::client;
 use crate::config::S3Config;
 use crate::error::Error;
@@ -35,7 +33,7 @@ use crate::path::{is_s3express_bucket, split_bucket_key, validate_bucket_name};
 use crate::redirect::Redirector;
 use filter::Filters;
 use generator::{Item, ListOptions, ObjectProps, skip_warning};
-use params::{RequestParams, Unpacked};
+pub use params::{RequestParams, Unpacked};
 use paths::{Endpoint, relative_path};
 use printer::{PrintMode, Printer, TransferId};
 
@@ -107,7 +105,7 @@ pub struct Options {
 }
 
 impl Options {
-    fn new(command: CommandName, paths: Vec<String>, dir_op: bool) -> Self {
+    pub fn new(command: CommandName, paths: Vec<String>, dir_op: bool) -> Self {
         Self {
             command,
             paths,
@@ -143,7 +141,7 @@ impl Options {
         }
     }
 
-    fn with_transfer_args(self, args: &TransferArgs) -> Self {
+    pub fn with_transfer_args(self, args: &TransferArgs) -> Self {
         Self {
             dryrun: args.dryrun,
             quiet: args.quiet,
@@ -171,62 +169,6 @@ impl Options {
             ..self
         }
     }
-}
-
-pub async fn cp(args: &CpArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
-    let paths = vec![args.source.clone(), args.destination.clone()];
-    let mut options =
-        Options::new(CommandName::Cp, paths, args.recursive).with_transfer_args(&args.transfer);
-    options.expected_size = args.expected_size;
-    let unpacked = Unpacked::load(&args.transfer)?;
-    let params = RequestParams::new(&args.transfer, &unpacked);
-    run(options, params, global).await
-}
-
-pub async fn mv(args: &MvArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
-    let paths = vec![args.source.clone(), args.destination.clone()];
-    let mut options =
-        Options::new(CommandName::Mv, paths, args.recursive).with_transfer_args(&args.transfer);
-    options.validate_same_s3_paths = args.validate_same_s3_paths || samepath::enabled_by_env();
-    let unpacked = Unpacked::load(&args.transfer)?;
-    let params = RequestParams::new(&args.transfer, &unpacked);
-    run(options, params, global).await
-}
-
-pub async fn rm(args: &RmArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
-    let mut options = Options::new(CommandName::Rm, vec![args.path.clone()], args.recursive);
-    options.dryrun = args.dryrun;
-    options.quiet = args.quiet;
-    options.only_show_errors = args.only_show_errors;
-    // The rm command has no progress option, which disables the progress.
-    options.progress = false;
-    options.page_size = args.page_size;
-    options.filters = args.filter.filters.clone();
-    let params = RequestParams::with_request_payer(args.request_payer.request_payer);
-    run(options, Ok(params), global).await
-}
-
-/// Deletes the objects under the path, for rb with `--force`.
-pub async fn rm_recursive(path: &str, global: &GlobalArgs) -> Result<ExitCode, Error> {
-    let mut options = Options::new(CommandName::Rm, vec![path.to_owned()], true);
-    options.progress = false;
-    run(options, Ok(RequestParams::default()), global).await
-}
-
-pub async fn sync(args: &SyncArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
-    let paths = vec![args.source.clone(), args.destination.clone()];
-    let mut options =
-        Options::new(CommandName::Sync, paths, true).with_transfer_args(&args.transfer);
-    options.size_only = args.size_only;
-    options.exact_timestamps = args.exact_timestamps;
-    options.delete = args.delete;
-    // The no-overwrite option is handled by comparing the files.
-    let unpacked = Unpacked::load(&args.transfer)?;
-    let params = RequestParams::new(&args.transfer, &unpacked).map(|params| RequestParams {
-        no_overwrite: false,
-        ..params
-    });
-    run(options, params, global).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -537,7 +479,8 @@ impl Context {
     }
 }
 
-async fn run(
+/// Runs the transfer command with the options and the request parameters.
+pub async fn run(
     mut options: Options,
     params: Result<RequestParams, String>,
     global: &GlobalArgs,
@@ -546,7 +489,7 @@ async fn run(
     let sdk_config = client::load_config(global).await?;
     if options.command == CommandName::Mv && plan.paths_type == PathsType::S3S3 {
         let region = options.source_region.as_deref();
-        let enabled = options.validate_same_s3_paths;
+        let enabled = options.validate_same_s3_paths || samepath::enabled_by_env();
         samepath::validate(&sdk_config, global, region, &plan.src, &plan.dest, enabled).await?;
     }
     // The keys of directory buckets are not listed in order, where the case
