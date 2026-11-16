@@ -2,6 +2,8 @@
 //! render the sections of the titles, the column headers and the rows, where
 //! the nested sections are indented.
 
+use std::fmt::Write;
+
 use super::east_asian_width::WIDE_RANGES;
 use crate::value::{Value, python_str};
 
@@ -413,9 +415,9 @@ fn line_break(widths: &[usize]) -> String {
     let mut line = String::new();
     for (i, width) in widths.iter().enumerate() {
         if i == 0 {
-            line += &format!("+{}+", "-".repeat(width.saturating_sub(2)));
+            let _ = write!(line, "+{}+", "-".repeat(width.saturating_sub(2)));
         } else {
-            line += &format!("{}+", "-".repeat(width.saturating_sub(1)));
+            let _ = write!(line, "{}+", "-".repeat(width.saturating_sub(1)));
         }
     }
     line

@@ -2,6 +2,8 @@
 //! CLI, which writes the scalars separated by tabs, where the nested values
 //! are written on the following lines with the upper-cased keys.
 
+use std::fmt::Write;
+
 use crate::value::{Value, python_str};
 
 /// Formats the value, which fails on the lists of the maps and the other
@@ -56,11 +58,7 @@ fn format_scalars(values: &[&Value], buf: &mut String, identifier: Option<&str>)
     match identifier {
         Some(identifier) => {
             for value in values {
-                buf.push_str(&format!(
-                    "{}\t{}\n",
-                    identifier.to_uppercase(),
-                    python_str(value)
-                ));
+                let _ = writeln!(buf, "{}\t{}", identifier.to_uppercase(), python_str(value));
             }
         }
         None => {

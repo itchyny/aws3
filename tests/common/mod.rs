@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
@@ -490,7 +491,9 @@ fn encode_keys(xml: &str) -> String {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
                     encoded.push(byte as char)
                 }
-                _ => encoded.push_str(&format!("%{byte:02X}")),
+                _ => {
+                    let _ = write!(encoded, "%{byte:02X}");
+                }
             }
         }
         rest = &tail[end..];

@@ -2,6 +2,8 @@
 //! syntax, and of the responses of the api commands, which are not only
 //! strings but also lists and maps.
 
+use std::fmt::Write;
+
 /// The value of an argument.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -144,7 +146,7 @@ pub fn ascii_json_string(value: &str) -> String {
             c => {
                 let mut units = [0; 2];
                 for unit in c.encode_utf16(&mut units) {
-                    buf.push_str(&format!("\\u{unit:04x}"));
+                    let _ = write!(buf, "\\u{unit:04x}");
                 }
             }
         }
@@ -239,7 +241,9 @@ fn repr_string(string: &str, prefix: &str) -> String {
                 buf.push('\\');
                 buf.push(c);
             }
-            c if c.is_control() => buf.push_str(&format!("\\x{:02x}", c as u32)),
+            c if c.is_control() => {
+                let _ = write!(buf, "\\x{:02x}", c as u32);
+            }
             c => buf.push(c),
         }
     }

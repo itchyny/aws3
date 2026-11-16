@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 /// Splits an S3 path into the bucket and the key, with or without the `s3://`
 /// scheme, in the same way as `find_bucket_key` of the AWS CLI. The access
 /// point ARNs are treated as buckets.
@@ -156,7 +158,9 @@ pub fn url_encode(value: &str, keep_slash: bool) -> String {
                 encoded.push(byte as char)
             }
             b'/' if keep_slash => encoded.push('/'),
-            _ => encoded.push_str(&format!("%{byte:02X}")),
+            _ => {
+                let _ = write!(encoded, "%{byte:02X}");
+            }
         }
     }
     encoded
