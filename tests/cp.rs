@@ -668,7 +668,7 @@ fn cp_full_object_checksum() {
 
     // The object is corrupted on the storage, whose stored checksum does not
     // match the downloaded parts.
-    let mut corrupted = data.clone();
+    let mut corrupted = data;
     corrupted[6 * 1024 * 1024] ^= 1;
     env.object("bucket", "big.bin", &corrupted);
     let result = env.run_with_env(&["cp", "s3://bucket/big.bin", "corrupted.bin"], &envs);

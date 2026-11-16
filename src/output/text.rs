@@ -154,7 +154,7 @@ mod tests {
     use crate::json::decode as decode_json;
 
     fn text(json: &str) -> String {
-        format(&decode_json(json).unwrap()).unwrap_or_else(|err| err.to_string())
+        format(&decode_json(json).unwrap()).unwrap_or_else(|err| err)
     }
 
     #[test]

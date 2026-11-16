@@ -236,7 +236,7 @@ impl MultiTable {
                     ..Section::default()
                 };
                 for (header, element) in headers.into_iter().zip(row) {
-                    let _ = converted.add_row(vec![header, element]);
+                    converted.add_row(vec![header, element]);
                 }
                 *section = converted;
             }
@@ -245,11 +245,10 @@ impl MultiTable {
 }
 
 impl Section {
-    fn add_row(&mut self, row: Vec<String>) -> Result<(), String> {
+    fn add_row(&mut self, row: Vec<String>) {
         self.num_cols.get_or_insert(row.len());
         self.update_max_widths(&row);
         self.rows.push(row);
-        Ok(())
     }
 
     fn update_max_widths(&mut self, row: &[String]) {

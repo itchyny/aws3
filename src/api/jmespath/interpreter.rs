@@ -92,7 +92,7 @@ pub fn search(node: &Node, value: &Value) -> Result<Value, Error> {
         }
         Node::Comparator(comparator, left, right) => {
             let (left, right) = (search(left, value)?, search(right, value)?);
-            compare(*comparator, &left, &right)?
+            compare(*comparator, &left, &right)
         }
         Node::Function(name, args) => {
             let args = args
@@ -287,25 +287,25 @@ fn equals(left: &Value, right: &Value) -> bool {
     !special && python_eq(left, right)
 }
 
-fn compare(comparator: Comparator, left: &Value, right: &Value) -> Result<Value, Error> {
+fn compare(comparator: Comparator, left: &Value, right: &Value) -> Value {
     let ordering = match comparator {
-        Comparator::Eq => return Ok(Value::Bool(equals(left, right))),
-        Comparator::Ne => return Ok(Value::Bool(!equals(left, right))),
+        Comparator::Eq => return Value::Bool(equals(left, right)),
+        Comparator::Ne => return Value::Bool(!equals(left, right)),
         _ => {
             let comparable = |value: &Value| matches!(type_of(value), "number" | "string");
             if !comparable(left) || type_of(left) != type_of(right) {
-                return Ok(Value::Null);
+                return Value::Null;
             }
             cmp(left, right)
         }
     };
-    Ok(Value::Bool(match (comparator, ordering) {
+    Value::Bool(match (comparator, ordering) {
         (_, None) => false,
         (Comparator::Lt, Some(ordering)) => ordering.is_lt(),
         (Comparator::Lte, Some(ordering)) => ordering.is_le(),
         (Comparator::Gt, Some(ordering)) => ordering.is_gt(),
         (_, Some(ordering)) => ordering.is_ge(),
-    }))
+    })
 }
 
 /// Compares the numbers or the strings, which returns `None` for the values

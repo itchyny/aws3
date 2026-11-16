@@ -154,7 +154,7 @@ impl Paginator {
                             "'{name}': {}",
                             token
                                 .as_ref()
-                                .map_or("None".to_owned(), |token| format!("'{token}'"))
+                                .map_or_else(|| "None".to_owned(), |token| format!("'{token}'"))
                         ))
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -200,7 +200,7 @@ impl Paginator {
                     ascii_json_string(name),
                     token
                         .as_deref()
-                        .map_or("null".to_owned(), ascii_json_string)
+                        .map_or_else(|| "null".to_owned(), ascii_json_string)
                 )
             })
             .collect();

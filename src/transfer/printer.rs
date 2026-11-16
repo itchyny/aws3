@@ -89,7 +89,7 @@ impl Printer {
             PrintMode::NoProgress | PrintMode::Progress { .. }
         ) {
             let statement = format!("{transfer_type}: {}", location(src, dest));
-            self.print_out(&self.pad(&statement, '\n'));
+            print_out(&self.pad(&statement, '\n'));
         }
         self.redisplay_progress();
     }
@@ -109,7 +109,7 @@ impl Printer {
         self.files_transferred += 1;
         if self.mode != PrintMode::Quiet {
             let statement = format!("{transfer_type} failed: {} {message}", location(src, dest));
-            self.print_err(&self.pad(&statement, '\n'));
+            print_err(&self.pad(&statement, '\n'));
         }
         self.redisplay_progress();
     }
@@ -124,7 +124,7 @@ impl Printer {
     pub fn warning(&mut self, message: &str) {
         self.files_warned += 1;
         if self.mode != PrintMode::Quiet {
-            self.print_err(&self.pad(message, '\n'));
+            print_err(&self.pad(message, '\n'));
         }
         self.redisplay_progress();
     }
@@ -132,14 +132,14 @@ impl Printer {
     /// Prints the message to the standard error, which is not counted as a
     /// warning and printed even with `--quiet`.
     pub fn notice(&mut self, message: &str) {
-        self.print_err(&self.pad(message, '\n'));
+        print_err(&self.pad(message, '\n'));
         self.redisplay_progress();
     }
 
-    pub fn dry_run(&mut self, transfer_type: &str, src: &str, dest: Option<&str>) {
+    pub fn dry_run(&self, transfer_type: &str, src: &str, dest: Option<&str>) {
         if self.mode != PrintMode::Quiet {
             let statement = format!("(dryrun) {transfer_type}: {}", location(src, dest));
-            self.print_out(&self.pad(&statement, '\n'));
+            print_out(&self.pad(&statement, '\n'));
         }
     }
 
@@ -147,7 +147,7 @@ impl Printer {
     pub fn error(&mut self, message: &str) {
         self.errors += 1;
         if self.mode != PrintMode::Quiet {
-            self.print_err(&self.pad(&format!("fatal error: {message}"), '\n'));
+            print_err(&self.pad(&format!("fatal error: {message}"), '\n'));
         }
     }
 
@@ -155,7 +155,7 @@ impl Printer {
     pub fn ctrl_c(&mut self) {
         self.errors += 1;
         if self.mode != PrintMode::Quiet {
-            self.print_err(&self.pad("cancelled: ctrl-c received", '\n'));
+            print_err(&self.pad("cancelled: ctrl-c received", '\n'));
         }
     }
 
@@ -253,14 +253,14 @@ impl Printer {
         {
             self.first_progress = false;
             self.last_progress = now;
-            self.print_out(&statement);
+            print_out(&statement);
         }
     }
 
-    fn clear_progress_if_done(&mut self, ending: char) {
+    fn clear_progress_if_done(&self, ending: char) {
         if self.progress_length > 0 && !self.has_remaining_progress() {
             let statement = self.pad("", ending);
-            self.print_out(&statement);
+            print_out(&statement);
         }
     }
 
@@ -270,18 +270,18 @@ impl Printer {
         let padding = self.progress_length.saturating_sub(width);
         format!("{statement}{}{ending}", " ".repeat(padding))
     }
+}
 
-    fn print_out(&self, statement: &str) {
-        let mut stdout = io::stdout().lock();
-        let _ = stdout.write_all(statement.as_bytes());
-        let _ = stdout.flush();
-    }
+fn print_out(statement: &str) {
+    let mut stdout = io::stdout().lock();
+    let _ = stdout.write_all(statement.as_bytes());
+    let _ = stdout.flush();
+}
 
-    fn print_err(&self, statement: &str) {
-        let mut stderr = io::stderr().lock();
-        let _ = stderr.write_all(statement.as_bytes());
-        let _ = stderr.flush();
-    }
+fn print_err(statement: &str) {
+    let mut stderr = io::stderr().lock();
+    let _ = stderr.write_all(statement.as_bytes());
+    let _ = stderr.flush();
 }
 
 fn location(src: &str, dest: Option<&str>) -> String {
