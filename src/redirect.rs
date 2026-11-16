@@ -96,8 +96,10 @@ impl Redirector {
         };
         let config = client.config().to_builder().region(Region::new(region));
         let client = Client::from_conf(config.build());
-        let mut clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
-        clients.insert(bucket.to_owned(), client.clone());
+        self.clients
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(bucket.to_owned(), client.clone());
         Some(client)
     }
 }

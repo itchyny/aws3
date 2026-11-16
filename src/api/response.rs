@@ -117,9 +117,8 @@ impl ResponseHeaders {
     /// Returns the metadata in the order of the headers, whose names are
     /// stripped of the prefix like botocore.
     pub fn metadata(&self) -> Value {
-        let headers = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let mut pairs = Vec::new();
-        for (name, value) in headers.iter() {
+        for (name, value) in self.0.lock().unwrap_or_else(PoisonError::into_inner).iter() {
             if let Some(name) = name.to_lowercase().strip_prefix("x-amz-meta-") {
                 insert(&mut pairs, name.to_owned(), Value::Str(value.clone()));
             }
