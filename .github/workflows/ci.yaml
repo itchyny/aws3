@@ -128,9 +128,10 @@ jobs:
       - name: Generate Dockerfile
         run: |
           cat > docker/Dockerfile <<EOF
-          FROM gcr.io/distroless/static-debian13:nonroot
+          FROM gcr.io/distroless/static-debian13
           ARG TARGETARCH
           COPY --chmod=755 \${TARGETARCH}/$NAME /
+          WORKDIR /aws
           ENTRYPOINT ["/$NAME"]
           CMD ["--help"]
           EOF
