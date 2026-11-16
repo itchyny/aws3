@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime};
@@ -189,7 +190,12 @@ fn resign(url: &str, expires_in: i64, access_key: &str, secret: &str) -> Option<
 
 /// Encodes the bytes in lowercase hexadecimal digits.
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
 }
 
 #[cfg(test)]

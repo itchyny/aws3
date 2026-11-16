@@ -11,8 +11,11 @@ fn without_last_modified(stdout: &str) -> String {
     stdout
         .lines()
         .filter(|line| !line.trim_start().starts_with("\"LastModified\": "))
-        .map(|line| format!("{line}\n"))
-        .collect()
+        .fold(String::new(), |mut stdout, line| {
+            stdout.push_str(line);
+            stdout.push('\n');
+            stdout
+        })
 }
 
 #[test]

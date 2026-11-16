@@ -369,10 +369,13 @@ fn reason_phrase(status: u16) -> &'static str {
 
 fn hex_sha256(value: &str) -> String {
     use sha2::{Digest, Sha256};
+    use std::fmt::Write;
     Sha256::digest(value)
         .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        })
 }
 
 fn is_no_credentials(err: &(dyn std::error::Error + 'static)) -> bool {
