@@ -217,7 +217,7 @@ jobs:
 
   publish:
     name: Publish
-    needs: release
+    needs: [docker, release]
     permissions:
       contents: read
       id-token: write
