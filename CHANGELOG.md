@@ -1,4 +1,25 @@
 # Changelog
+## [v0.4.0](https://github.com/itchyny/aws3/compare/v0.3.0..v0.4.0) (2026-11-15)
+* support `api` subcommand compatible with `aws s3api` for 45 commonly used operations of
+  objects, listing, multipart uploads, buckets, configurations of versioning, public access
+  blocks, policies, encryption, lifecycle, CORS, ACLs, notifications, logging, and tagging,
+  with the same options, outputs, errors, and exit codes
+* support `--query` option with JMESPath expressions, and `--output` option in `json`,
+  `text`, `table`, `yaml`, `yaml-stream`, and `off` formats, from the environment variable
+  and the profile in the same way as the AWS CLI
+* paginate the list operations automatically with `--page-size`, `--max-items`,
+  `--starting-token`, and `--no-paginate` options
+* parse the structured arguments in the shorthand syntax and JSON, and validate them in the
+  same way as the AWS CLI
+* load the values of the arguments from the files of `file://` and `fileb://` in the same
+  way as the AWS CLI
+* merge the content encoding of `--content-encoding` option and `aws-chunked` into one
+  header on uploads, in the same way as the AWS CLI
+* omit the message in the structured formats of `--cli-error-format` when the error response
+  has no message
+* publish the Docker images for `linux/amd64` and `linux/arm64` based on `distroless/static`
+  to GitHub Container Registry, with the attestations of the build provenance
+
 ## [v0.3.0](https://github.com/itchyny/aws3/compare/v0.2.0..v0.3.0) (2026-11-11)
 * send the requests through the proxies of `HTTP_PROXY` and `HTTPS_PROXY` except for the
   hosts of `NO_PROXY`, including the proxies of HTTPS and with `--no-verify-ssl`, and report
