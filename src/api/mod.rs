@@ -55,10 +55,9 @@ mod response;
 mod restore_object;
 pub mod shape;
 
-use std::io::{self, IsTerminal};
 use std::process::ExitCode;
 
-use crate::cli::{ApiArgs, ApiOperation, Color, GlobalArgs};
+use crate::cli::{ApiArgs, ApiOperation, GlobalArgs};
 use crate::client;
 use crate::error::Error;
 use jmespath::Expression;
@@ -188,11 +187,12 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
             delete_object_tagging::run(&client, args).await?.into()
         }
     };
-    let colored = match global.color {
-        Some(Color::On) => true,
-        Some(Color::Off) => false,
-        _ => io::stdout().is_terminal(),
-    };
-    print(&args.operation, responses, format, query.as_ref(), colored)?;
+    print(
+        &args.operation,
+        responses,
+        format,
+        query.as_ref(),
+        global.colored(),
+    )?;
     Ok(ExitCode::SUCCESS)
 }

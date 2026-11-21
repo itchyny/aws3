@@ -62,12 +62,7 @@ fn error_style(global: &cli::GlobalArgs) -> (cli::ErrorFormat, bool) {
             .and_then(|value| cli::ErrorFormat::from_str(&value, true).ok())
             .unwrap_or(cli::ErrorFormat::Enhanced)
     });
-    let colored = match global.color {
-        Some(cli::Color::On) => true,
-        Some(cli::Color::Off) => false,
-        _ => std::io::IsTerminal::is_terminal(&std::io::stdout()),
-    };
-    (format, colored)
+    (format, global.colored())
 }
 
 /// Rejects the S3 paths of the resources unsupported by the s3 commands,

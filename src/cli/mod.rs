@@ -161,6 +161,18 @@ pub struct GlobalArgs {
     pub cli_error_format: Option<ErrorFormat>,
 }
 
+impl GlobalArgs {
+    /// Returns whether the outputs are colored, which defaults to whether the
+    /// standard output is a terminal.
+    pub fn colored(&self) -> bool {
+        match self.color {
+            Some(Color::On) => true,
+            Some(Color::Off) => false,
+            _ => std::io::IsTerminal::is_terminal(&std::io::stdout()),
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 pub struct LsArgs {
     #[arg(value_name = "S3Uri", default_value = "s3://")]
