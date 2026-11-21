@@ -257,17 +257,48 @@ fn positive_error(name: &str, value: impl std::fmt::Display) -> String {
     format!("Value for {name} must be a positive integer: {value}")
 }
 
+/// Returns the profile specified explicitly by the option or `AWS_PROFILE` if
+/// it is in neither the config file nor the credentials file, which the AWS
+/// CLI rejects even when the credentials are not needed.
+pub fn missing_profile(profile: Option<&str>) -> Option<String> {
+    let profile = profile
+        .map(str::to_owned)
+        .or_else(|| std::env::var("AWS_PROFILE").ok())?;
+    let read = |path: Option<PathBuf>| path.and_then(|path| std::fs::read_to_string(path).ok());
+    let in_config =
+        read(config_file()).is_some_and(|content| profile_settings(&content, &profile).found);
+    let in_credentials = read(credentials_file()).is_some_and(|content| {
+        content.lines().any(|line| {
+            line.trim()
+                .strip_prefix('[')
+                .and_then(|line| line.strip_suffix(']'))
+                .is_some_and(|section| section.trim() == profile)
+        })
+    });
+    (!in_config && !in_credentials).then_some(profile)
+}
+
 fn config_file() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("AWS_CONFIG_FILE").filter(|path| !path.is_empty()) {
+    aws_file("AWS_CONFIG_FILE", "config")
+}
+
+fn credentials_file() -> Option<PathBuf> {
+    aws_file("AWS_SHARED_CREDENTIALS_FILE", "credentials")
+}
+
+fn aws_file(name: &str, file: &str) -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os(name).filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(path));
     }
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".aws").join("config"))
+    Some(PathBuf::from(home).join(".aws").join(file))
 }
 
 /// The settings in the section of a profile.
 #[derive(Debug, Default)]
 struct Settings {
+    /// Whether the section of the profile is found.
+    found: bool,
     profile: Vec<(String, String)>,
     s3: Vec<(String, String)>,
 }
@@ -291,6 +322,7 @@ fn profile_settings(content: &str, profile: &str) -> Settings {
                 .unwrap_or(section);
             in_profile =
                 name == profile && (section.starts_with("profile ") || section == "default");
+            settings.found |= in_profile;
             in_s3 = false;
             continue;
         }
@@ -462,7 +494,11 @@ ca_bundle = /etc/other.pem
                 ("ca_bundle".to_owned(), "/etc/other.pem".to_owned())
             ]
         );
+        assert!(profile_settings(content, "other").found);
+        assert!(!profile_settings(content, "missing").found);
         assert!(profile_settings(content, "missing").profile.is_empty());
+        // The profiles other than the default need the prefix.
+        assert!(!profile_settings("[other]\nregion = us-west-2\n", "other").found);
     }
 
     #[test]

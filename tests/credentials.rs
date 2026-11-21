@@ -371,3 +371,63 @@ fn credentials_sso() {
         Some("role_name=role&account_id=123456789012")
     );
 }
+
+#[test]
+fn credentials_missing_profile() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.config("[profile config]\nregion = us-east-1\n[other]\nregion = us-east-1\n");
+    env.write(
+        ".aws-credentials",
+        format!("[credentials]\naws_access_key_id = {ACCESS_KEY}\naws_secret_access_key = {SECRET_KEY}\n"),
+    );
+    let credentials = env.path(".aws-credentials");
+    // The profile specified explicitly is rejected before any requests
+    // unless it is in the config file or the credentials file, even with the
+    // credentials in the environment variables and without signing.
+    for (args, profile) in [
+        (&["ls", "s3://bucket/", "--profile", "missing"][..], None),
+        (&["ls", "s3://bucket/", "--profile", "other"][..], None),
+        (&["ls", "s3://bucket/", "--profile", "default"][..], None),
+        (
+            &[
+                "ls",
+                "s3://bucket/",
+                "--profile",
+                "missing",
+                "--no-sign-request",
+            ][..],
+            None,
+        ),
+        (
+            &["presign", "s3://bucket/key", "--profile", "missing"][..],
+            None,
+        ),
+        (&["ls", "s3://bucket/"][..], Some("missing")),
+    ] {
+        let mut cmd = env.command(args);
+        cmd.env("AWS_CONFIG_FILE", &config)
+            .env("AWS_SHARED_CREDENTIALS_FILE", &credentials);
+        if let Some(profile) = profile {
+            cmd.env("AWS_PROFILE", profile);
+        }
+        let result = run(cmd);
+        let profile = profile.unwrap_or_else(|| args[3]);
+        assert_eq!(result.code, 255, "{args:?}");
+        assert_eq!(
+            result.stderr,
+            format!("\naws3: [ERROR]: The config profile ({profile}) could not be found\n"),
+        );
+    }
+    assert!(env.requests().is_empty());
+
+    // The profiles in either of the files are found, where the profile
+    // without the credentials does not fall back to the environment variables.
+    for (profile, code) in [("config", 253), ("credentials", 0)] {
+        let mut cmd = env.command(&["ls", "s3://bucket/", "--profile", profile]);
+        cmd.env("AWS_CONFIG_FILE", &config)
+            .env("AWS_SHARED_CREDENTIALS_FILE", &credentials);
+        let result = run(cmd);
+        assert_eq!(result.code, code, "{profile}: {}", result.stderr);
+    }
+}

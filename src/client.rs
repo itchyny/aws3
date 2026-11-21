@@ -35,7 +35,7 @@ use hyper_util::client::proxy::matcher::Matcher;
 use crate::cli::GlobalArgs;
 use aws_types::service_config::ServiceConfigKey;
 
-use crate::config::{AddressingStyle, ProfileConfig, S3Config};
+use crate::config::{self, AddressingStyle, ProfileConfig, S3Config};
 use crate::error::{ConnectionError, Error, Retries};
 use crate::{insecure, tls};
 
@@ -56,6 +56,11 @@ pub struct Config {
 /// Loads the configuration from the environment, the config files and the
 /// global options.
 pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
+    if let Some(profile) = config::missing_profile(global.profile.as_deref()) {
+        return Err(Error::new(format!(
+            "The config profile ({profile}) could not be found"
+        )));
+    }
     let profile = ProfileConfig::load(global.profile.as_deref());
     let ca_bundle = global
         .ca_bundle
