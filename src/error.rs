@@ -3,7 +3,12 @@ use std::process::ExitCode;
 
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_s3::operation::create_session::CreateSessionError;
+use aws_sdk_sso::operation::get_role_credentials::GetRoleCredentialsError;
+use aws_sdk_sts::operation::assume_role::AssumeRoleError;
+use aws_sdk_sts::operation::assume_role_with_web_identity::AssumeRoleWithWebIdentityError;
 use aws_smithy_runtime_api::box_error::BoxError;
+use aws_smithy_runtime_api::client::result::ServiceError;
 
 use crate::cli::ErrorFormat;
 use crate::output::{table, yaml};
@@ -72,44 +77,11 @@ impl Error {
     where
         E: ProvideErrorMetadata + std::error::Error + 'static,
     {
+        if let Some(err) = credentials_service_error(&err) {
+            return err;
+        }
         match &err {
-            SdkError::ServiceError(service_err) => {
-                let raw = service_err.raw();
-                // The errors of the responses with the 200 status code are
-                // handled as 500 errors like botocore.
-                let status = match raw.status().as_u16() {
-                    200 => 500,
-                    status => status,
-                };
-                let inner = service_err.err();
-                // The responses without the error codes, e.g. of HEAD requests
-                // or whose bodies are not XML, are reported by the status code
-                // and the reason phrase like botocore.
-                let (code, message) = match inner.code() {
-                    Some(code) if !operation.starts_with("Head") => {
-                        (code.to_owned(), inner.message().map(str::to_owned))
-                    }
-                    _ => (status.to_string(), Some(reason_phrase(status).to_owned())),
-                };
-                let retries = raw
-                    .extension::<Retries>()
-                    .filter(|retries| retries.max_attempts_reached && retries.retries > 0)
-                    .filter(|_| is_retryable(status, &code))
-                    .map(|retries| format!(" (reached max retries: {})", retries.retries))
-                    .unwrap_or_default();
-                Self {
-                    code: EXIT_SERVICE,
-                    message: format!(
-                        "An error occurred ({code}) when calling the {operation} operation{retries}: {}",
-                        message.as_deref().unwrap_or("Unknown")
-                    ),
-                    info: Some(ErrorInfo {
-                        kind: ErrorKind::Client,
-                        code,
-                        message,
-                    }),
-                }
-            }
+            SdkError::ServiceError(service_err) => Self::service(operation, service_err),
             // The message of the transfers is extended by the error handler of
             // the commands.
             _ if is_no_credentials(&err) => Self {
@@ -158,6 +130,48 @@ impl Error {
             // The innermost error describes the cause, e.g. an invalid
             // combination of the configurations to resolve the endpoint.
             _ => endpoint_error(&root_cause(&err).to_string()),
+        }
+    }
+
+    /// Creates an error from a service error of the operation.
+    fn service<E>(operation: &str, service_err: &ServiceError<E, HttpResponse>) -> Self
+    where
+        E: ProvideErrorMetadata,
+    {
+        let raw = service_err.raw();
+        // The errors of the responses with the 200 status code are handled as
+        // 500 errors like botocore.
+        let status = match raw.status().as_u16() {
+            200 => 500,
+            status => status,
+        };
+        let inner = service_err.err();
+        // The responses without the error codes, e.g. of HEAD requests or
+        // whose bodies are not XML, are reported by the status code and the
+        // reason phrase like botocore.
+        let (code, message) = match inner.code() {
+            Some(code) if !operation.starts_with("Head") => {
+                (code.to_owned(), inner.message().map(str::to_owned))
+            }
+            _ => (status.to_string(), Some(reason_phrase(status).to_owned())),
+        };
+        let retries = raw
+            .extension::<Retries>()
+            .filter(|retries| retries.max_attempts_reached && retries.retries > 0)
+            .filter(|_| is_retryable(status, &code))
+            .map(|retries| format!(" (reached max retries: {})", retries.retries))
+            .unwrap_or_default();
+        Self {
+            code: EXIT_SERVICE,
+            message: format!(
+                "An error occurred ({code}) when calling the {operation} operation{retries}: {}",
+                message.as_deref().unwrap_or("Unknown")
+            ),
+            info: Some(ErrorInfo {
+                kind: ErrorKind::Client,
+                code,
+                message,
+            }),
         }
     }
 
@@ -376,6 +390,41 @@ fn hex_sha256(value: &str) -> String {
             let _ = write!(hex, "{byte:02x}");
             hex
         })
+}
+
+/// Returns the service error of the requests of the credential providers,
+/// e.g. `AssumeRole` of the profile with the role, and of the sessions of the
+/// directory buckets, in the same way as the errors of the operations.
+fn credentials_service_error(err: &(dyn std::error::Error + 'static)) -> Option<Error> {
+    if let Some(SdkError::ServiceError(err)) =
+        find_source::<SdkError<CreateSessionError, HttpResponse>>(err)
+    {
+        return Some(Error::service("CreateSession", err));
+    }
+    if let Some(SdkError::ServiceError(err)) =
+        find_source::<SdkError<AssumeRoleError, HttpResponse>>(err)
+    {
+        return Some(Error::service("AssumeRole", err));
+    }
+    if let Some(SdkError::ServiceError(err)) =
+        find_source::<SdkError<AssumeRoleWithWebIdentityError, HttpResponse>>(err)
+    {
+        return Some(Error::service("AssumeRoleWithWebIdentity", err));
+    }
+    if let Some(SdkError::ServiceError(err)) =
+        find_source::<SdkError<GetRoleCredentialsError, HttpResponse>>(err)
+    {
+        // The AWS CLI asks to log in again on the session not valid.
+        if let GetRoleCredentialsError::UnauthorizedException(_) = err.err() {
+            return Some(Error::new(
+                "The SSO session associated with this profile has expired or is otherwise \
+                 invalid. To refresh this SSO session run aws sso login with the corresponding \
+                 profile.",
+            ));
+        }
+        return Some(Error::service("GetRoleCredentials", err));
+    }
+    None
 }
 
 fn is_no_credentials(err: &(dyn std::error::Error + 'static)) -> bool {

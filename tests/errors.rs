@@ -709,3 +709,36 @@ fn invalid_bucket_name() {
         ["(dryrun) upload: ./a.txt to s3://bad~name/key"]
     );
 }
+
+#[test]
+fn invalid_addressing_style() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "a");
+    let config = env.config(
+        r"[default]
+s3 =
+  addressing_style = path-style
+  max_concurrent_requests = 0
+",
+    );
+    let envs = [("AWS_CONFIG_FILE", config.to_str().unwrap())];
+    // The invalid addressing style is reported by all the commands before any
+    // requests, and before the invalid transfer settings.
+    for args in [
+        &["ls", "s3://bucket/"][..],
+        &["cp", "a.txt", "s3://bucket/a.txt", "--dryrun"],
+        &["presign", "s3://bucket/a.txt"],
+        &["mb", "s3://new-bucket"],
+        &["api", "head-object", "--bucket", "bucket", "--key", "a.txt"],
+    ] {
+        let result = env.run_with_env(args, &envs);
+        assert_eq!(result.code, 255, "{args:?}");
+        assert_eq!(
+            result.stderr,
+            "\naws3: [ERROR]: S3 addressing style path-style is invalid. \
+             Valid options are: 'auto', 'virtual', and 'path'\n"
+        );
+    }
+    assert!(env.requests().is_empty());
+}

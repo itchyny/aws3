@@ -112,6 +112,9 @@ pub struct S3Config {
     /// The error of the invalid transfer settings, which is reported by the
     /// transfer commands since other commands do not validate them.
     pub invalid: Option<String>,
+    /// The error of the invalid addressing style, which is reported by all
+    /// the commands.
+    pub invalid_addressing_style: Option<String>,
 }
 
 /// The style of the URLs of buckets.
@@ -144,6 +147,7 @@ impl Default for S3Config {
             max_bandwidth: None,
             payload_signing_enabled: None,
             invalid: None,
+            invalid_addressing_style: None,
         }
     }
 }
@@ -159,7 +163,12 @@ impl S3Config {
                     "auto" => config.addressing_style = AddressingStyle::Auto,
                     "virtual" => config.addressing_style = AddressingStyle::Virtual,
                     "path" => config.addressing_style = AddressingStyle::Path,
-                    _ => {}
+                    _ => {
+                        config.invalid_addressing_style = Some(format!(
+                            "S3 addressing style {value} is invalid. \
+                             Valid options are: 'auto', 'virtual', and 'path'"
+                        ));
+                    }
                 },
                 "use_accelerate_endpoint" => {
                     config.use_accelerate_endpoint = value.eq_ignore_ascii_case("true");
@@ -265,18 +274,55 @@ fn selected_profile(profile: Option<&str>) -> Option<String> {
 /// CLI rejects even when the credentials are not needed.
 pub fn missing_profile(profile: Option<&str>) -> Option<String> {
     let profile = selected_profile(profile)?;
-    let read = |path: Option<PathBuf>| path.and_then(|path| std::fs::read_to_string(path).ok());
-    let in_config =
-        read(config_file()).is_some_and(|content| profile_settings(&content, &profile).found);
-    let in_credentials = read(credentials_file()).is_some_and(|content| {
-        content.lines().any(|line| {
-            line.trim()
-                .strip_prefix('[')
-                .and_then(|line| line.strip_suffix(']'))
-                .is_some_and(|section| section.trim() == profile)
+    (!profile_exists(&profile)).then_some(profile)
+}
+
+/// Returns the error of the invalid configuration of the credentials, which
+/// the AWS CLI reports on resolving the credentials before any requests: the
+/// access key in the environment variables without the secret key, unless
+/// the profile is specified by the option, or the source profile of the role
+/// of the profile not found.
+pub fn credentials_error(profile: Option<&str>) -> Option<String> {
+    if profile.is_none() {
+        let is_set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+        match (is_set("AWS_ACCESS_KEY_ID"), is_set("AWS_SECRET_ACCESS_KEY")) {
+            (true, false) => {
+                return Some(
+                    "Partial credentials found in env, missing: AWS_SECRET_ACCESS_KEY".to_owned(),
+                );
+            }
+            (true, true) => return None,
+            _ => {}
+        }
+    }
+    let profile = selected_profile(profile).unwrap_or_else(|| "default".to_owned());
+    let content = read_file(config_file())?;
+    let settings = profile_settings(&content, &profile);
+    let setting = |name: &str| {
+        let mut settings = settings.profile.iter();
+        settings.find_map(|(key, value)| (key == name).then_some(value))
+    };
+    let source = setting("source_profile")?;
+    (setting("role_arn").is_some() && !profile_exists(source)).then(|| {
+        format!("The source_profile \"{source}\" referenced in the profile \"{profile}\" does not exist.")
+    })
+}
+
+/// Returns whether the profile is in the config file or the credentials file.
+fn profile_exists(profile: &str) -> bool {
+    read_file(config_file()).is_some_and(|content| profile_settings(&content, profile).found)
+        || read_file(credentials_file()).is_some_and(|content| {
+            content.lines().any(|line| {
+                line.trim()
+                    .strip_prefix('[')
+                    .and_then(|line| line.strip_suffix(']'))
+                    .is_some_and(|section| section.trim() == profile)
+            })
         })
-    });
-    (!in_config && !in_credentials).then_some(profile)
+}
+
+fn read_file(path: Option<PathBuf>) -> Option<String> {
+    path.and_then(|path| std::fs::read_to_string(path).ok())
 }
 
 fn config_file() -> Option<PathBuf> {
@@ -642,5 +688,20 @@ s3 =
             settings,
             [("addressing_style".to_owned(), "path".to_owned())]
         );
+        let config = S3Config::from_settings(&settings);
+        assert_eq!(config.addressing_style, AddressingStyle::Path);
+        assert_eq!(config.invalid_addressing_style, None);
+        // Only the lowercase values are valid like the AWS CLI.
+        for value in ["Path", "path-style", ""] {
+            let settings = [("addressing_style".to_owned(), value.to_owned())];
+            let config = S3Config::from_settings(&settings);
+            assert_eq!(
+                config.invalid_addressing_style,
+                Some(format!(
+                    "S3 addressing style {value} is invalid. \
+                     Valid options are: 'auto', 'virtual', and 'path'"
+                ))
+            );
+        }
     }
 }

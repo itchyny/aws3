@@ -61,7 +61,15 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
             "The config profile ({profile}) could not be found"
         )));
     }
+    if !global.no_sign_request
+        && let Some(message) = config::credentials_error(global.profile.as_deref())
+    {
+        return Err(Error::new(message));
+    }
     let profile = ProfileConfig::load(global.profile.as_deref());
+    if let Some(message) = &profile.s3.invalid_addressing_style {
+        return Err(Error::new(message));
+    }
     let ca_bundle = global
         .ca_bundle
         .clone()

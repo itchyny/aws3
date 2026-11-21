@@ -431,3 +431,184 @@ fn credentials_missing_profile() {
         assert_eq!(result.code, code, "{profile}: {}", result.stderr);
     }
 }
+
+#[test]
+fn credentials_partial_environment() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "a");
+    env.write(
+        ".aws-credentials",
+        format!(
+            "[default]\naws_access_key_id = {ACCESS_KEY}\naws_secret_access_key = {SECRET_KEY}\n\
+             [other]\naws_access_key_id = {ACCESS_KEY}\naws_secret_access_key = {SECRET_KEY}\n"
+        ),
+    );
+    let credentials = env.path(".aws-credentials");
+    // The access key without the secret key is rejected before any requests,
+    // even on the dry runs, instead of falling back to the profile.
+    for args in [
+        &["ls", "s3://bucket/"][..],
+        &["cp", "a.txt", "s3://bucket/a.txt", "--dryrun"],
+    ] {
+        let mut cmd = env.command(args);
+        cmd.env_remove("AWS_SECRET_ACCESS_KEY")
+            .env("AWS_SHARED_CREDENTIALS_FILE", &credentials);
+        let result = run(cmd);
+        assert_eq!(result.code, 255, "{args:?}");
+        assert_eq!(
+            result.stderr,
+            "\naws3: [ERROR]: Partial credentials found in env, missing: AWS_SECRET_ACCESS_KEY\n"
+        );
+    }
+    assert!(env.requests().is_empty());
+
+    // The environment variables are not used with the profile of the option,
+    // nor without signing.
+    for args in [
+        &["ls", "s3://bucket/", "--profile", "other"][..],
+        &["ls", "s3://bucket/", "--no-sign-request"],
+    ] {
+        let mut cmd = env.command(args);
+        cmd.env_remove("AWS_SECRET_ACCESS_KEY")
+            .env("AWS_SHARED_CREDENTIALS_FILE", &credentials);
+        let result = run(cmd);
+        assert!(
+            !result.stderr.contains("Partial"),
+            "{args:?}: {}",
+            result.stderr
+        );
+    }
+}
+
+#[test]
+fn credentials_service_errors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.intercept(|request| {
+        if form_param(request, "Action").is_some() {
+            return Some(xml_response(
+                403,
+                "<ErrorResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\">\
+                 <Error><Type>Sender</Type><Code>AccessDenied</Code>\
+                 <Message>Not authorized to perform sts:AssumeRole</Message></Error>\
+                 <RequestId>request-id</RequestId></ErrorResponse>",
+            ));
+        }
+        (request.uri.path() == "/federation/credentials").then(|| {
+            http::Response::builder()
+                .status(401)
+                .header("content-type", "application/json")
+                .header("x-amzn-errortype", "UnauthorizedException")
+                .body(s3s::Body::from(
+                    r#"{"message":"Session token not found or invalid"}"#.to_owned(),
+                ))
+                .unwrap()
+        })
+    });
+    env.write("token", "oidc-token");
+    env.write(
+        ".aws/sso/cache/0ad374308c5a4e22f723adf10145eafad7c4031c.json",
+        r#"{"accessToken":"sso-access-token","expiresAt":"2099-01-01T00:00:00Z","region":"us-east-1","startUrl":"https://example.awsapps.com/start"}"#,
+    );
+    let config = env.config(&format!(
+        "[profile role]\nrole_arn = arn:aws:iam::123456789012:role/role\n\
+         source_profile = base\n\n\
+         [profile base]\naws_access_key_id = AKIABASEEXAMPLE\naws_secret_access_key = base-secret\n\n\
+         [profile web]\nrole_arn = arn:aws:iam::123456789012:role/role\n\
+         web_identity_token_file = {}\n\n\
+         [profile sso]\nsso_session = my-sso\nsso_account_id = 123456789012\nsso_role_name = role\n\n\
+         [sso-session my-sso]\nsso_start_url = https://example.awsapps.com/start\n\
+         sso_region = us-east-1\n",
+        env.path("token").display()
+    ));
+    // The service errors of the credential providers are reported in the same
+    // way as those of the operations.
+    for (profile, operation) in [("role", "AssumeRole"), ("web", "AssumeRoleWithWebIdentity")] {
+        let mut cmd = command(&env, &["ls", "s3://bucket/", "--profile", profile]);
+        cmd.env("AWS_CONFIG_FILE", &config);
+        let result = run(cmd);
+        assert_eq!(result.code, 254, "{profile}: {}", result.stderr);
+        assert_eq!(
+            result.stderr,
+            format!(
+                "\naws3: [ERROR]: An error occurred (AccessDenied) when calling the {operation} \
+                 operation: Not authorized to perform sts:AssumeRole\n"
+            )
+        );
+    }
+    // The session of SSO not valid is asked to log in again.
+    let mut cmd = command(&env, &["ls", "s3://bucket/", "--profile", "sso"]);
+    cmd.env("AWS_CONFIG_FILE", &config);
+    let result = run(cmd);
+    assert_eq!(result.code, 255, "{}", result.stderr);
+    assert_eq!(
+        result.stderr,
+        "\naws3: [ERROR]: The SSO session associated with this profile has expired or is \
+         otherwise invalid. To refresh this SSO session run aws sso login with the \
+         corresponding profile.\n"
+    );
+    assert!(bucket_requests(&env).is_empty());
+}
+
+#[test]
+fn credentials_missing_source_profile() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "a");
+    let config = env.config(
+        "[default]\nrole_arn = arn:aws:iam::123456789012:role/role\nsource_profile = missing\n",
+    );
+    for args in [
+        &["ls", "s3://bucket/"][..],
+        &["cp", "a.txt", "s3://bucket/a.txt", "--dryrun"],
+    ] {
+        let mut cmd = command(&env, args);
+        cmd.env("AWS_CONFIG_FILE", &config);
+        let result = run(cmd);
+        assert_eq!(result.code, 255, "{args:?}");
+        assert_eq!(
+            result.stderr,
+            "\naws3: [ERROR]: The source_profile \"missing\" referenced in the profile \
+             \"default\" does not exist.\n"
+        );
+    }
+    assert!(env.requests().is_empty());
+
+    // The credentials in the environment variables take precedence.
+    let mut cmd = env.command(&["ls", "s3://bucket/"]);
+    cmd.env("AWS_CONFIG_FILE", &config);
+    run(cmd).success();
+}
+
+#[test]
+fn credentials_directory_bucket_session() {
+    let env = Env::new();
+    env.intercept(|request| {
+        request.has_query("session").then(|| {
+            xml_response(
+                403,
+                "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
+            )
+        })
+    });
+    // The errors of the sessions of the directory buckets are reported in the
+    // same way as those of the operations.
+    for args in [
+        &["ls", "s3://bucket--use1-az4--x-s3/"][..],
+        &["presign", "s3://bucket--use1-az4--x-s3/a.txt"],
+    ] {
+        let result = env.run(args);
+        assert_eq!(result.code, 254, "{args:?}: {}", result.stderr);
+        assert_eq!(
+            result.stderr,
+            "\naws3: [ERROR]: An error occurred (AccessDenied) when calling the CreateSession \
+             operation: Access Denied\n"
+        );
+    }
+    assert!(
+        env.requests()
+            .iter()
+            .all(|request| request.has_query("session"))
+    );
+}
