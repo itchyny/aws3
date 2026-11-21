@@ -1,5 +1,5 @@
-//! Request parameters of objects mapped from the command line options, in the
-//! same way as `RequestParamsMapper` of the AWS CLI.
+//! The request parameters of the objects mapped from the command line options,
+//! in the same way as `RequestParamsMapper` of the AWS CLI.
 
 use std::collections::HashMap;
 

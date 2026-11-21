@@ -1,4 +1,5 @@
-//! The transfers of the files and the objects.
+//! The tasks of the transfers, with the operations, the sources and the
+//! destinations, and the outcomes.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};

@@ -1,4 +1,4 @@
-//! Generators of the source files or objects, in the same way as
+//! The generators of the source files or objects, in the same way as
 //! `FileGenerator` of the AWS CLI.
 
 use std::fs;

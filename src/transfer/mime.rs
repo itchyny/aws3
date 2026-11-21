@@ -1,5 +1,5 @@
-//! Content type guessing compatible with the default tables of Python's
-//! `mimetypes` module, which the AWS CLI uses to set the content type.
+//! The guessing of the content types compatible with the default tables of
+//! Python's `mimetypes` module, which the AWS CLI uses to set the content type.
 //! The tables are generated from Python's `mimetypes._types_map_default`,
 //! `_suffix_map_default` and `_encodings_map_default`, and the types in the
 //! known files of the system are added like `mimetypes.init`.

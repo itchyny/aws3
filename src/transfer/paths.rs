@@ -1,5 +1,5 @@
-//! Path manipulations compatible with the AWS CLI, which works on strings
-//! rather than on file system objects.
+//! The manipulations of the paths compatible with the AWS CLI, which work on
+//! strings rather than on file system objects.
 
 use std::path::MAIN_SEPARATOR as SEP;
 

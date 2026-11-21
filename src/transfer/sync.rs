@@ -1,4 +1,4 @@
-//! Comparison of the source and the destination, in the same way as the
+//! The comparison of the source and the destination, in the same way as the
 //! `Comparator` and the sync strategies of the AWS CLI.
 
 use std::collections::HashSet;

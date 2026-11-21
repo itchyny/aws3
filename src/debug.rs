@@ -1,6 +1,6 @@
 //! The debug logging of `--debug`, which writes the events of the SDK to the
 //! standard error in the same line format as the AWS CLI, e.g.
-//! `2026-01-01 00:00:00,000 - main - aws3 - DEBUG - CLI version: aws3/0.1.0`.
+//! `2026-01-01 00:00:00,000 - main - aws3 - DEBUG - <message>`.
 
 use std::fmt::{self, Write as _};
 use std::io::Write as _;
