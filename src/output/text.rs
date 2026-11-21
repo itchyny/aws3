@@ -4,7 +4,7 @@
 
 use std::fmt::Write;
 
-use crate::value::{Value, python_str};
+use crate::value::{Value, get, python_str};
 
 /// Formats the value, which fails on the lists of the maps and the other
 /// values.
@@ -39,7 +39,7 @@ fn format_list(values: &[Value], buf: &mut String, identifier: Option<&str>) -> 
         }
     } else if values.iter().any(|value| matches!(value, Value::List(_))) {
         let (scalars, others): (Vec<&Value>, Vec<&Value>) =
-            values.iter().partition(|value| !is_container(value));
+            values.iter().partition(|value| !value.is_container());
         if !scalars.is_empty() {
             format_scalars(&scalars, buf, identifier);
         }
@@ -83,7 +83,7 @@ fn format_map(
         None => {
             let (scalars, nested): (Vec<_>, Vec<_>) = sorted
                 .into_iter()
-                .partition(|(_, value)| !is_container(value));
+                .partition(|(_, value)| !value.is_container());
             (
                 scalars.iter().map(|(_, value)| python_str(value)).collect(),
                 nested
@@ -94,12 +94,7 @@ fn format_map(
         }
         Some(keys) => (
             keys.iter()
-                .map(|key| {
-                    pairs
-                        .iter()
-                        .find(|(k, _)| k == key)
-                        .map_or_else(String::new, |(_, value)| python_str(value))
-                })
+                .map(|key| get(pairs, key).map(python_str).unwrap_or_default())
                 .collect(),
             sorted
                 .into_iter()
@@ -132,7 +127,7 @@ fn scalar_keys(values: &[Value]) -> Result<Vec<String>, String> {
             );
         };
         for (key, value) in pairs {
-            if !is_container(value) {
+            if !value.is_container() {
                 keys.push(key.clone());
             }
         }
@@ -140,10 +135,6 @@ fn scalar_keys(values: &[Value]) -> Result<Vec<String>, String> {
     keys.sort();
     keys.dedup();
     Ok(keys)
-}
-
-fn is_container(value: &Value) -> bool {
-    matches!(value, Value::Map(_) | Value::List(_))
 }
 
 #[cfg(test)]

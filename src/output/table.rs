@@ -5,7 +5,7 @@
 use std::fmt::Write;
 
 use super::east_asian_width::WIDE_RANGES;
-use crate::value::{Value, python_str};
+use crate::value::{Value, get, python_str};
 
 /// Builds the table of the value, whose title is the name of the operation,
 /// like `TableFormatter` of the AWS CLI. Returns `None` for the false values,
@@ -57,8 +57,7 @@ impl MultiTable {
                 row.len()
             ));
         }
-        section.update_max_widths(&row);
-        section.rows.push(row);
+        section.add_row(row);
         Ok(())
     }
 
@@ -81,7 +80,9 @@ impl MultiTable {
             Value::List(values) => {
                 for value in values {
                     match value {
-                        Value::List(elements) if elements.iter().all(is_scalar) => {
+                        Value::List(elements)
+                            if elements.iter().all(|value| !value.is_container()) =>
+                        {
                             self.add_row(elements.iter().map(python_str).collect())?;
                         }
                         // The keys of the maps are scalars like Python.
@@ -108,33 +109,18 @@ impl MultiTable {
     ) -> Result<(), String> {
         let (headers, more) = group_scalar_keys(pairs);
         if let [header] = headers.as_slice() {
-            let value = pairs
-                .iter()
-                .find(|(key, _)| key == header)
-                .map(|(_, value)| value);
-            self.add_row(vec![
-                header.clone(),
-                value.map(python_str).unwrap_or_default(),
-            ])?;
+            let value = get(pairs, header).map(python_str).unwrap_or_default();
+            self.add_row(vec![header.clone(), value])?;
         } else if !headers.is_empty() {
             let row = headers
                 .iter()
-                .map(|header| {
-                    pairs
-                        .iter()
-                        .find(|(key, _)| key == header)
-                        .map_or_else(String::new, |(_, value)| python_str(value))
-                })
+                .map(|header| get(pairs, header).map(python_str).unwrap_or_default())
                 .collect();
             self.add_row_header(headers);
             self.add_row(row)?;
         }
         for key in more {
-            let value = pairs
-                .iter()
-                .find(|(k, _)| *k == key)
-                .map(|(_, value)| value);
-            if let Some(value) = value {
+            if let Some(value) = get(pairs, &key) {
                 self.build(Some(&key), value, indent_level + 1)?;
             }
         }
@@ -174,16 +160,11 @@ impl MultiTable {
             }
             let row = headers
                 .iter()
-                .map(|header| {
-                    pairs
-                        .iter()
-                        .find(|(key, _)| key == header)
-                        .map_or_else(String::new, |(_, value)| python_str(value))
-                })
+                .map(|header| get(pairs, header).map(python_str).unwrap_or_default())
                 .collect();
             self.add_row(row)?;
             for key in &more {
-                if let Some((_, value)) = pairs.iter().find(|(k, _)| k == key) {
+                if let Some(value) = get(pairs, key) {
                     self.build(Some(key), value, indent_level + 1)?;
                 }
             }
@@ -392,15 +373,11 @@ fn is_false(value: &Value) -> bool {
     }
 }
 
-fn is_scalar(value: &Value) -> bool {
-    !matches!(value, Value::List(_) | Value::Map(_))
-}
-
 /// Returns the sorted keys of the scalars and of the others.
 fn group_scalar_keys(pairs: &[(String, Value)]) -> (Vec<String>, Vec<String>) {
     let (mut headers, mut more): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     for (key, value) in pairs {
-        if is_scalar(value) {
+        if !value.is_container() {
             headers.push(key.clone());
         } else {
             more.push(key.clone());
@@ -465,17 +442,10 @@ fn text_length(text: &str) -> usize {
     text.chars()
         .map(|ch| {
             let code = ch as u32;
+            let index = WIDE_RANGES.partition_point(|&(_, end)| end < code);
             let wide = WIDE_RANGES
-                .binary_search_by(|&(start, end)| {
-                    if end < code {
-                        std::cmp::Ordering::Less
-                    } else if start > code {
-                        std::cmp::Ordering::Greater
-                    } else {
-                        std::cmp::Ordering::Equal
-                    }
-                })
-                .is_ok();
+                .get(index)
+                .is_some_and(|&(start, _)| start <= code);
             if wide { 2 } else { 1 }
         })
         .sum()

@@ -36,9 +36,14 @@ impl Value {
     /// Returns the value of the key of the map.
     pub fn get(&self, key: &str) -> Option<&Self> {
         match self {
-            Self::Map(pairs) => pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            Self::Map(pairs) => get(pairs, key),
             _ => None,
         }
+    }
+
+    /// Returns whether the value is a list or a map.
+    pub fn is_container(&self) -> bool {
+        matches!(self, Self::List(_) | Self::Map(_))
     }
 
     /// Returns the value in the JSON syntax, where the bytes are formatted
@@ -118,6 +123,11 @@ impl Value {
             _ => buf.push_str(&self.to_json()),
         }
     }
+}
+
+/// Returns the value of the key in the pairs of a map.
+pub fn get<'a>(pairs: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
+    pairs.iter().find(|(k, _)| k == key).map(|(_, value)| value)
 }
 
 /// Returns the validation error of the parameter whose value is not of the
