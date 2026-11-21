@@ -17,8 +17,8 @@ use s3s::service::S3ServiceBuilder;
 use s3s_fs::FileSystem;
 use tempfile::TempDir;
 
-const ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
-const SECRET_KEY: &str = "wJalrXUtnFI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+pub const ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
+pub const SECRET_KEY: &str = "wJalrXUtnFI/K7MDENG/bPxRfiCYEXAMPLEKEY";
 
 /// A fake S3 server storing the buckets in a temporary directory, and a
 /// temporary working directory to run aws3 in.
@@ -63,11 +63,28 @@ impl Request {
 
     /// Returns the region in the credential scope of the signature.
     pub fn signed_region(&self) -> &str {
+        self.credential_scope(2)
+    }
+
+    /// Returns the access key ID in the credential scope of the signature.
+    pub fn access_key(&self) -> &str {
+        self.credential_scope(0)
+    }
+
+    fn credential_scope(&self, index: usize) -> &str {
         let authorization = self.headers.get("authorization");
         let authorization = authorization.and_then(|value| value.to_str().ok());
         let credential = authorization.and_then(|value| value.split("Credential=").nth(1));
         credential
-            .and_then(|value| value.split('/').nth(2))
+            .and_then(|value| value.split('/').nth(index))
+            .unwrap_or_default()
+    }
+
+    /// Returns the value of the header, or an empty string if missing.
+    pub fn header(&self, name: &str) -> &str {
+        let value = self.headers.get(name);
+        value
+            .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
     }
 }
@@ -584,7 +601,7 @@ pub struct Result {
 }
 
 impl Result {
-    fn new(output: Output) -> Self {
+    pub fn new(output: Output) -> Self {
         Self {
             code: output.status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
