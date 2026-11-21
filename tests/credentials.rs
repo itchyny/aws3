@@ -244,12 +244,24 @@ fn credentials_web_identity() {
     run(cmd).success();
     assert_signed(&env, "web-token");
 
+    // The role is assumed in the default region if the region is not
+    // configured, with and without the profile of the option.
+    for args in [
+        &["ls", "s3://bucket/"][..],
+        &["ls", "s3://bucket/", "--profile", "default"],
+    ] {
+        let mut cmd = command(&env, args);
+        cmd.env("AWS_CONFIG_FILE", &config).env_remove("AWS_REGION");
+        run(cmd).success();
+        assert_signed(&env, "web-token");
+    }
+
     let requests = env.requests();
     let assume: Vec<_> = requests
         .iter()
         .filter(|request| form_param(request, "Action") == Some("AssumeRoleWithWebIdentity"))
         .collect();
-    assert_eq!(assume.len(), 2);
+    assert_eq!(assume.len(), 4);
     for request in assume {
         assert_eq!(form_param(request, "WebIdentityToken"), Some("oidc-token"));
         // The request is not signed.

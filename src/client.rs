@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use aws_config::ecs::EcsCredentialsProvider;
+use aws_config::environment::EnvironmentVariableCredentialsProvider;
 use aws_config::imds::credentials::ImdsCredentialsProvider;
 use aws_config::meta::credentials::CredentialsProviderChain;
 use aws_config::profile::ProfileFileCredentialsProvider;
@@ -105,10 +106,8 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
         loader = loader.no_credentials();
     }
     let mut sdk = loader.load().await;
-    if let Some(profile) = &global.profile
-        && !global.no_sign_request
-    {
-        let provider = profile_credentials(profile, sdk.region(), http_client, timeout_config);
+    if !global.no_sign_request {
+        let provider = credentials_chain(global, sdk.region(), http_client, timeout_config);
         sdk = sdk
             .into_builder()
             .credentials_provider(SharedCredentialsProvider::new(provider))
@@ -136,30 +135,45 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
     })
 }
 
-/// Returns the default credentials chain of the profile without the
-/// credentials in the environment variables, which the AWS CLI ignores when
-/// the profile is specified explicitly.
-fn profile_credentials(
-    profile: &str,
+/// Returns the default credentials chain of the SDK, without the credentials
+/// in the environment variables when the profile is specified by the option,
+/// which the AWS CLI ignores.
+/// The requests to STS are sent to the default region if the region is not
+/// configured, like the AWS CLI sends them to the global endpoint.
+fn credentials_chain(
+    global: &GlobalArgs,
     region: Option<&Region>,
     http_client: SharedHttpClient,
     timeout_config: TimeoutConfig,
 ) -> CredentialsProviderChain {
+    let region = region
+        .cloned()
+        .unwrap_or(Region::from_static(DEFAULT_REGION));
     let conf = ProviderConfig::without_region()
-        .with_region(region.cloned())
+        .with_region(Some(region))
         .with_http_client(http_client)
         .with_timeout_config(timeout_config)
         .with_behavior_version(Some(BehaviorVersion::latest()));
-    let profile_provider = ProfileFileCredentialsProvider::builder()
-        .configure(&conf)
-        .profile_name(profile)
-        .build();
+    let mut profile_provider = ProfileFileCredentialsProvider::builder().configure(&conf);
+    if let Some(profile) = &global.profile {
+        profile_provider = profile_provider.profile_name(profile);
+    }
+    let profile_provider = profile_provider.build();
+    let chain = if global.profile.is_some() {
+        CredentialsProviderChain::first_try("Profile", profile_provider)
+    } else {
+        CredentialsProviderChain::first_try(
+            "Environment",
+            EnvironmentVariableCredentialsProvider::new(),
+        )
+        .or_else("Profile", profile_provider)
+    };
     let web_identity_provider = WebIdentityTokenCredentialsProvider::builder()
         .configure(&conf)
         .build();
     let ecs_provider = EcsCredentialsProvider::builder().configure(&conf).build();
     let imds_provider = ImdsCredentialsProvider::builder().configure(&conf).build();
-    CredentialsProviderChain::first_try("Profile", profile_provider)
+    chain
         .or_else("WebIdentityToken", web_identity_provider)
         .or_else("EcsContainer", ecs_provider)
         .or_else("Ec2InstanceMetadata", imds_provider)
