@@ -51,11 +51,7 @@ impl ProfileConfig {
         else {
             return Self::default();
         };
-        let profile = profile
-            .map(str::to_owned)
-            .or_else(|| std::env::var("AWS_PROFILE").ok())
-            .or_else(|| std::env::var("AWS_DEFAULT_PROFILE").ok())
-            .unwrap_or_else(|| "default".to_owned());
+        let profile = selected_profile(profile).unwrap_or_else(|| "default".to_owned());
         let settings = profile_settings(&content, &profile);
         let ca_bundle = settings
             .profile
@@ -257,13 +253,18 @@ fn positive_error(name: &str, value: impl std::fmt::Display) -> String {
     format!("Value for {name} must be a positive integer: {value}")
 }
 
+/// Returns the profile specified explicitly by the option or `AWS_PROFILE`.
+fn selected_profile(profile: Option<&str>) -> Option<String> {
+    profile
+        .map(str::to_owned)
+        .or_else(|| std::env::var("AWS_PROFILE").ok())
+}
+
 /// Returns the profile specified explicitly by the option or `AWS_PROFILE` if
 /// it is in neither the config file nor the credentials file, which the AWS
 /// CLI rejects even when the credentials are not needed.
 pub fn missing_profile(profile: Option<&str>) -> Option<String> {
-    let profile = profile
-        .map(str::to_owned)
-        .or_else(|| std::env::var("AWS_PROFILE").ok())?;
+    let profile = selected_profile(profile)?;
     let read = |path: Option<PathBuf>| path.and_then(|path| std::fs::read_to_string(path).ok());
     let in_config =
         read(config_file()).is_some_and(|content| profile_settings(&content, &profile).found);
