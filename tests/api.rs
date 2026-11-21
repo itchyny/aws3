@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::Env;
+use common::{ACCESS_KEY, Env, SECRET_KEY};
 
 /// Returns the standard output without the line of the timestamp of the last
 /// modification, which differs on each run.
@@ -1584,7 +1584,10 @@ fn output_format() {
 
     // The format is of the option, the environment variable, or the config
     // file of the profile.
-    let config = env.config("[default]\noutput = text\n[profile json]\noutput = json\n");
+    let config = env.config(&format!(
+        "[default]\noutput = text\n[profile json]\noutput = json\n\
+         aws_access_key_id = {ACCESS_KEY}\naws_secret_access_key = {SECRET_KEY}\n"
+    ));
     let config = config.to_str().unwrap();
     let result = env
         .run_with_env(&args, &[("AWS_CONFIG_FILE", config)])

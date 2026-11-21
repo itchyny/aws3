@@ -117,6 +117,34 @@ fn credentials_shared_file() {
 }
 
 #[test]
+fn credentials_profile_over_environment() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write(
+        ".aws-credentials",
+        format!(
+            "[other]\naws_access_key_id = {ACCESS_KEY}\naws_secret_access_key = {SECRET_KEY}\n\
+             aws_session_token = other-token\n"
+        ),
+    );
+    // The profile of the option takes precedence over the credentials in the
+    // environment variables, but that of AWS_PROFILE does not.
+    let mut cmd = env.command(&["ls", "s3://bucket/", "--profile", "other"]);
+    cmd.env("AWS_SHARED_CREDENTIALS_FILE", env.path(".aws-credentials"));
+    run(cmd).success();
+    assert_signed(&env, "other-token");
+
+    let start = env.requests().len();
+    let mut cmd = env.command(&["ls", "s3://bucket/"]);
+    cmd.env("AWS_SHARED_CREDENTIALS_FILE", env.path(".aws-credentials"))
+        .env("AWS_PROFILE", "other");
+    run(cmd).success();
+    for request in &env.requests()[start..] {
+        assert_eq!(request.header("x-amz-security-token"), "");
+    }
+}
+
+#[test]
 fn credentials_process() {
     let env = Env::new();
     env.bucket("bucket");

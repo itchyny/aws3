@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::Env;
+use common::{ACCESS_KEY, Env, SECRET_KEY};
 
 #[test]
 fn invalid_arguments() {
@@ -397,11 +397,10 @@ fn timeouts_and_profile() {
         "5",
     ])
     .success();
-    let path = env.config(
-        r"[profile other]
-region = us-west-2
-",
-    );
+    let path = env.config(&format!(
+        "[profile other]\nregion = us-west-2\n\
+         aws_access_key_id = {ACCESS_KEY}\naws_secret_access_key = {SECRET_KEY}\n"
+    ));
     let path = path.to_string_lossy().into_owned();
     env.run_with_env(&["ls", "--profile", "other"], &[("AWS_CONFIG_FILE", &path)])
         .success();

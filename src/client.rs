@@ -2,9 +2,15 @@ use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use aws_config::ecs::EcsCredentialsProvider;
+use aws_config::imds::credentials::ImdsCredentialsProvider;
+use aws_config::meta::credentials::CredentialsProviderChain;
+use aws_config::profile::ProfileFileCredentialsProvider;
+use aws_config::provider_config::ProviderConfig;
+use aws_config::web_identity_token::WebIdentityTokenCredentialsProvider;
 use aws_config::{BehaviorVersion, SdkConfig};
-use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::provider::error::CredentialsError;
+use aws_credential_types::provider::{ProvideCredentials, SharedCredentialsProvider};
 use aws_runtime::auth::PayloadSigningOverride;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::Region;
@@ -69,9 +75,10 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
     } else {
         tls::http_client(ca_bundle.as_deref())?
     };
+    let http_client = with_request_urls(http_client);
     let mut loader = aws_config::defaults(BehaviorVersion::latest())
-        .http_client(with_request_urls(http_client))
-        .timeout_config(timeout_config);
+        .http_client(http_client.clone())
+        .timeout_config(timeout_config.clone());
     if let Some(profile) = &global.profile {
         loader = loader.profile_name(profile);
     }
@@ -84,7 +91,16 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
     if global.no_sign_request {
         loader = loader.no_credentials();
     }
-    let sdk = loader.load().await;
+    let mut sdk = loader.load().await;
+    if let Some(profile) = &global.profile
+        && !global.no_sign_request
+    {
+        let provider = profile_credentials(profile, sdk.region(), http_client, timeout_config);
+        sdk = sdk
+            .into_builder()
+            .credentials_provider(SharedCredentialsProvider::new(provider))
+            .build();
+    }
     // The credentials of `aws login` are resolved on creating the clients,
     // where the errors are reported before any requests like the AWS CLI.
     if let Some(session) = &profile.login_session
@@ -105,6 +121,35 @@ pub async fn load_config(global: &GlobalArgs) -> Result<Config, Error> {
         s3: profile.s3,
         endpoint_url,
     })
+}
+
+/// Returns the default credentials chain of the profile without the
+/// credentials in the environment variables, which the AWS CLI ignores when
+/// the profile is specified explicitly.
+fn profile_credentials(
+    profile: &str,
+    region: Option<&Region>,
+    http_client: SharedHttpClient,
+    timeout_config: TimeoutConfig,
+) -> CredentialsProviderChain {
+    let conf = ProviderConfig::without_region()
+        .with_region(region.cloned())
+        .with_http_client(http_client)
+        .with_timeout_config(timeout_config)
+        .with_behavior_version(Some(BehaviorVersion::latest()));
+    let profile_provider = ProfileFileCredentialsProvider::builder()
+        .configure(&conf)
+        .profile_name(profile)
+        .build();
+    let web_identity_provider = WebIdentityTokenCredentialsProvider::builder()
+        .configure(&conf)
+        .build();
+    let ecs_provider = EcsCredentialsProvider::builder().configure(&conf).build();
+    let imds_provider = ImdsCredentialsProvider::builder().configure(&conf).build();
+    CredentialsProviderChain::first_try("Profile", profile_provider)
+        .or_else("WebIdentityToken", web_identity_provider)
+        .or_else("EcsContainer", ecs_provider)
+        .or_else("Ec2InstanceMetadata", imds_provider)
 }
 
 /// Disables the signing of the payloads of all the requests, which is enabled
