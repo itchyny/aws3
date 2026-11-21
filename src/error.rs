@@ -1,6 +1,11 @@
+//! The errors of the commands, translated from the errors of the SDK with the
+//! same messages and exit codes as the AWS CLI, and rendered in the formats of
+//! `--cli-error-format`.
+
 use std::fmt;
 use std::process::ExitCode;
 
+use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_s3::config::http::HttpResponse;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::operation::create_session::CreateSessionError;
@@ -80,11 +85,17 @@ impl Error {
         if let Some(err) = credentials_service_error(&err) {
             return err;
         }
+        let no_credentials = sources(&err).any(|err| {
+            matches!(
+                err.downcast_ref::<CredentialsError>(),
+                Some(CredentialsError::CredentialsNotLoaded(_))
+            )
+        });
         match &err {
             SdkError::ServiceError(service_err) => Self::service(operation, service_err),
             // The message of the transfers is extended by the error handler of
             // the commands.
-            _ if is_no_credentials(&err) => Self {
+            _ if no_credentials => Self {
                 code: EXIT_NO_CREDENTIALS,
                 message: "Unable to locate credentials".to_owned(),
                 info: Some(ErrorInfo {
@@ -426,23 +437,6 @@ fn credentials_service_error(err: &(dyn std::error::Error + 'static)) -> Option<
         return Some(Error::service("GetRoleCredentials", err));
     }
     None
-}
-
-fn is_no_credentials(err: &(dyn std::error::Error + 'static)) -> bool {
-    let mut source = Some(err);
-    while let Some(err) = source {
-        if let Some(err) =
-            err.downcast_ref::<aws_credential_types::provider::error::CredentialsError>()
-            && matches!(
-                err,
-                aws_credential_types::provider::error::CredentialsError::CredentialsNotLoaded(_)
-            )
-        {
-            return true;
-        }
-        source = err.source();
-    }
-    false
 }
 
 /// Translates the error of resolving the endpoint in the same way as

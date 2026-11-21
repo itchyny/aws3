@@ -1,3 +1,6 @@
+//! The S3 paths of the buckets, the keys and the access point ARNs, which are
+//! split, validated and encoded in the same way as the AWS CLI.
+
 use std::fmt::Write;
 
 /// Splits an S3 path into the bucket and the key, with or without the `s3://`

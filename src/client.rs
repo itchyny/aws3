@@ -1,3 +1,7 @@
+//! The configuration and the clients of S3, loaded from the environment
+//! variables, the config files and the global options, where the HTTP clients
+//! record the URLs of the requests for the errors.
+
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -31,11 +35,10 @@ use aws_smithy_runtime_api::client::retries::RequestAttempts;
 use aws_smithy_runtime_api::client::retries::classifiers::{ClassifyRetry, RetryAction};
 use aws_smithy_runtime_api::http::Headers;
 use aws_smithy_types::retry::RetryConfig;
+use aws_types::service_config::ServiceConfigKey;
 use hyper_util::client::proxy::matcher::Matcher;
 
 use crate::cli::GlobalArgs;
-use aws_types::service_config::ServiceConfigKey;
-
 use crate::config::{self, AddressingStyle, ProfileConfig, S3Config};
 use crate::error::{ConnectionError, Error, Retries};
 use crate::{insecure, tls};

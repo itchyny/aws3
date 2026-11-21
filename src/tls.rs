@@ -1,3 +1,7 @@
+//! An HTTP client which verifies the certificates of the servers with the CA
+//! bundle or the Mozilla root certificates, and sends the requests through the
+//! proxies of the environment variables.
+
 use std::path::Path;
 
 use aws_sdk_s3::config::SharedHttpClient;

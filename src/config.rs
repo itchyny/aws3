@@ -54,32 +54,19 @@ impl ProfileConfig {
         let profile = selected_profile(profile).unwrap_or_else(|| "default".to_owned());
         let settings = profile_settings(&content, &profile);
         let ca_bundle = settings
-            .profile
-            .iter()
-            .find(|(key, _)| key == "ca_bundle")
-            .map(|(_, value)| PathBuf::from(value))
+            .get("ca_bundle")
+            .map(PathBuf::from)
             .filter(|path| !path.as_os_str().is_empty());
         let mut s3 = S3Config::from_settings(&settings.s3);
-        if let Some((_, value)) = settings
-            .profile
-            .iter()
-            .find(|(key, _)| key == "s3_use_arn_region")
-        {
+        if let Some(value) = settings.get("s3_use_arn_region") {
             s3.use_arn_region = Some(value.eq_ignore_ascii_case("true"));
         }
-        let setting = |name: &str| {
-            settings
-                .profile
-                .iter()
-                .find(|(key, _)| key == name)
-                .map(|(_, value)| value.clone())
-        };
         Self {
             ca_bundle,
             s3,
-            login_session: setting("login_session"),
-            cli_error_format: setting("cli_error_format"),
-            output: setting("output"),
+            login_session: settings.get("login_session").map(str::to_owned),
+            cli_error_format: settings.get("cli_error_format").map(str::to_owned),
+            output: settings.get("output").map(str::to_owned),
         }
     }
 }
@@ -298,20 +285,17 @@ pub fn credentials_error(profile: Option<&str>) -> Option<String> {
     let profile = selected_profile(profile).unwrap_or_else(|| "default".to_owned());
     let content = read_file(config_file())?;
     let settings = profile_settings(&content, &profile);
-    let setting = |name: &str| {
-        let mut settings = settings.profile.iter();
-        settings.find_map(|(key, value)| (key == name).then_some(value))
-    };
-    let source = setting("source_profile")?;
-    (setting("role_arn").is_some() && !profile_exists(source)).then(|| {
+    let source = settings.get("source_profile")?;
+    (settings.get("role_arn").is_some() && !profile_exists(source)).then(|| {
         format!("The source_profile \"{source}\" referenced in the profile \"{profile}\" does not exist.")
     })
 }
 
 /// Returns whether the profile is in the config file or the credentials file.
 fn profile_exists(profile: &str) -> bool {
+    let credentials = aws_file("AWS_SHARED_CREDENTIALS_FILE", "credentials");
     read_file(config_file()).is_some_and(|content| profile_settings(&content, profile).found)
-        || read_file(credentials_file()).is_some_and(|content| {
+        || read_file(credentials).is_some_and(|content| {
             content.lines().any(|line| {
                 line.trim()
                     .strip_prefix('[')
@@ -329,10 +313,6 @@ fn config_file() -> Option<PathBuf> {
     aws_file("AWS_CONFIG_FILE", "config")
 }
 
-fn credentials_file() -> Option<PathBuf> {
-    aws_file("AWS_SHARED_CREDENTIALS_FILE", "credentials")
-}
-
 fn aws_file(name: &str, file: &str) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(name).filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(path));
@@ -348,6 +328,14 @@ struct Settings {
     found: bool,
     profile: Vec<(String, String)>,
     s3: Vec<(String, String)>,
+}
+
+impl Settings {
+    /// Returns the value of the setting in the section of the profile.
+    fn get(&self, name: &str) -> Option<&str> {
+        let mut settings = self.profile.iter();
+        settings.find_map(|(key, value)| (key == name).then_some(value.as_str()))
+    }
 }
 
 /// Returns the settings in the section of the profile, and the nested
