@@ -150,6 +150,14 @@ fn sync_s3_to_s3() {
         b"b"
     );
     assert_eq!(env.object_content("bucket", "dest/stale.txt"), None);
+    // The deletions are sent in a batch of DeleteObjects.
+    let requests = env.requests();
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.method == "POST" && request.has_query("delete"))
+    );
+    assert!(requests.iter().all(|request| request.method != "DELETE"));
 
     let result = env
         .run(&[

@@ -1,6 +1,6 @@
 //! The shared state of the transfers.
 
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use aws_sdk_s3::Client;
@@ -36,6 +36,9 @@ pub(super) struct Context {
     pub(super) limiter: Option<Arc<bandwidth::Limiter>>,
     /// The clients of the regions of the buckets found on redirects.
     pub(super) redirector: Redirector,
+    /// Whether the deletions are sent in batches of `DeleteObjects`, which is
+    /// disabled when the endpoint does not support it.
+    pub(super) batch_delete: AtomicBool,
 }
 
 impl Context {

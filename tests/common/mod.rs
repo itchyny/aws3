@@ -28,8 +28,13 @@ pub struct Env {
     work: TempDir,
     requests: Arc<Mutex<Vec<Request>>>,
     regions: Arc<Mutex<HashMap<String, String>>>,
+    interceptor: Arc<Mutex<Option<Interceptor>>>,
     _runtime: tokio::runtime::Runtime,
 }
+
+/// Returns the response to the request instead of the server, e.g. to inject
+/// errors, or `None` to pass the request to the server.
+type Interceptor = Box<dyn Fn(&Request) -> Option<http::Response<s3s::Body>> + Send>;
 
 /// The request received by the server, to check the headers and the body.
 #[derive(Debug, Clone)]
@@ -45,6 +50,15 @@ impl Request {
     pub fn bucket(&self) -> &str {
         let path = self.uri.path().trim_start_matches('/');
         path.split('/').next().unwrap_or_default()
+    }
+
+    /// Returns whether the request has the query parameter.
+    pub fn has_query(&self, name: &str) -> bool {
+        self.uri.query().is_some_and(|query| {
+            query
+                .split('&')
+                .any(|param| param.split('=').next() == Some(name))
+        })
     }
 
     /// Returns the region in the credential scope of the signature.
@@ -93,10 +107,17 @@ impl Env {
         // close the connection while the client is writing the body.
         let requests = Arc::new(Mutex::new(Vec::new()));
         let regions = Arc::new(Mutex::new(HashMap::<String, String>::new()));
+        let interceptor = Arc::new(Mutex::new(None::<Interceptor>));
         let service = hyper::service::service_fn({
-            let (requests, regions) = (requests.clone(), regions.clone());
+            let (requests, regions, interceptor) =
+                (requests.clone(), regions.clone(), interceptor.clone());
             move |request: http::Request<Incoming>| {
-                let (s3, requests, regions) = (s3.clone(), requests.clone(), regions.clone());
+                let (s3, requests, regions, interceptor) = (
+                    s3.clone(),
+                    requests.clone(),
+                    regions.clone(),
+                    interceptor.clone(),
+                );
                 async move {
                     let (parts, body) = request.into_parts();
                     let body = body
@@ -111,6 +132,14 @@ impl Env {
                         body: body.clone(),
                     };
                     requests.lock().unwrap().push(request.clone());
+                    let intercepted = interceptor
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .and_then(|intercept| intercept(&request));
+                    if let Some(response) = intercepted {
+                        return Ok(response);
+                    }
                     // The requests to the bucket in another region are
                     // redirected like S3.
                     let region = regions.lock().unwrap().get(request.bucket()).cloned();
@@ -174,6 +203,7 @@ impl Env {
             work,
             requests,
             regions,
+            interceptor,
             _runtime: runtime,
         }
     }
@@ -183,6 +213,14 @@ impl Env {
     pub fn bucket_region(&self, bucket: &str, region: &str) {
         let mut regions = self.regions.lock().unwrap();
         regions.insert(bucket.to_owned(), region.to_owned());
+    }
+
+    /// Responds to the requests with the interceptor instead of the server.
+    pub fn intercept(
+        &self,
+        intercept: impl Fn(&Request) -> Option<http::Response<s3s::Body>> + Send + 'static,
+    ) {
+        *self.interceptor.lock().unwrap() = Some(Box::new(intercept));
     }
 
     /// Returns the requests received by the server so far.
@@ -440,6 +478,15 @@ s3 =
         std::fs::write(&path, content).unwrap();
         path
     }
+}
+
+/// Returns the response of the status code with the XML body.
+pub fn xml_response(status: u16, body: &str) -> http::Response<s3s::Body> {
+    http::Response::builder()
+        .status(status)
+        .header("content-type", "application/xml")
+        .body(s3s::Body::from(body.to_owned()))
+        .unwrap()
 }
 
 /// Returns the response of S3 to the request to the bucket in another region.

@@ -4,6 +4,7 @@ mod bandwidth;
 mod checksum;
 mod context;
 mod copy;
+mod delete;
 mod download;
 mod execute;
 mod filter;
@@ -21,7 +22,7 @@ mod task;
 mod upload;
 
 use std::process::ExitCode;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::{Semaphore, watch};
@@ -127,6 +128,7 @@ pub async fn run(
         cleanup: Mutex::new(Vec::new()),
         limiter,
         redirector: Redirector::default(),
+        batch_delete: AtomicBool::new(true),
     });
     // The first Ctrl-C cancels the transfers, and the second one exits.
     let listener = tokio::spawn({

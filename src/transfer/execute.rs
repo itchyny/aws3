@@ -4,18 +4,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use aws_sdk_s3::Client;
 use tokio::task::JoinSet;
 
 use super::context::Context;
+use super::delete::{self, Deletion, MAX_BATCH_SIZE, delete_object};
 use super::generator::{ObjectProps, skip_warning};
 use super::options::CommandName;
 use super::paths::{self, relative_path};
 use super::printer::TransferId;
 use super::task::{Operation, Outcome, Task};
 use super::{copy, download, upload};
-use crate::error::Error;
-use crate::path::{split_bucket_key, validate_bucket_name};
+use crate::path::split_bucket_key;
 
 /// The maximum size of an object of S3.
 const MAX_UPLOAD_SIZE: u64 = 5 * 1024 * 1024 * 1024 * 1024;
@@ -25,6 +24,10 @@ pub(super) struct Submitter {
     ctx: Arc<Context>,
     tasks: JoinSet<()>,
     submitted: u64,
+    /// The deletions of the objects to send in a batch of `DeleteObjects`.
+    deletions: Vec<Deletion>,
+    /// The bucket of the objects of the deletions.
+    deletion_bucket: String,
     /// Whether a fatal error occurred, which aborts the command.
     fatal: bool,
 }
@@ -35,6 +38,8 @@ impl Submitter {
             ctx,
             tasks: JoinSet::new(),
             submitted: 0,
+            deletions: Vec::new(),
+            deletion_bucket: String::new(),
             fatal: false,
         }
     }
@@ -68,6 +73,29 @@ impl Submitter {
         };
         ctx.printer().queued(id, size);
         self.submitted += 1;
+        // The recursive deletions are sent in batches of a bucket, while the
+        // deletion of an object is sent alone like the AWS CLI. The keys are
+        // sent in XML 1.0, where the control characters are not allowed even
+        // as character references, so they are also deleted alone.
+        if task.operation == Operation::Delete
+            && ctx.options.dir_op
+            && ctx.batch_delete.load(Ordering::Relaxed)
+            && task.src.chars().all(|c| {
+                matches!(c, '\t' | '\n' | '\r')
+                    || (c >= ' ' && !matches!(c, '\u{FFFE}' | '\u{FFFF}'))
+            })
+        {
+            let (bucket, _) = split_bucket_key(&task.src);
+            if bucket != self.deletion_bucket {
+                self.flush_deletions();
+                self.deletion_bucket = bucket.to_owned();
+            }
+            self.deletions.push(Deletion { id, path: task.src });
+            if self.deletions.len() >= MAX_BATCH_SIZE {
+                self.flush_deletions();
+            }
+            return;
+        }
         let ctx = ctx.clone();
         self.tasks.spawn(async move {
             let result = execute(&ctx, id, &task).await;
@@ -146,6 +174,15 @@ impl Submitter {
         true
     }
 
+    fn flush_deletions(&mut self) {
+        if !self.deletions.is_empty() {
+            let deletions = std::mem::take(&mut self.deletions);
+            let bucket = self.deletion_bucket.clone();
+            self.tasks
+                .spawn(delete::delete_batch(self.ctx.clone(), bucket, deletions));
+        }
+    }
+
     /// Stops submitting transfers on a fatal error.
     pub(super) fn abort(&mut self) {
         self.fatal = true;
@@ -153,6 +190,9 @@ impl Submitter {
 
     /// Waits for the submitted transfers.
     pub(super) async fn finish(mut self) {
+        if !self.ctx.is_cancelled() {
+            self.flush_deletions();
+        }
         if !self.fatal && !self.ctx.is_cancelled() {
             self.ctx.printer().final_total(self.submitted);
         }
@@ -301,27 +341,4 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
         }
     }
     Ok(outcome)
-}
-
-async fn delete_object(
-    ctx: &Context,
-    client: &Client,
-    bucket: &str,
-    key: &str,
-) -> Result<Outcome, String> {
-    validate_bucket_name(bucket)?;
-    let _permit = ctx.permit().await?;
-    ctx.redirector
-        .send(client, bucket, "DeleteObject", |client| async move {
-            client
-                .delete_object()
-                .bucket(bucket)
-                .key(key)
-                .set_request_payer(ctx.params.request_payer.clone())
-                .send()
-                .await
-        })
-        .await
-        .map_err(|err| Error::sdk("DeleteObject", err).to_string())?;
-    Ok(Outcome::Done)
 }
