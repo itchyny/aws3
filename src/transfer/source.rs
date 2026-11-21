@@ -13,6 +13,9 @@ use super::paths::{self, Endpoint};
 use super::plan::PathsType;
 use crate::path::split_bucket_key;
 
+/// The maximum number of the ranges of the keys listed in parallel.
+const MAX_LIST_RANGES: usize = 16;
+
 /// Creates the filters rooted at the source and the destination.
 pub(super) fn create_filters(ctx: &Context) -> Filters {
     let dir_op = ctx.options.dir_op;
@@ -46,11 +49,13 @@ pub(super) fn create_filters(ctx: &Context) -> Filters {
     )
 }
 
-/// Spawns the generator of the files or objects at the endpoint.
+/// Spawns the generator of the files or objects at the endpoint, where the
+/// objects are listed in parallel out of order unless `ordered`.
 pub(super) fn spawn_generator(
     ctx: &Arc<Context>,
     endpoint: &Endpoint,
     is_delete: bool,
+    ordered: bool,
 ) -> mpsc::Receiver<Item> {
     let (tx, rx) = mpsc::channel(ctx.config.max_queue_size);
     let path = endpoint.path.clone();
@@ -68,6 +73,11 @@ pub(super) fn spawn_generator(
                 },
                 checksum_mode: ctx.params.checksum_mode.clone(),
                 is_delete,
+                ranges: if ordered {
+                    1
+                } else {
+                    MAX_LIST_RANGES.min(ctx.config.max_concurrent_requests)
+                },
             };
             let client = &ctx.source_client;
             generator::list_s3(client, &ctx.redirector, &path, dir_op, &options, &tx).await;

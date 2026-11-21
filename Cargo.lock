@@ -689,6 +689,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "crc-fast",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",

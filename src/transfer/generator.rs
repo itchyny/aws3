@@ -8,13 +8,15 @@ use std::time::SystemTime;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::ResponseChecksumValidation;
 use aws_sdk_s3::operation::head_object::HeadObjectOutput;
-use aws_sdk_s3::types::{ChecksumMode, EncodingType, RequestPayer};
+use aws_sdk_s3::operation::list_objects_v2::builders::ListObjectsV2FluentBuilder;
+use aws_sdk_s3::types::{ChecksumMode, EncodingType, Object, RequestPayer};
+use futures_util::future::try_join_all;
 use tokio::sync::mpsc::Sender;
 
 use super::params::{SseCustomerKey, set_sse_c};
 use crate::error::{Error, has_status_code};
-use crate::path::{split_bucket_key, url_decode, validate_bucket_name};
-use crate::redirect::Redirector;
+use crate::path::{is_s3express_bucket, split_bucket_key, url_decode, validate_bucket_name};
+use crate::redirect::{Pages, Redirector};
 
 /// A file or an object listed by the generator.
 #[derive(Debug, Clone)]
@@ -190,6 +192,26 @@ pub struct ListOptions {
     /// Whether the objects are deleted, which includes directory markers and
     /// does not call HeadObject for a single object.
     pub is_delete: bool,
+    /// The maximum number of the ranges of the keys listed in parallel, where
+    /// the objects are not listed in order unless it is 1.
+    pub ranges: usize,
+}
+
+/// The maximum depth of the common prefixes to find the points to split the
+/// listing at, where the prefixes of each level have only one prefix.
+const MAX_SPLIT_DEPTH: usize = 4;
+
+/// The listing of the objects under the prefix.
+struct Listing<'a> {
+    client: &'a Client,
+    redirector: &'a Redirector,
+    /// `bucket/key` of the object, or `bucket/prefix/` to list.
+    path: &'a str,
+    bucket: &'a str,
+    prefix: &'a str,
+    dir_op: bool,
+    options: &'a ListOptions,
+    tx: &'a Sender<Item>,
 }
 
 /// Lists the object, or the objects under the prefix, where the path is
@@ -225,28 +247,172 @@ async fn try_list_s3(
         let _ = tx.send(Item::File(stat)).await;
         return Ok(());
     }
-    let mut pages = redirector.paginate(client, bucket, |client| {
+    let listing = Listing {
+        client,
+        redirector,
+        path,
+        bucket,
+        prefix,
+        dir_op,
+        options,
+        tx,
+    };
+    if options.ranges > 1 && !is_s3express_bucket(bucket) {
+        listing.list_parallel().await
+    } else {
+        listing.list_range(None, None).await
+    }
+}
+
+impl Listing<'_> {
+    fn request(&self, client: &Client) -> ListObjectsV2FluentBuilder {
         client
             .list_objects_v2()
-            .bucket(bucket)
-            .prefix(prefix)
+            .bucket(self.bucket)
+            .prefix(self.prefix)
             .encoding_type(EncodingType::Url)
-            .set_max_keys(options.page_size)
-            .set_request_payer(options.request_payer.clone())
-    });
-    while let Some(result) = pages.next().await {
+            .set_request_payer(self.options.request_payer.clone())
+    }
+
+    /// Lists the objects after `start` up to `end` inclusively, or all the
+    /// objects without them.
+    async fn list_range(&self, start: Option<&str>, end: Option<&str>) -> Result<(), String> {
+        let mut pages = self
+            .redirector
+            .paginate(self.client, self.bucket, |client| {
+                self.request(client)
+                    .set_start_after(start.map(str::to_owned))
+                    .set_max_keys(self.options.page_size)
+            });
+        self.send_pages(&mut pages, start, end).await
+    }
+
+    /// Lists the first page, and then the ranges of the rest in parallel,
+    /// split at the common prefixes after the first page.
+    async fn list_parallel(&self) -> Result<(), String> {
+        let mut pages = self
+            .redirector
+            .paginate(self.client, self.bucket, |client| {
+                self.request(client).set_max_keys(self.options.page_size)
+            });
+        let Some(result) = pages.next().await else {
+            return Ok(());
+        };
         let output = result.map_err(|err| Error::sdk("ListObjectsV2", err).to_string())?;
-        for object in output.contents() {
+        if !self.send_objects(output.contents(), None, None).await
+            || output.is_truncated() != Some(true)
+        {
+            return Ok(());
+        }
+        // The rest is listed with the continuation token without the key to
+        // split after.
+        let Some(last) = output.contents().last().and_then(Object::key) else {
+            return self.send_pages(&mut pages, None, None).await;
+        };
+        // The ranges are between the adjacent bounds, where the last range
+        // has no end.
+        let mut bounds = vec![url_decode(last)];
+        bounds.extend(self.split_points(&bounds[0]).await?);
+        try_join_all(bounds.iter().enumerate().map(|(i, start)| {
+            let end = bounds.get(i + 1).map(String::as_str);
+            self.list_range(Some(start), end)
+        }))
+        .await?;
+        Ok(())
+    }
+
+    /// Sends the objects of the pages after `start` up to `end` inclusively.
+    async fn send_pages<F>(
+        &self,
+        pages: &mut Pages<'_, F>,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> Result<(), String>
+    where
+        F: Fn(&Client) -> ListObjectsV2FluentBuilder,
+    {
+        while let Some(result) = pages.next().await {
+            let output = result.map_err(|err| Error::sdk("ListObjectsV2", err).to_string())?;
+            if !self.send_objects(output.contents(), start, end).await {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns the points to split the listing of the keys after the key,
+    /// which are chosen evenly from the common prefixes after the key.
+    async fn split_points(&self, after: &str) -> Result<Vec<String>, String> {
+        let mut prefix = self.prefix.to_owned();
+        for _ in 0..MAX_SPLIT_DEPTH {
+            let output = self
+                .redirector
+                .send(self.client, self.bucket, "ListObjectsV2", |client| {
+                    self.request(&client)
+                        .prefix(&prefix)
+                        .delimiter("/")
+                        .start_after(after)
+                        .send()
+                })
+                .await
+                .map_err(|err| Error::sdk("ListObjectsV2", err).to_string())?;
+            let mut prefixes: Vec<_> = output
+                .common_prefixes()
+                .iter()
+                .filter_map(|prefix| prefix.prefix())
+                .map(url_decode)
+                .filter(|prefix| prefix.as_str() > after)
+                .collect();
+            if prefixes.len() >= 2 {
+                let ranges = self.options.ranges.min(prefixes.len() + 1);
+                return Ok((1..ranges)
+                    .map(|i| prefixes[i * prefixes.len() / ranges].clone())
+                    .collect());
+            }
+            // The rest of the keys under a prefix are split at the next level,
+            // where the prefix is the only one after the key, or the one which
+            // contains the key.
+            if output.is_truncated() == Some(true) || !output.contents().is_empty() {
+                return Ok(Vec::new());
+            }
+            let next = prefixes.pop().or_else(|| {
+                let index = after.strip_prefix(prefix.as_str())?.find('/')?;
+                Some(after[..=prefix.len() + index].to_owned())
+            });
+            let Some(next) = next else {
+                return Ok(Vec::new());
+            };
+            prefix = next;
+        }
+        Ok(Vec::new())
+    }
+
+    /// Sends the objects after `start` up to `end` inclusively, and returns
+    /// whether the listing continues. The objects up to `start` are skipped,
+    /// in case the storage ignores the key to start after.
+    async fn send_objects(
+        &self,
+        objects: &[Object],
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> bool {
+        for object in objects {
             let key = url_decode(object.key().unwrap_or_default());
+            if start.is_some_and(|start| key.as_str() <= start) {
+                continue;
+            }
+            if end.is_some_and(|end| key.as_str() > end) {
+                return false;
+            }
             let size = object.size().unwrap_or_default().max(0) as u64;
-            let source_path = format!("{bucket}/{key}");
+            let source_path = format!("{}/{key}", self.bucket);
             // Directory markers are only deleted, and a single object is
             // matched exactly when listing the whole bucket.
             if size == 0 && key.ends_with('/') {
-                if !options.is_delete {
+                if !self.options.is_delete {
                     continue;
                 }
-            } else if !dir_op && source_path != path {
+            } else if !self.dir_op && source_path != self.path {
                 continue;
             }
             let stat = FileStat {
@@ -263,12 +429,12 @@ async fn try_list_s3(
                     ..ObjectProps::default()
                 }),
             };
-            if tx.send(Item::File(stat)).await.is_err() {
-                return Ok(());
+            if self.tx.send(Item::File(stat)).await.is_err() {
+                return false;
             }
         }
+        true
     }
-    Ok(())
 }
 
 async fn head_single_object(

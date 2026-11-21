@@ -979,3 +979,141 @@ s3 =
     // The commands other than the transfer commands do not validate them.
     env.run_with_env(&["ls", "s3://bucket"], &envs).success();
 }
+
+/// Returns the distinct keys to start after of the requests of ListObjectsV2,
+/// and the number of the requests with the delimiter.
+fn list_requests(requests: &[common::Request]) -> (Vec<String>, usize) {
+    let lists = requests
+        .iter()
+        .filter(|request| request.method == "GET" && request.has_query("list-type"));
+    let query = |request: &common::Request, name: &str| {
+        request.uri.query().and_then(|query| {
+            query.split('&').find_map(|param| {
+                let (key, value) = param.split_once('=')?;
+                (key == name).then(|| value.to_owned())
+            })
+        })
+    };
+    // The pages of the ranges are requested with the same keys concurrently.
+    let mut start_afters: Vec<_> = lists
+        .clone()
+        .filter(|request| !request.has_query("delimiter"))
+        .filter_map(|request| query(request, "start-after"))
+        .collect();
+    start_afters.sort_unstable();
+    start_afters.dedup();
+    let delimiters = lists
+        .filter(|request| request.has_query("delimiter"))
+        .count();
+    (start_afters, delimiters)
+}
+
+#[test]
+fn cp_download_parallel_listing() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let mut keys = Vec::new();
+    for dir in ["a", "b", "c", "d"] {
+        for i in 0..50 {
+            keys.push(format!("src/{dir}/{i:02}.txt"));
+        }
+    }
+    keys.push("src/e.txt".to_owned());
+    for key in &keys {
+        env.object("bucket", key, key);
+    }
+    let result = env
+        .run(&[
+            "cp",
+            "s3://bucket/src/",
+            "out",
+            "--recursive",
+            "--page-size",
+            "30",
+            "--no-progress",
+        ])
+        .success();
+    // The objects are listed in parallel ranges, each of them only once.
+    let mut lines = result.lines();
+    lines.sort_unstable();
+    lines.dedup();
+    assert_eq!(lines.len(), keys.len());
+    for key in &keys {
+        let path = key.strip_prefix("src/").unwrap();
+        assert_eq!(env.read(&format!("out/{path}")), key.as_bytes());
+    }
+    let (start_afters, delimiters) = list_requests(&env.requests());
+    assert_eq!(delimiters, 1);
+    assert_eq!(
+        start_afters,
+        ["src%2Fa%2F29.txt", "src%2Fb%2F", "src%2Fc%2F", "src%2Fd%2F"]
+    );
+}
+
+#[test]
+fn cp_download_parallel_listing_nested() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let mut keys = Vec::new();
+    for dir in ["a", "b", "c"] {
+        for i in 0..20 {
+            keys.push(format!("logs/2026/{dir}/{i:02}.txt"));
+        }
+    }
+    for key in &keys {
+        env.object("bucket", key, "x");
+    }
+    // The prefixes containing the last key of the first page are split at
+    // the next levels.
+    env.run(&[
+        "cp",
+        "s3://bucket/",
+        "out",
+        "--recursive",
+        "--page-size",
+        "10",
+    ])
+    .success();
+    for key in &keys {
+        assert_eq!(env.read(&format!("out/{key}")), b"x");
+    }
+    let (start_afters, delimiters) = list_requests(&env.requests());
+    assert_eq!(delimiters, 3);
+    assert_eq!(
+        start_afters,
+        [
+            "logs%2F2026%2Fa%2F09.txt",
+            "logs%2F2026%2Fb%2F",
+            "logs%2F2026%2Fc%2F"
+        ]
+    );
+
+    // The objects are listed in order for the dry runs.
+    let start = env.requests().len();
+    let result = env
+        .run(&[
+            "cp",
+            "s3://bucket/",
+            "out",
+            "--recursive",
+            "--page-size",
+            "10",
+            "--dryrun",
+        ])
+        .success();
+    let expected: Vec<_> = keys
+        .iter()
+        .map(|key| format!("(dryrun) download: s3://bucket/{key} to out/{key}"))
+        .collect();
+    assert_eq!(result.lines(), expected);
+    let (start_afters, delimiters) = list_requests(&env.requests()[start..]);
+    assert_eq!((start_afters.len(), delimiters), (0, 0));
+
+    // The objects are listed in order for the deletions, which are throttled
+    // by S3 when the batches are sent at once.
+    let start = env.requests().len();
+    env.run(&["rm", "s3://bucket/", "--recursive", "--page-size", "10"])
+        .success();
+    let (start_afters, delimiters) = list_requests(&env.requests()[start..]);
+    assert_eq!((start_afters.len(), delimiters), (0, 0));
+}

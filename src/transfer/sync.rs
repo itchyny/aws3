@@ -68,8 +68,12 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
     let (src, dest, use_src_name) = paths::format_paths(&plan.src, &plan.dest, true);
     let (rev_src, rev_dest, rev_use_src_name) = paths::format_paths(&plan.dest, &plan.src, true);
     let filters = create_filters(ctx);
-    let mut src_files = Stream::new(spawn_generator(ctx, &src, false), &filters, &src);
-    let mut dest_files = Stream::new(spawn_generator(ctx, &rev_src, false), &filters, &rev_src);
+    let mut src_files = Stream::new(spawn_generator(ctx, &src, false, true), &filters, &src);
+    let mut dest_files = Stream::new(
+        spawn_generator(ctx, &rev_src, false, true),
+        &filters,
+        &rev_src,
+    );
     let mut src_file = None;
     let mut dest_file = None;
     loop {

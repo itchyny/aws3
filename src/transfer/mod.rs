@@ -172,7 +172,11 @@ async fn run_files(ctx: &Arc<Context>, submitter: &mut Submitter) {
         PathsType::S3S3 => Operation::Copy,
         PathsType::S3 => Operation::Delete,
     };
-    let mut rx = spawn_generator(ctx, &src, operation == Operation::Delete);
+    // The objects are listed in order for the dry runs, which print the
+    // transfers in the order of submission, and for the deletions, whose
+    // batches are throttled by S3 when they are sent at once.
+    let is_delete = operation == Operation::Delete;
+    let mut rx = spawn_generator(ctx, &src, is_delete, options.dryrun || is_delete);
     loop {
         let item = tokio::select! {
             item = rx.recv() => item,
