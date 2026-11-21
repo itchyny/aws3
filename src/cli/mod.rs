@@ -1,3 +1,6 @@
+//! The arguments of the commands and the global options, parsed by clap with
+//! the exit codes of the AWS CLI on the errors.
+
 mod api;
 
 use std::ffi::OsString;
@@ -41,8 +44,14 @@ impl Cli {
     {
         let matches = Self::command().try_get_matches_from(args)?;
         let mut cli = Self::from_arg_matches(&matches)?;
-        if let (Some(filter), Some((_, matches))) = (cli.command.filter_mut(), matches.subcommand())
-        {
+        let filter = match &mut cli.command {
+            Command::Cp(args) => Some(&mut args.transfer.filter),
+            Command::Mv(args) => Some(&mut args.transfer.filter),
+            Command::Rm(args) => Some(&mut args.filter),
+            Command::Sync(args) => Some(&mut args.transfer.filter),
+            _ => None,
+        };
+        if let (Some(filter), Some((_, matches))) = (filter, matches.subcommand()) {
             filter.resolve(matches);
         }
         Ok(cli)
@@ -74,18 +83,6 @@ pub enum Command {
     /// Generate the completion script of the shell
     #[command(hide = true)]
     Completion(CompletionArgs),
-}
-
-impl Command {
-    fn filter_mut(&mut self) -> Option<&mut FilterArgs> {
-        match self {
-            Self::Cp(args) => Some(&mut args.transfer.filter),
-            Self::Mv(args) => Some(&mut args.transfer.filter),
-            Self::Rm(args) => Some(&mut args.filter),
-            Self::Sync(args) => Some(&mut args.transfer.filter),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Args)]

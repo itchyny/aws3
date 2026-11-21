@@ -381,7 +381,8 @@ fn reason_phrase(status: u16) -> &'static str {
     }
 }
 
-fn hex_sha256(value: &str) -> String {
+/// Returns the SHA-256 digest of the value in lowercase hexadecimal digits.
+pub fn hex_sha256(value: &str) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write;
     Sha256::digest(value)

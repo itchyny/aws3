@@ -1,4 +1,5 @@
-use std::fmt::Write as _;
+//! The presign command, which prints the pre-signed URL to get an object.
+
 use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime};
@@ -6,11 +7,10 @@ use std::time::{Duration, SystemTime};
 use aws_credential_types::provider::ProvideCredentials;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sigv4::sign::{v4, v4a};
-use sha2::{Digest, Sha256};
 
 use crate::cli::{GlobalArgs, PresignArgs};
 use crate::client;
-use crate::error::Error;
+use crate::error::{Error, hex_sha256};
 use crate::path::{split_bucket_key, validate_bucket_name};
 
 /// The longest expiration which the SDK presigns.
@@ -167,7 +167,7 @@ fn resign(url: &str, expires_in: i64, access_key: &str, secret: &str) -> Option<
     );
     let string_to_sign = format!(
         "{algorithm}\n{date_time}\n{scope}\n{}",
-        hex(&Sha256::digest(canonical_request))
+        hex_sha256(&canonical_request)
     );
     let signature = if algorithm == SIGV4A {
         let key = v4a::generate_signing_key(access_key, secret);
@@ -186,16 +186,6 @@ fn resign(url: &str, expires_in: i64, access_key: &str, secret: &str) -> Option<
         "{scheme}://{host}{path}?{}&X-Amz-Signature={signature}",
         params.join("&")
     ))
-}
-
-/// Encodes the bytes in lowercase hexadecimal digits.
-fn hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .fold(String::with_capacity(bytes.len() * 2), |mut hex, byte| {
-            let _ = write!(hex, "{byte:02x}");
-            hex
-        })
 }
 
 #[cfg(test)]

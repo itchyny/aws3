@@ -1,6 +1,10 @@
+//! The ls command, which lists the objects and the common prefixes, or the
+//! buckets.
+
 use std::io::{self, BufWriter, Stdout, Write};
 use std::process::ExitCode;
 
+use aws_sdk_s3::Client;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Output;
 use aws_sdk_s3::primitives::DateTime;
 use aws_sdk_s3::types::{EncodingType, RequestPayer};
@@ -19,12 +23,13 @@ pub async fn run(args: &LsArgs, global: &GlobalArgs) -> Result<ExitCode, Error> 
     if !bucket.is_empty() {
         validate_bucket_name(bucket).map_err(Error::param_validation)?;
     }
+    let client = client::new_client(&config, None);
     let mut lister = Lister::new(args.human_readable);
     let result: Result<(), Error> = async {
         if bucket.is_empty() {
-            lister.list_buckets(&config, args).await?;
+            lister.list_buckets(&client, args).await?;
         } else {
-            lister.list_objects(&config, bucket, key, args).await?;
+            lister.list_objects(&client, bucket, key, args).await?;
         }
         if args.summarize {
             lister.print_summary()?;
@@ -69,8 +74,7 @@ impl Lister {
         }
     }
 
-    async fn list_buckets(&mut self, config: &client::Config, args: &LsArgs) -> Result<(), Error> {
-        let client = client::new_client(config, None);
+    async fn list_buckets(&mut self, client: &Client, args: &LsArgs) -> Result<(), Error> {
         let mut paginator = client
             .list_buckets()
             .set_prefix(args.bucket_name_prefix.clone())
@@ -97,14 +101,13 @@ impl Lister {
 
     async fn list_objects(
         &mut self,
-        config: &client::Config,
+        client: &Client,
         bucket: &str,
         key: &str,
         args: &LsArgs,
     ) -> Result<(), Error> {
-        let client = client::new_client(config, None);
         let redirector = Redirector::default();
-        let mut pages = redirector.paginate(&client, bucket, |client| {
+        let mut pages = redirector.paginate(client, bucket, |client| {
             client
                 .list_objects_v2()
                 .bucket(bucket)
@@ -171,7 +174,6 @@ impl Lister {
     }
 }
 
-/// Formats the date time in the local time zone.
 /// The standard output which records whether the reader has gone away.
 struct Output {
     stdout: Stdout,
@@ -199,6 +201,7 @@ impl Write for Output {
     }
 }
 
+/// Formats the date time in the local time zone.
 fn format_date_time(date_time: Option<&DateTime>) -> String {
     date_time
         .and_then(|date_time| chrono::DateTime::from_timestamp(date_time.secs(), 0))
