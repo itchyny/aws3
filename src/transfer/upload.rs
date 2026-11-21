@@ -1,3 +1,6 @@
+//! The uploads of the local files and the standard input, by PutObject or by
+//! multipart uploads.
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -562,7 +565,7 @@ impl MultipartUpload {
         let upload = CompletedMultipartUpload::builder()
             .set_parts(Some(completed))
             .build();
-        let _permit = ctx.permit().await?;
+        let permit = ctx.permit().await?;
         let result = ctx
             .redirector
             .send(
@@ -588,7 +591,7 @@ impl MultipartUpload {
                 Ok(Some(output))
             }
             Err(err) => {
-                drop(_permit);
+                drop(permit);
                 self.abort(ctx).await;
                 if params.no_overwrite && has_error_code(&err, "PreconditionFailed") {
                     Ok(None)

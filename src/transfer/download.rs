@@ -1,3 +1,6 @@
+//! The downloads of the objects to the local files, written to the temporary
+//! files and renamed on completion, or to the standard output.
+
 use std::fs::{File, FileTimes};
 use std::hash::{BuildHasher, RandomState};
 use std::sync::{Arc, Mutex, PoisonError};

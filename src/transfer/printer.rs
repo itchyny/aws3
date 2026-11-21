@@ -1,3 +1,6 @@
+//! The printer of the results and the progress of the transfers, in the same
+//! format as the AWS CLI.
+
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::process::ExitCode;

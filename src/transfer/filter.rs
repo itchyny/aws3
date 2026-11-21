@@ -1,3 +1,6 @@
+//! The include and exclude filters of the files and the objects, matched in
+//! the same way as `fnmatch` of Python.
+
 use crate::cli::Filter;
 
 /// The include and exclude filters, evaluated against the full source paths

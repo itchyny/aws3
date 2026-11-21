@@ -1,3 +1,7 @@
+//! The copies of the objects, by CopyObject or by the part copies of multipart
+//! uploads, which copy the properties, the tags and the annotations following
+//! the copy props option.
+
 use std::sync::Arc;
 
 use aws_sdk_s3::operation::complete_multipart_upload::CompleteMultipartUploadOutput;
@@ -9,6 +13,7 @@ use aws_sdk_s3::types::{
 use tokio::task::JoinSet;
 
 use super::context::Context;
+use super::delete::delete_object;
 use super::download::etag_mismatch;
 use super::generator::ObjectProps;
 use super::params::{set_copy_source_sse_c, set_object_params, set_sse_c};
@@ -282,37 +287,26 @@ async fn copy_multipart(
         return Ok(Outcome::Skipped);
     };
     if put_tags_later {
-        let permit = ctx.permit().await?;
         let tagging = Tagging::builder()
             .set_tag_set(Some(tags))
             .build()
             .map_err(|err| err.to_string())?;
-        let result = ctx
-            .redirector
-            .send(&ctx.client, bucket, "PutObjectTagging", |client| {
-                client
-                    .put_object_tagging()
-                    .bucket(bucket)
-                    .key(key)
-                    .tagging(tagging.clone())
-                    .set_request_payer(params.request_payer.clone())
-                    .send()
-            })
-            .await;
-        drop(permit);
-        if let Err(err) = result {
+        let result = {
             let _permit = ctx.permit().await?;
-            let _ = ctx
-                .redirector
-                .send(&ctx.client, bucket, "DeleteObject", |client| {
+            ctx.redirector
+                .send(&ctx.client, bucket, "PutObjectTagging", |client| {
                     client
-                        .delete_object()
+                        .put_object_tagging()
                         .bucket(bucket)
                         .key(key)
+                        .tagging(tagging.clone())
                         .set_request_payer(params.request_payer.clone())
                         .send()
                 })
-                .await;
+                .await
+        };
+        if let Err(err) = result {
+            let _ = delete_object(ctx, &ctx.client, bucket, key).await;
             return Err(Error::sdk("PutObjectTagging", err).to_string());
         }
     }
