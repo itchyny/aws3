@@ -263,7 +263,11 @@ fn cli_error_format() {
         format!("\naws3: [ERROR]: {message}\n")
     );
     let json = format!(
-        "{{\n    \"Code\": \"ParamValidation\",\n    \"Message\": {}\n}}\n",
+        r#"{{
+    "Code": "ParamValidation",
+    "Message": {}
+}}
+"#,
         serde_json::to_string(message).unwrap()
     );
     assert_eq!(run(&["--cli-error-format", "json"], &[]), json);
