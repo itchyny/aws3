@@ -73,7 +73,7 @@ fn encode_pem(certs: &[CertificateDer<'_>]) -> String {
         pem.push_str("-----BEGIN CERTIFICATE-----\n");
         let encoded = base64::encode(cert);
         for line in encoded.as_bytes().chunks(64) {
-            pem.push_str(std::str::from_utf8(line).unwrap());
+            pem.extend(line.iter().map(|&byte| char::from(byte)));
             pem.push('\n');
         }
         pem.push_str("-----END CERTIFICATE-----\n");

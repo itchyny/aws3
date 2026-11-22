@@ -74,45 +74,53 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
         &filters,
         &rev_src,
     );
+    // The files with the destination paths and the compare keys, which are
+    // merged in the order of the compare keys.
     let mut src_file = None;
     let mut dest_file = None;
     loop {
         if src_file.is_none() {
             src_file = match src_files.next(ctx).await {
-                Ok(file) => file,
+                Ok(file) => file.map(|stat| {
+                    let (path, key) = key_of(&src, &dest, use_src_name, &stat.path);
+                    (stat, path, key)
+                }),
                 Err(()) => return submitter.abort(),
             };
         }
         if dest_file.is_none() {
             dest_file = match dest_files.next(ctx).await {
-                Ok(file) => file,
+                Ok(file) => file.map(|stat| {
+                    let (path, key) = key_of(&rev_src, &rev_dest, rev_use_src_name, &stat.path);
+                    (stat, path, key)
+                }),
                 Err(()) => return submitter.abort(),
             };
         }
-        let src_key = src_file
-            .as_ref()
-            .map(|stat: &FileStat| key_of(&src, &dest, use_src_name, &stat.path));
-        let dest_key = dest_file
-            .as_ref()
-            .map(|stat: &FileStat| key_of(&rev_src, &rev_dest, rev_use_src_name, &stat.path));
-        let ordering = match (&src_key, &dest_key) {
-            (Some((_, src_key)), Some((_, dest_key))) => src_key.cmp(dest_key),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => break,
+        // The file with the larger compare key is kept for the next files.
+        let files = match (src_file.take(), dest_file.take()) {
+            (Some(src), Some(dest)) => match src.2.cmp(&dest.2) {
+                std::cmp::Ordering::Equal => (Some(src), Some(dest)),
+                std::cmp::Ordering::Less => {
+                    dest_file = Some(dest);
+                    (Some(src), None)
+                }
+                std::cmp::Ordering::Greater => {
+                    src_file = Some(src);
+                    (None, Some(dest))
+                }
+            },
+            files => files,
         };
-        match ordering {
-            std::cmp::Ordering::Equal => {
-                let (src_stat, dest_stat) = (src_file.take().unwrap(), dest_file.take().unwrap());
-                let (dest_path, compare_key) = src_key.unwrap();
+        match files {
+            (None, None) => break,
+            (Some((src_stat, dest_path, compare_key)), Some((dest_stat, _, _))) => {
                 let task = task(operation, src_stat, dest_path, compare_key);
                 if should_sync(at_both, &task, &dest_stat) {
                     submitter.submit(task).await;
                 }
             }
-            std::cmp::Ordering::Less => {
-                let src_stat = src_file.take().unwrap();
-                let (dest_path, compare_key) = src_key.unwrap();
+            (Some((src_stat, dest_path, compare_key)), None) => {
                 let mut task = task(operation, src_stat, dest_path, compare_key);
                 if let Some(keys) = &case_conflicts {
                     match check_case_conflict(ctx, keys, &task) {
@@ -127,10 +135,8 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
                 }
                 submitter.submit(task).await;
             }
-            std::cmp::Ordering::Greater => {
-                let dest_stat = dest_file.take().unwrap();
+            (None, Some((dest_stat, path, compare_key))) => {
                 if delete {
-                    let (path, compare_key) = dest_key.unwrap();
                     let operation = if dest.is_s3 {
                         Operation::Delete
                     } else {
