@@ -75,18 +75,26 @@ fn expand_user(path: &str) -> String {
     let Some(rest) = path.strip_prefix('~') else {
         return path.to_owned();
     };
-    if !(rest.is_empty() || rest.starts_with('/')) {
+    #[cfg(not(windows))]
+    let (separators, home) = (
+        &['/'][..],
+        std::env::var("HOME").map(|home| home.trim_end_matches('/').to_owned()),
+    );
+    #[cfg(windows)]
+    let (separators, home) = (
+        &['/', '\\'][..],
+        std::env::var("USERPROFILE").or_else(|_| {
+            let home_path = std::env::var("HOMEPATH")?;
+            let home_drive = std::env::var("HOMEDRIVE").unwrap_or_default();
+            Ok::<_, std::env::VarError>(format!("{home_drive}{home_path}"))
+        }),
+    );
+    if !(rest.is_empty() || rest.starts_with(separators)) {
         return path.to_owned();
     }
-    match std::env::var("HOME") {
-        Ok(home) => {
-            let path = format!("{}{rest}", home.trim_end_matches('/'));
-            if path.is_empty() {
-                "/".to_owned()
-            } else {
-                path
-            }
-        }
+    match home {
+        Ok(home) if home.is_empty() && rest.is_empty() => "/".to_owned(),
+        Ok(home) => format!("{home}{rest}"),
         Err(_) => path.to_owned(),
     }
 }
@@ -197,6 +205,7 @@ fn resolve_paramfile(value: String) -> Result<Value, String> {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
     #[test]
     fn expand() {
         let home = std::env::var("HOME").unwrap();
@@ -206,6 +215,7 @@ mod tests {
             format!("{}/a", home.trim_end_matches('/'))
         );
         assert_eq!(expand_user("~user/a"), "~user/a");
+        assert_eq!(expand_user("~\\a"), "~\\a");
         assert_eq!(expand_user("a/~"), "a/~");
         assert_eq!(expand_vars("$HOME/a"), format!("{home}/a"));
         assert_eq!(expand_vars("${HOME}a"), format!("{home}a"));
@@ -213,6 +223,17 @@ mod tests {
             expand_vars("$ $1x_UNSET ${} ${UNSET} ${HOME"),
             "$ $1x_UNSET ${} ${UNSET} ${HOME"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn expand() {
+        let home = std::env::var("USERPROFILE").unwrap();
+        assert_eq!(expand_user("~"), home);
+        assert_eq!(expand_user("~/a"), format!("{home}/a"));
+        assert_eq!(expand_user("~\\a"), format!("{home}\\a"));
+        assert_eq!(expand_user("~user/a"), "~user/a");
+        assert_eq!(expand_user("a/~"), "a/~");
     }
 
     #[test]

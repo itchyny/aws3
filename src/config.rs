@@ -317,7 +317,10 @@ fn aws_file(name: &str, file: &str) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(name).filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(path));
     }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let home = aws_runtime::fs_util::home_dir(
+        &aws_types::os_shim_internal::Env::real(),
+        aws_runtime::fs_util::Os::real(),
+    )?;
     Some(PathBuf::from(home).join(".aws").join(file))
 }
 
