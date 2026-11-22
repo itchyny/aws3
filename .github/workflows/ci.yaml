@@ -105,7 +105,6 @@ jobs:
     name: Docker
     needs: build
     permissions:
-      artifact-metadata: write
       attestations: write
       contents: read
       id-token: write
@@ -174,7 +173,6 @@ jobs:
         with:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
 
   release:
     name: Release
