@@ -1,8 +1,8 @@
 //! The submission and the execution of the transfers.
 
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, PoisonError};
 
 use tokio::task::JoinSet;
 
@@ -101,7 +101,7 @@ impl Submitter {
             let result = execute(&ctx, id, &task).await;
             if let Some((keys, key)) = &task.case_conflict {
                 keys.lock()
-                    .unwrap_or_else(|err| err.into_inner())
+                    .unwrap_or_else(PoisonError::into_inner)
                     .remove(key);
             }
             let mut printer = ctx.printer();

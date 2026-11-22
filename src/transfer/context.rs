@@ -1,7 +1,7 @@
 //! The shared state of the transfers.
 
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::http::HttpResponse;
@@ -102,12 +102,12 @@ impl Context {
         let handle = tokio::spawn(future);
         self.cleanup
             .lock()
-            .unwrap_or_else(|err| err.into_inner())
+            .unwrap_or_else(PoisonError::into_inner)
             .push(handle);
     }
 
     pub(super) fn printer(&self) -> std::sync::MutexGuard<'_, Printer> {
-        self.printer.lock().unwrap_or_else(|err| err.into_inner())
+        self.printer.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub(super) fn progress(&self, id: TransferId, bytes: u64) {

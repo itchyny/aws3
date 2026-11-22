@@ -23,7 +23,7 @@ mod upload;
 
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use tokio::sync::{Semaphore, watch};
 
@@ -151,7 +151,7 @@ pub async fn run(
         run_files(&ctx, &mut submitter).await;
     }
     submitter.finish().await;
-    let cleanup = std::mem::take(&mut *ctx.cleanup.lock().unwrap_or_else(|err| err.into_inner()));
+    let cleanup = std::mem::take(&mut *ctx.cleanup.lock().unwrap_or_else(PoisonError::into_inner));
     for handle in cleanup {
         let _ = handle.await;
     }

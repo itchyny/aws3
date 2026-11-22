@@ -2,7 +2,7 @@
 //! same way as `max_bandwidth` of the AWS CLI.
 
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
@@ -36,7 +36,7 @@ impl Limiter {
     /// Reserves the bytes, and returns the instant when they can be
     /// transferred.
     fn reserve(&self, bytes: usize) -> Instant {
-        let mut next = self.next.lock().unwrap_or_else(|err| err.into_inner());
+        let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
         let start = (*next).max(Instant::now());
         *next = start + Duration::from_secs_f64(bytes as f64 / self.rate);
         start

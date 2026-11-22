@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use tokio::sync::mpsc;
@@ -241,7 +241,7 @@ fn check_case_conflict(
     let key = task.compare_key.to_lowercase();
     let conflicts = keys
         .lock()
-        .unwrap_or_else(|err| err.into_inner())
+        .unwrap_or_else(PoisonError::into_inner)
         .contains(&key)
         || Path::new(&task.dest).exists();
     if !conflicts {
