@@ -85,7 +85,7 @@ pub(super) fn spawn_generator(
     } else {
         let follow_symlinks = ctx.options.follow_symlinks;
         tokio::task::spawn_blocking(move || {
-            generator::list_local(&path, dir_op, follow_symlinks, &tx)
+            generator::list_local(&path, dir_op, follow_symlinks, &tx);
         });
     }
     rx

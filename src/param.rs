@@ -131,14 +131,14 @@ pub fn parse_timestamp(value: &str) -> Result<DateTime, String> {
             .map(|date_time| date_time.and_utc())
             .ok_or(())
         })
-        .or_else(|_| {
+        .or_else(|()| {
             value
                 .parse::<f64>()
                 .ok()
                 .and_then(|secs| chrono::DateTime::from_timestamp_millis((secs * 1000.0) as i64))
                 .ok_or(())
         })
-        .map_err(|_| format!("Invalid timestamp value: {value}"))?;
+        .map_err(|()| format!("Invalid timestamp value: {value}"))?;
     Ok(DateTime::from_millis(date_time.timestamp_millis()))
 }
 

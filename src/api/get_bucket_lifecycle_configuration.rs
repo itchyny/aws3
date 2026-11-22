@@ -49,7 +49,7 @@ fn rule(rule: &LifecycleRule) -> Value {
         response.value("Expiration", value.build());
     }
     response.str("ID", rule.id());
-    #[allow(deprecated)]
+    #[expect(deprecated, reason = "S3 still returns the prefix of the legacy rules")]
     response.str("Prefix", rule.prefix());
     if let Some(filter) = rule.filter() {
         response.value("Filter", filter_value(filter));

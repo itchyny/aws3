@@ -158,7 +158,7 @@ pub fn url_encode(value: &str, keep_slash: bool) -> String {
     for byte in value.bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(byte as char)
+                encoded.push(byte as char);
             }
             b'/' if keep_slash => encoded.push('/'),
             _ => {

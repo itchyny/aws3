@@ -56,7 +56,7 @@ impl ChunkedProgress {
 
 /// Downloads the object to the local file, which is written to a temporary
 /// file in the same directory and renamed on completion.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the properties of the transfer")]
 pub async fn download_file(
     ctx: &Arc<Context>,
     id: TransferId,
@@ -194,7 +194,7 @@ async fn download_whole(
 /// object modified during the download fails instead of mixing the contents.
 /// The number of the ranges in progress is bounded, which also bounds the
 /// ranges read into the memory and waiting to be written.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the properties of the transfer")]
 async fn download_ranges(
     ctx: &Arc<Context>,
     id: TransferId,

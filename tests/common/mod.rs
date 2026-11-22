@@ -1,6 +1,6 @@
 //! A fake S3 server for the integration tests, and helpers to run aws3.
 
-#![allow(dead_code)]
+#![allow(dead_code, reason = "each test uses a part of the helpers")]
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -553,7 +553,7 @@ fn encode_keys(xml: &str) -> String {
             match byte {
                 b' ' => encoded.push('+'),
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                    encoded.push(byte as char)
+                    encoded.push(byte as char);
                 }
                 _ => {
                     let _ = write!(encoded, "%{byte:02X}");

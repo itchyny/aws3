@@ -168,6 +168,6 @@ fn response(output: &HeadObjectOutput, headers: &ResponseHeaders) -> Value {
 /// Returns the Expires header parsed as a timestamp, which is omitted if it
 /// is not a valid timestamp.
 fn expires(output: &HeadObjectOutput) -> Option<DateTime> {
-    #[allow(deprecated)]
+    #[expect(deprecated, reason = "the AWS CLI outputs the parsed Expires header")]
     output.expires().copied()
 }

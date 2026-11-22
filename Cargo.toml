@@ -55,13 +55,6 @@ webpki-root-certs = "1.0.12"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.191"
 
-[profile.release]
-opt-level = "s"
-lto = true
-strip = true
-codegen-units = 1
-panic = "abort"
-
 [dev-dependencies]
 http-body-util = "0.1.5"
 hyper = { version = "1.12.0", features = ["server", "http1", "http2"] }
@@ -72,3 +65,19 @@ s3s-fs = "0.14.1"
 tempfile = "3.27.0"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "test-util"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
+
+[lints.clippy]
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
+ignored_unit_patterns = "warn"
+semicolon_if_nothing_returned = "warn"
+todo = "warn"
+unimplemented = "warn"

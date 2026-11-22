@@ -231,7 +231,7 @@ fn rule(value: &Value) -> Result<LifecycleRule, Error> {
                 .set_days_after_initiation(members::int(abort, "DaysAfterInitiation"))
                 .build()
         });
-    #[allow(deprecated)]
+    #[expect(deprecated, reason = "S3 still accepts the prefix of the legacy rules")]
     let builder = LifecycleRule::builder().set_prefix(members::str(value, "Prefix"));
     builder
         .set_expiration(expiration)

@@ -33,7 +33,10 @@ impl Redirector {
     /// Sends the request with the client for the bucket, and sends it again
     /// to the region of the bucket if redirected. The errors of the SDK are
     /// returned as they are.
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the errors of the SDK are returned as they are"
+    )]
     pub async fn send<T, E, F, Fut>(
         &self,
         client: &Client,

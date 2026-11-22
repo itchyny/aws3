@@ -82,7 +82,7 @@ const MAX_TAGGING_HEADER_SIZE: usize = 2 * 1024;
 
 /// Copies the object to the object, following the copy props option in the
 /// same way as the AWS CLI.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the properties of the transfer")]
 pub async fn copy_object(
     ctx: &Arc<Context>,
     id: TransferId,
@@ -192,7 +192,7 @@ async fn copy_single(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the properties of the transfer")]
 async fn copy_multipart(
     ctx: &Arc<Context>,
     id: TransferId,

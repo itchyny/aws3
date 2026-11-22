@@ -10,8 +10,6 @@ pub struct ApiArgs {
     pub operation: ApiOperation,
 }
 
-// The arguments are parsed only once, whose size does not matter.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 pub enum ApiOperation {
     /// Retrieve the metadata of an object without returning the object itself

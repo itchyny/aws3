@@ -74,7 +74,7 @@ fn convert(value: &mut Value, shape: &Shape) -> Result<(), Error> {
         // The single values are wrapped in the lists, which are not
         // converted to the types of the members.
         (Shape::List(_), value) => {
-            *value = Value::List(vec![std::mem::replace(value, Value::Null)])
+            *value = Value::List(vec![std::mem::replace(value, Value::Null)]);
         }
         (Shape::Long, value @ Value::Str(_)) => {
             let Value::Str(string) = &*value else {

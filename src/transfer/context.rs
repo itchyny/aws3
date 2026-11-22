@@ -55,7 +55,10 @@ impl Context {
     /// request, which is released when the response is received. The requests
     /// with the bodies of the responses to read should hold the permit by
     /// [`Self::permit`] instead.
-    #[allow(clippy::result_large_err)]
+    #[expect(
+        clippy::result_large_err,
+        reason = "the errors of the SDK are returned as they are"
+    )]
     pub(super) async fn send<T, E, F, Fut>(
         &self,
         client: &Client,
