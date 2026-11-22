@@ -5,10 +5,10 @@ use aws_sdk_s3::types::{Tag, Tagging};
 
 use super::args::required_checksum_algorithm;
 use super::members;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::PutBucketTaggingArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static TAG: Structure = Structure {
@@ -27,21 +27,19 @@ pub(super) static TAGGING: Structure = Structure {
 pub async fn run(client: &Client, args: &PutBucketTaggingArgs) -> Result<Value, Error> {
     let value = parse_structure("--tagging", "Tagging", &args.tagging, &TAGGING)?;
     let tagging = tagging(&value)?;
-    Redirector::default()
-        .send(client, &args.bucket, "PutBucketTagging", |client| {
-            client
-                .put_bucket_tagging()
-                .bucket(&args.bucket)
-                .tagging(tagging.clone())
-                .set_content_md5(args.content_md5.clone())
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutBucketTagging", err))?;
+    send(client, &args.bucket, "PutBucketTagging", |client| {
+        client
+            .put_bucket_tagging()
+            .bucket(&args.bucket)
+            .tagging(tagging.clone())
+            .set_content_md5(args.content_md5.clone())
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .send()
+    })
+    .await?;
     Ok(Value::Map(Vec::new()))
 }
 

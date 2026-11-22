@@ -57,9 +57,14 @@ pub mod shape;
 
 use std::process::ExitCode;
 
+use aws_sdk_s3::Client;
+use aws_sdk_s3::config::http::HttpResponse;
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
+
 use crate::cli::{ApiArgs, ApiOperation, GlobalArgs};
 use crate::client;
 use crate::error::Error;
+use crate::redirect::Redirector;
 use jmespath::Expression;
 use output::{output_format, print};
 
@@ -195,4 +200,24 @@ pub async fn run(args: &ApiArgs, global: &GlobalArgs) -> Result<ExitCode, Error>
         global.colored(),
     )?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// Sends the request of the operation with the client for the bucket, which
+/// is sent again to the region of the bucket if redirected, and returns the
+/// error of the operation on failure.
+pub async fn send<T, E, F, Fut>(
+    client: &Client,
+    bucket: &str,
+    operation: &str,
+    send: F,
+) -> Result<T, Error>
+where
+    F: Fn(Client) -> Fut,
+    Fut: Future<Output = Result<T, SdkError<E, HttpResponse>>>,
+    E: ProvideErrorMetadata + std::error::Error + 'static,
+{
+    Redirector::default()
+        .send(client, bucket, operation, send)
+        .await
+        .map_err(|err| Error::sdk(operation, err))
 }

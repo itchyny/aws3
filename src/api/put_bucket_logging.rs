@@ -9,10 +9,10 @@ use aws_sdk_s3::types::{
 use super::args::required_checksum_algorithm;
 use super::members;
 use super::put_bucket_acl::{GRANTEE, grantee};
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::PutBucketLoggingArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static TARGET_GRANT: Structure = Structure {
@@ -70,21 +70,19 @@ pub async fn run(client: &Client, args: &PutBucketLoggingArgs) -> Result<Value, 
         &BUCKET_LOGGING_STATUS,
     )?;
     let status = status(&value)?;
-    Redirector::default()
-        .send(client, &args.bucket, "PutBucketLogging", |client| {
-            client
-                .put_bucket_logging()
-                .bucket(&args.bucket)
-                .bucket_logging_status(status.clone())
-                .set_content_md5(args.content_md5.clone())
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutBucketLogging", err))?;
+    send(client, &args.bucket, "PutBucketLogging", |client| {
+        client
+            .put_bucket_logging()
+            .bucket(&args.bucket)
+            .bucket_logging_status(status.clone())
+            .set_content_md5(args.content_md5.clone())
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .send()
+    })
+    .await?;
     Ok(Value::Map(Vec::new()))
 }
 

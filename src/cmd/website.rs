@@ -4,11 +4,11 @@ use std::process::ExitCode;
 
 use aws_sdk_s3::types::{ErrorDocument, IndexDocument, WebsiteConfiguration};
 
+use crate::api::send;
 use crate::cli::{GlobalArgs, WebsiteArgs};
 use crate::client;
 use crate::error::Error;
 use crate::path::validate_bucket_name;
-use crate::redirect::Redirector;
 
 pub async fn run(args: &WebsiteArgs, global: &GlobalArgs) -> Result<ExitCode, Error> {
     let path = args.path.strip_prefix("s3://").unwrap_or(&args.path);
@@ -32,15 +32,13 @@ pub async fn run(args: &WebsiteArgs, global: &GlobalArgs) -> Result<ExitCode, Er
     let config = client::load_config(global).await?;
     let client = client::new_client(&config, None);
     let configuration = configuration.build();
-    Redirector::default()
-        .send(&client, bucket, "PutBucketWebsite", |client| {
-            client
-                .put_bucket_website()
-                .bucket(bucket)
-                .website_configuration(configuration.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutBucketWebsite", err))?;
+    send(&client, bucket, "PutBucketWebsite", |client| {
+        client
+            .put_bucket_website()
+            .bucket(bucket)
+            .website_configuration(configuration.clone())
+            .send()
+    })
+    .await?;
     Ok(ExitCode::SUCCESS)
 }

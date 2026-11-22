@@ -7,10 +7,10 @@ use aws_sdk_s3::types::{
 
 use super::args::required_checksum_algorithm;
 use super::members;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::PutBucketAclArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 pub(super) static GRANTEE: Structure = Structure {
@@ -62,27 +62,25 @@ pub async fn run(client: &Client, args: &PutBucketAclArgs) -> Result<Value, Erro
             .and_then(|value| policy(&value))
         })
         .transpose()?;
-    Redirector::default()
-        .send(client, &args.bucket, "PutBucketAcl", |client| {
-            client
-                .put_bucket_acl()
-                .set_acl(args.acl.as_deref().map(BucketCannedAcl::from))
-                .set_access_control_policy(policy.clone())
-                .bucket(&args.bucket)
-                .set_content_md5(args.content_md5.clone())
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .set_grant_full_control(args.grant_full_control.clone())
-                .set_grant_read(args.grant_read.clone())
-                .set_grant_read_acp(args.grant_read_acp.clone())
-                .set_grant_write(args.grant_write.clone())
-                .set_grant_write_acp(args.grant_write_acp.clone())
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutBucketAcl", err))?;
+    send(client, &args.bucket, "PutBucketAcl", |client| {
+        client
+            .put_bucket_acl()
+            .set_acl(args.acl.as_deref().map(BucketCannedAcl::from))
+            .set_access_control_policy(policy.clone())
+            .bucket(&args.bucket)
+            .set_content_md5(args.content_md5.clone())
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .set_grant_full_control(args.grant_full_control.clone())
+            .set_grant_read(args.grant_read.clone())
+            .set_grant_read_acp(args.grant_read_acp.clone())
+            .set_grant_write(args.grant_write.clone())
+            .set_grant_write_acp(args.grant_write_acp.clone())
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .send()
+    })
+    .await?;
     Ok(Value::Map(Vec::new()))
 }
 

@@ -5,10 +5,10 @@ use aws_sdk_s3::types::{CorsConfiguration, CorsRule};
 
 use super::args::required_checksum_algorithm;
 use super::members;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::PutBucketCorsArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static CORS_RULE: Structure = Structure {
@@ -36,21 +36,19 @@ pub async fn run(client: &Client, args: &PutBucketCorsArgs) -> Result<Value, Err
         &CORS_CONFIGURATION,
     )?;
     let configuration = configuration(&value)?;
-    Redirector::default()
-        .send(client, &args.bucket, "PutBucketCors", |client| {
-            client
-                .put_bucket_cors()
-                .bucket(&args.bucket)
-                .cors_configuration(configuration.clone())
-                .set_content_md5(args.content_md5.clone())
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutBucketCors", err))?;
+    send(client, &args.bucket, "PutBucketCors", |client| {
+        client
+            .put_bucket_cors()
+            .bucket(&args.bucket)
+            .cors_configuration(configuration.clone())
+            .set_content_md5(args.content_md5.clone())
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .send()
+    })
+    .await?;
     Ok(Value::Map(Vec::new()))
 }
 

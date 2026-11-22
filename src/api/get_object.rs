@@ -11,9 +11,9 @@ use tokio::io::AsyncWriteExt;
 
 use super::head_object::{ObjectRequest, set_object_request};
 use super::response::{Response, ResponseHeaders};
+use super::send;
 use crate::cli::GetObjectArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 pub async fn run(client: &Client, args: &GetObjectArgs) -> Result<Value, Error> {
@@ -31,16 +31,14 @@ pub async fn run(client: &Client, args: &GetObjectArgs) -> Result<Value, Error> 
                 .then_some(ChecksumMode::Enabled)
         });
     let headers = ResponseHeaders::default();
-    let output = Redirector::default()
-        .send(client, &object.bucket, "GetObject", |client| {
-            set_object_request!(client.get_object(), object, &request)
-                .set_checksum_mode(checksum_mode.clone())
-                .customize()
-                .interceptor(headers.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("GetObject", err))?;
+    let output = send(client, &object.bucket, "GetObject", |client| {
+        set_object_request!(client.get_object(), object, &request)
+            .set_checksum_mode(checksum_mode.clone())
+            .customize()
+            .interceptor(headers.clone())
+            .send()
+    })
+    .await?;
     let response = response(&output, &headers);
     write_body(output, &args.outfile).await?;
     Ok(response)

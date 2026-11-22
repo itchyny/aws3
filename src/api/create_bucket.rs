@@ -8,10 +8,10 @@ use aws_sdk_s3::types::{
 
 use super::members;
 use super::response::Response;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::CreateBucketArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static LOCATION_INFO: Structure = Structure {
@@ -64,25 +64,23 @@ pub async fn run(client: &Client, args: &CreateBucketArgs) -> Result<Value, Erro
         .transpose()?;
     // The request is redirected to the region of the bucket except on the
     // errors of the location constraints, like botocore.
-    let output = Redirector::default()
-        .send(client, &args.bucket, "CreateBucket", |client| {
-            client
-                .create_bucket()
-                .set_acl(args.acl.as_deref().map(BucketCannedAcl::from))
-                .bucket(&args.bucket)
-                .set_create_bucket_configuration(configuration.clone())
-                .set_grant_full_control(args.grant_full_control.clone())
-                .set_grant_read(args.grant_read.clone())
-                .set_grant_read_acp(args.grant_read_acp.clone())
-                .set_grant_write(args.grant_write.clone())
-                .set_grant_write_acp(args.grant_write_acp.clone())
-                .set_object_lock_enabled_for_bucket(args.object_lock_enabled_for_bucket.value())
-                .set_object_ownership(args.object_ownership.as_deref().map(ObjectOwnership::from))
-                .set_bucket_namespace(args.bucket_namespace.as_deref().map(BucketNamespace::from))
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("CreateBucket", err))?;
+    let output = send(client, &args.bucket, "CreateBucket", |client| {
+        client
+            .create_bucket()
+            .set_acl(args.acl.as_deref().map(BucketCannedAcl::from))
+            .bucket(&args.bucket)
+            .set_create_bucket_configuration(configuration.clone())
+            .set_grant_full_control(args.grant_full_control.clone())
+            .set_grant_read(args.grant_read.clone())
+            .set_grant_read_acp(args.grant_read_acp.clone())
+            .set_grant_write(args.grant_write.clone())
+            .set_grant_write_acp(args.grant_write_acp.clone())
+            .set_object_lock_enabled_for_bucket(args.object_lock_enabled_for_bucket.value())
+            .set_object_ownership(args.object_ownership.as_deref().map(ObjectOwnership::from))
+            .set_bucket_namespace(args.bucket_namespace.as_deref().map(BucketNamespace::from))
+            .send()
+    })
+    .await?;
     let mut response = Response::default();
     response.str("Location", output.location());
     response.str("BucketArn", output.bucket_arn());

@@ -8,10 +8,10 @@ use aws_sdk_s3::types::{
 
 use super::args::required_checksum_algorithm;
 use super::members;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::PutBucketEncryptionArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static SERVER_SIDE_ENCRYPTION_BY_DEFAULT: Structure = Structure {
@@ -58,21 +58,19 @@ pub async fn run(client: &Client, args: &PutBucketEncryptionArgs) -> Result<Valu
         &SERVER_SIDE_ENCRYPTION_CONFIGURATION,
     )?;
     let configuration = configuration(&value)?;
-    Redirector::default()
-        .send(client, &args.bucket, "PutBucketEncryption", |client| {
-            client
-                .put_bucket_encryption()
-                .bucket(&args.bucket)
-                .set_content_md5(args.content_md5.clone())
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .server_side_encryption_configuration(configuration.clone())
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutBucketEncryption", err))?;
+    send(client, &args.bucket, "PutBucketEncryption", |client| {
+        client
+            .put_bucket_encryption()
+            .bucket(&args.bucket)
+            .set_content_md5(args.content_md5.clone())
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .server_side_encryption_configuration(configuration.clone())
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .send()
+    })
+    .await?;
     Ok(Value::Map(Vec::new()))
 }
 

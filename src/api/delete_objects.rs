@@ -6,10 +6,10 @@ use aws_sdk_s3::types::{Delete, ObjectIdentifier, RequestPayer};
 use super::args::required_checksum_algorithm;
 use super::members;
 use super::response::Response;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::DeleteObjectsArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static OBJECT_IDENTIFIER: Structure = Structure {
@@ -41,23 +41,21 @@ pub async fn run(client: &Client, args: &DeleteObjectsArgs) -> Result<Value, Err
         &args.delete,
         &DELETE,
     )?)?;
-    let output = Redirector::default()
-        .send(client, &args.bucket, "DeleteObjects", |client| {
-            client
-                .delete_objects()
-                .bucket(&args.bucket)
-                .delete(delete.clone())
-                .set_mfa(args.mfa.clone())
-                .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
-                .set_bypass_governance_retention(args.bypass_governance_retention.value())
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("DeleteObjects", err))?;
+    let output = send(client, &args.bucket, "DeleteObjects", |client| {
+        client
+            .delete_objects()
+            .bucket(&args.bucket)
+            .delete(delete.clone())
+            .set_mfa(args.mfa.clone())
+            .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
+            .set_bypass_governance_retention(args.bypass_governance_retention.value())
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .send()
+    })
+    .await?;
     // The members of the headers precede those of the body, like botocore.
     let mut response = Response::default();
     response.str("RequestCharged", output.request_charged());

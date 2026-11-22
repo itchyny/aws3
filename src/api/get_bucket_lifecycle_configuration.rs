@@ -4,27 +4,25 @@ use aws_sdk_s3::Client;
 use aws_sdk_s3::types::{LifecycleRule, LifecycleRuleFilter, Tag};
 
 use super::response::Response;
+use super::send;
 use crate::cli::BucketArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 pub async fn run(client: &Client, args: &BucketArgs) -> Result<Value, Error> {
-    let output = Redirector::default()
-        .send(
-            client,
-            &args.bucket,
-            "GetBucketLifecycleConfiguration",
-            |client| {
-                client
-                    .get_bucket_lifecycle_configuration()
-                    .bucket(&args.bucket)
-                    .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                    .send()
-            },
-        )
-        .await
-        .map_err(|err| Error::sdk("GetBucketLifecycleConfiguration", err))?;
+    let output = send(
+        client,
+        &args.bucket,
+        "GetBucketLifecycleConfiguration",
+        |client| {
+            client
+                .get_bucket_lifecycle_configuration()
+                .bucket(&args.bucket)
+                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+                .send()
+        },
+    )
+    .await?;
     // The members of the headers precede those of the body, like botocore.
     let mut response = Response::default();
     response.str(

@@ -11,10 +11,10 @@ use aws_sdk_s3::types::{
 use super::args::required_checksum_algorithm;
 use super::members;
 use super::response::Response;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::PutBucketLifecycleConfigurationArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static LIFECYCLE_EXPIRATION: Structure = Structure {
@@ -132,30 +132,28 @@ pub async fn run(
             .and_then(|value| configuration(&value))
         })
         .transpose()?;
-    let output = Redirector::default()
-        .send(
-            client,
-            &args.bucket,
-            "PutBucketLifecycleConfiguration",
-            |client| {
-                client
-                    .put_bucket_lifecycle_configuration()
-                    .bucket(&args.bucket)
-                    .checksum_algorithm(required_checksum_algorithm(
-                        args.checksum_algorithm.as_deref(),
-                    ))
-                    .set_lifecycle_configuration(configuration.clone())
-                    .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                    .set_transition_default_minimum_object_size(
-                        args.transition_default_minimum_object_size
-                            .as_deref()
-                            .map(TransitionDefaultMinimumObjectSize::from),
-                    )
-                    .send()
-            },
-        )
-        .await
-        .map_err(|err| Error::sdk("PutBucketLifecycleConfiguration", err))?;
+    let output = send(
+        client,
+        &args.bucket,
+        "PutBucketLifecycleConfiguration",
+        |client| {
+            client
+                .put_bucket_lifecycle_configuration()
+                .bucket(&args.bucket)
+                .checksum_algorithm(required_checksum_algorithm(
+                    args.checksum_algorithm.as_deref(),
+                ))
+                .set_lifecycle_configuration(configuration.clone())
+                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+                .set_transition_default_minimum_object_size(
+                    args.transition_default_minimum_object_size
+                        .as_deref()
+                        .map(TransitionDefaultMinimumObjectSize::from),
+                )
+                .send()
+        },
+    )
+    .await?;
     let mut response = Response::default();
     response.str(
         "TransitionDefaultMinimumObjectSize",

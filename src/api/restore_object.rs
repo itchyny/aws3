@@ -7,10 +7,10 @@ use aws_sdk_s3::types::{GlacierJobParameters, RequestPayer, RestoreRequest, Tier
 use super::args::required_checksum_algorithm;
 use super::members;
 use super::response::Response;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::RestoreObjectArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static GLACIER_JOB_PARAMETERS: Structure = Structure {
@@ -52,23 +52,21 @@ pub async fn run(client: &Client, args: &RestoreObjectArgs) -> Result<Value, Err
             restore_request(&value)
         })
         .transpose()?;
-    let output = Redirector::default()
-        .send(client, &args.bucket, "RestoreObject", |client| {
-            client
-                .restore_object()
-                .bucket(&args.bucket)
-                .key(&args.key)
-                .set_version_id(args.version_id.clone())
-                .set_restore_request(restore_request.clone())
-                .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("RestoreObject", err))?;
+    let output = send(client, &args.bucket, "RestoreObject", |client| {
+        client
+            .restore_object()
+            .bucket(&args.bucket)
+            .key(&args.key)
+            .set_version_id(args.version_id.clone())
+            .set_restore_request(restore_request.clone())
+            .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .send()
+    })
+    .await?;
     let mut response = Response::default();
     response.str("RequestCharged", output.request_charged());
     response.str("RestoreOutputPath", output.restore_output_path());

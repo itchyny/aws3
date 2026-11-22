@@ -16,11 +16,11 @@ use aws_smithy_types::body::SdkBody;
 
 use super::args::{parse_int, parse_metadata, parse_timestamp, sse_customer_key};
 use super::response::Response;
+use super::send;
 use crate::cli::PutObjectArgs;
 use crate::client::Config;
 use crate::client::merge_content_encodings;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 pub async fn run(config: &Config, client: &Client, args: &PutObjectArgs) -> Result<Value, Error> {
@@ -44,88 +44,86 @@ pub async fn run(config: &Config, client: &Client, args: &PutObjectArgs) -> Resu
     let checksum = header_checksum(config, args, checksum_algorithm.as_ref()).await?;
     let checksums = &args.checksums;
     let has_content_type = args.content_type.is_some();
-    let output = Redirector::default()
-        .send(client, &args.bucket, "PutObject", |client| {
-            client
-                .put_object()
-                .set_acl(args.acl.as_deref().map(ObjectCannedAcl::from))
-                .body(ByteStream::new(
-                    body.try_clone().unwrap_or_else(SdkBody::taken),
-                ))
-                .bucket(&args.bucket)
-                .set_cache_control(args.cache_control.clone())
-                .set_content_disposition(args.content_disposition.clone())
-                .set_content_encoding(args.content_encoding.clone())
-                .set_content_language(args.content_language.clone())
-                .set_content_length(args.content_length)
-                .set_content_md5(args.content_md5.clone())
-                .set_content_type(args.content_type.clone())
-                .set_checksum_algorithm(checksum_algorithm.clone())
-                .set_checksum_crc32(checksums.checksum_crc32.clone())
-                .set_checksum_crc32_c(checksums.checksum_crc32_c.clone())
-                .set_checksum_crc64_nvme(checksums.checksum_crc64_nvme.clone())
-                .set_checksum_sha1(checksums.checksum_sha1.clone())
-                .set_checksum_sha256(checksums.checksum_sha256.clone())
-                .set_checksum_sha512(checksums.checksum_sha512.clone())
-                .set_checksum_md5(checksums.checksum_md5.clone())
-                .set_checksum_xxhash64(checksums.checksum_xxhash64.clone())
-                .set_checksum_xxhash3(checksums.checksum_xxhash3.clone())
-                .set_checksum_xxhash128(checksums.checksum_xxhash128.clone())
-                .set_checksum(checksum_algorithm.as_ref(), checksum.clone())
-                .set_expires(expires)
-                .set_if_match(args.if_match.clone())
-                .set_if_none_match(args.if_none_match.clone())
-                .set_grant_full_control(args.grant_full_control.clone())
-                .set_grant_read(args.grant_read.clone())
-                .set_grant_read_acp(args.grant_read_acp.clone())
-                .set_grant_write_acp(args.grant_write_acp.clone())
-                .key(&args.key)
-                .set_write_offset_bytes(args.write_offset_bytes)
-                .set_metadata(metadata.clone())
-                .set_server_side_encryption(
-                    args.server_side_encryption
-                        .as_deref()
-                        .map(ServerSideEncryption::from),
-                )
-                .set_storage_class(args.storage_class.as_deref().map(StorageClass::from))
-                .set_website_redirect_location(args.website_redirect_location.clone())
-                .set_sse_customer_algorithm(args.sse_customer_algorithm.clone())
-                .set_sse_customer_key(sse_customer_key.clone())
-                .set_sse_customer_key_md5(sse_customer_key_md5.clone())
-                .set_ssekms_key_id(args.ssekms_key_id.clone())
-                .set_ssekms_encryption_context(args.ssekms_encryption_context.clone())
-                .set_bucket_key_enabled(args.bucket_key_enabled.value())
-                .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
-                .set_tagging(args.tagging.clone())
-                .set_object_lock_mode(args.object_lock_mode.as_deref().map(ObjectLockMode::from))
-                .set_object_lock_retain_until_date(object_lock_retain_until_date)
-                .set_object_lock_legal_hold_status(
-                    args.object_lock_legal_hold_status
-                        .as_deref()
-                        .map(ObjectLockLegalHoldStatus::from),
-                )
-                .set_object_lock_event_hold(
-                    args.object_lock_event_hold
-                        .as_deref()
-                        .map(ObjectLockEventHold::from),
-                )
-                .set_object_lock_event_hold_duration_days(object_lock_event_hold_duration_days)
-                .set_object_lock_event_hold_duration_years(object_lock_event_hold_duration_years)
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .customize()
-                .mutate_request(move |request| {
-                    // The SDK sends the default content type of the body,
-                    // whereas the AWS CLI leaves it to S3, which defaults to
-                    // binary/octet-stream.
-                    if !has_content_type {
-                        request.headers_mut().remove("content-type");
-                    }
-                    merge_content_encodings(request.headers_mut());
-                })
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutObject", err))?;
+    let output = send(client, &args.bucket, "PutObject", |client| {
+        client
+            .put_object()
+            .set_acl(args.acl.as_deref().map(ObjectCannedAcl::from))
+            .body(ByteStream::new(
+                body.try_clone().unwrap_or_else(SdkBody::taken),
+            ))
+            .bucket(&args.bucket)
+            .set_cache_control(args.cache_control.clone())
+            .set_content_disposition(args.content_disposition.clone())
+            .set_content_encoding(args.content_encoding.clone())
+            .set_content_language(args.content_language.clone())
+            .set_content_length(args.content_length)
+            .set_content_md5(args.content_md5.clone())
+            .set_content_type(args.content_type.clone())
+            .set_checksum_algorithm(checksum_algorithm.clone())
+            .set_checksum_crc32(checksums.checksum_crc32.clone())
+            .set_checksum_crc32_c(checksums.checksum_crc32_c.clone())
+            .set_checksum_crc64_nvme(checksums.checksum_crc64_nvme.clone())
+            .set_checksum_sha1(checksums.checksum_sha1.clone())
+            .set_checksum_sha256(checksums.checksum_sha256.clone())
+            .set_checksum_sha512(checksums.checksum_sha512.clone())
+            .set_checksum_md5(checksums.checksum_md5.clone())
+            .set_checksum_xxhash64(checksums.checksum_xxhash64.clone())
+            .set_checksum_xxhash3(checksums.checksum_xxhash3.clone())
+            .set_checksum_xxhash128(checksums.checksum_xxhash128.clone())
+            .set_checksum(checksum_algorithm.as_ref(), checksum.clone())
+            .set_expires(expires)
+            .set_if_match(args.if_match.clone())
+            .set_if_none_match(args.if_none_match.clone())
+            .set_grant_full_control(args.grant_full_control.clone())
+            .set_grant_read(args.grant_read.clone())
+            .set_grant_read_acp(args.grant_read_acp.clone())
+            .set_grant_write_acp(args.grant_write_acp.clone())
+            .key(&args.key)
+            .set_write_offset_bytes(args.write_offset_bytes)
+            .set_metadata(metadata.clone())
+            .set_server_side_encryption(
+                args.server_side_encryption
+                    .as_deref()
+                    .map(ServerSideEncryption::from),
+            )
+            .set_storage_class(args.storage_class.as_deref().map(StorageClass::from))
+            .set_website_redirect_location(args.website_redirect_location.clone())
+            .set_sse_customer_algorithm(args.sse_customer_algorithm.clone())
+            .set_sse_customer_key(sse_customer_key.clone())
+            .set_sse_customer_key_md5(sse_customer_key_md5.clone())
+            .set_ssekms_key_id(args.ssekms_key_id.clone())
+            .set_ssekms_encryption_context(args.ssekms_encryption_context.clone())
+            .set_bucket_key_enabled(args.bucket_key_enabled.value())
+            .set_request_payer(args.request_payer.as_deref().map(RequestPayer::from))
+            .set_tagging(args.tagging.clone())
+            .set_object_lock_mode(args.object_lock_mode.as_deref().map(ObjectLockMode::from))
+            .set_object_lock_retain_until_date(object_lock_retain_until_date)
+            .set_object_lock_legal_hold_status(
+                args.object_lock_legal_hold_status
+                    .as_deref()
+                    .map(ObjectLockLegalHoldStatus::from),
+            )
+            .set_object_lock_event_hold(
+                args.object_lock_event_hold
+                    .as_deref()
+                    .map(ObjectLockEventHold::from),
+            )
+            .set_object_lock_event_hold_duration_days(object_lock_event_hold_duration_days)
+            .set_object_lock_event_hold_duration_years(object_lock_event_hold_duration_years)
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .customize()
+            .mutate_request(move |request| {
+                // The SDK sends the default content type of the body,
+                // whereas the AWS CLI leaves it to S3, which defaults to
+                // binary/octet-stream.
+                if !has_content_type {
+                    request.headers_mut().remove("content-type");
+                }
+                merge_content_encodings(request.headers_mut());
+            })
+            .send()
+    })
+    .await?;
     let mut response = Response::default();
     response.str("Expiration", output.expiration());
     response.str("ETag", output.e_tag());

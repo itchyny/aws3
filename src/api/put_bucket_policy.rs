@@ -3,10 +3,10 @@
 use aws_sdk_s3::Client;
 
 use super::args::required_checksum_algorithm;
+use super::send;
 use crate::cli::PutBucketPolicyArgs;
 use crate::error::Error;
 use crate::param::load_string;
-use crate::redirect::Redirector;
 use crate::value::{Value, invalid_type};
 
 pub async fn run(client: &Client, args: &PutBucketPolicyArgs) -> Result<Value, Error> {
@@ -19,23 +19,19 @@ pub async fn run(client: &Client, args: &PutBucketPolicyArgs) -> Result<Value, E
             )));
         }
     };
-    Redirector::default()
-        .send(client, &args.bucket, "PutBucketPolicy", |client| {
-            client
-                .put_bucket_policy()
-                .bucket(&args.bucket)
-                .set_content_md5(args.content_md5.clone())
-                .checksum_algorithm(required_checksum_algorithm(
-                    args.checksum_algorithm.as_deref(),
-                ))
-                .set_confirm_remove_self_bucket_access(
-                    args.confirm_remove_self_bucket_access.value(),
-                )
-                .policy(&policy)
-                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("PutBucketPolicy", err))?;
+    send(client, &args.bucket, "PutBucketPolicy", |client| {
+        client
+            .put_bucket_policy()
+            .bucket(&args.bucket)
+            .set_content_md5(args.content_md5.clone())
+            .checksum_algorithm(required_checksum_algorithm(
+                args.checksum_algorithm.as_deref(),
+            ))
+            .set_confirm_remove_self_bucket_access(args.confirm_remove_self_bucket_access.value())
+            .policy(&policy)
+            .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+            .send()
+    })
+    .await?;
     Ok(Value::Map(Vec::new()))
 }

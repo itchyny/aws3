@@ -8,10 +8,10 @@ use aws_sdk_s3::types::{
 };
 
 use super::members;
+use super::send;
 use super::shape::{Shape, Structure, parse_structure};
 use crate::cli::PutBucketNotificationConfigurationArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 static FILTER_RULE: Structure = Structure {
@@ -109,23 +109,21 @@ pub async fn run(
         &NOTIFICATION_CONFIGURATION,
     )?;
     let configuration = configuration(&value)?;
-    Redirector::default()
-        .send(
-            client,
-            &args.bucket,
-            "PutBucketNotificationConfiguration",
-            |client| {
-                client
-                    .put_bucket_notification_configuration()
-                    .bucket(&args.bucket)
-                    .notification_configuration(configuration.clone())
-                    .set_expected_bucket_owner(args.expected_bucket_owner.clone())
-                    .set_skip_destination_validation(args.skip_destination_validation.value())
-                    .send()
-            },
-        )
-        .await
-        .map_err(|err| Error::sdk("PutBucketNotificationConfiguration", err))?;
+    send(
+        client,
+        &args.bucket,
+        "PutBucketNotificationConfiguration",
+        |client| {
+            client
+                .put_bucket_notification_configuration()
+                .bucket(&args.bucket)
+                .notification_configuration(configuration.clone())
+                .set_expected_bucket_owner(args.expected_bucket_owner.clone())
+                .set_skip_destination_validation(args.skip_destination_validation.value())
+                .send()
+        },
+    )
+    .await?;
     Ok(Value::Map(Vec::new()))
 }
 

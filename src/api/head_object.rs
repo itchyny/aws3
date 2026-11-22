@@ -7,9 +7,9 @@ use aws_sdk_s3::types::ChecksumMode;
 
 use super::args::{parse_int, parse_timestamp, sse_customer_key};
 use super::response::{Response, ResponseHeaders};
+use super::send;
 use crate::cli::ObjectArgs;
 use crate::error::Error;
-use crate::redirect::Redirector;
 use crate::value::Value;
 
 /// The arguments of the requests of an object parsed before sending, which
@@ -85,16 +85,14 @@ pub(crate) use set_object_request;
 pub async fn run(client: &Client, args: &ObjectArgs) -> Result<Value, Error> {
     let request = ObjectRequest::parse(args)?;
     let headers = ResponseHeaders::default();
-    let output = Redirector::default()
-        .send(client, &args.bucket, "HeadObject", |client| {
-            set_object_request!(client.head_object(), args, &request)
-                .set_checksum_mode(args.checksum_mode.as_deref().map(ChecksumMode::from))
-                .customize()
-                .interceptor(headers.clone())
-                .send()
-        })
-        .await
-        .map_err(|err| Error::sdk("HeadObject", err))?;
+    let output = send(client, &args.bucket, "HeadObject", |client| {
+        set_object_request!(client.head_object(), args, &request)
+            .set_checksum_mode(args.checksum_mode.as_deref().map(ChecksumMode::from))
+            .customize()
+            .interceptor(headers.clone())
+            .send()
+    })
+    .await?;
     Ok(response(&output, &headers))
 }
 
