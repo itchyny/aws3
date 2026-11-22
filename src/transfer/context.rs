@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use aws_sdk_s3::Client;
+use aws_sdk_s3::config::http::HttpResponse;
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use tokio::sync::{Semaphore, SemaphorePermit, watch};
 use tokio::task::JoinHandle;
 
@@ -47,6 +49,31 @@ impl Context {
     /// by `max_concurrent_requests`.
     pub(super) async fn permit(&self) -> Result<SemaphorePermit<'_>, String> {
         self.requests.acquire().await.map_err(|err| err.to_string())
+    }
+
+    /// Sends the request with the client for the bucket under the permit of a
+    /// request, which is released when the response is received. The requests
+    /// with the bodies of the responses to read should hold the permit by
+    /// [`Self::permit`] instead.
+    #[allow(clippy::result_large_err)]
+    pub(super) async fn send<T, E, F, Fut>(
+        &self,
+        client: &Client,
+        bucket: &str,
+        operation: &str,
+        send: F,
+    ) -> Result<T, SdkError<E, HttpResponse>>
+    where
+        F: Fn(Client) -> Fut,
+        Fut: Future<Output = Result<T, SdkError<E, HttpResponse>>>,
+        E: ProvideErrorMetadata,
+    {
+        let _permit = self
+            .requests
+            .acquire()
+            .await
+            .map_err(SdkError::construction_failure)?;
+        self.redirector.send(client, bucket, operation, send).await
     }
 
     pub(super) fn is_cancelled(&self) -> bool {

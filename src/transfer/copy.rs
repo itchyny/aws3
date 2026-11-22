@@ -162,9 +162,7 @@ async fn copy_single(
         None => {}
     }
     params.validate_ascii_metadata()?;
-    let _permit = ctx.permit().await?;
     let result = ctx
-        .redirector
         .send(&ctx.client, bucket, "CopyObject", |client| {
             let request = client
                 .copy_object()
@@ -233,23 +231,20 @@ async fn copy_multipart(
     let put_tags_later = !tags.is_empty() && tagging_header.len() > MAX_TAGGING_HEADER_SIZE;
     let tagging = (!tags.is_empty() && !put_tags_later).then_some(tagging_header);
     params.validate_ascii_metadata()?;
-    let output = {
-        let _permit = ctx.permit().await?;
-        ctx.redirector
-            .send(&ctx.client, bucket, "CreateMultipartUpload", |client| {
-                let request = client.create_multipart_upload().bucket(bucket).key(key);
-                let mut request = set_object_params!(request, params)
-                    .set_checksum_algorithm(params.checksum_algorithm.clone())
-                    .set_tagging(tagging.clone());
-                request = set_sse_c!(request, &params.sse_c);
-                if let Some(head) = &source {
-                    request = set_source_props!(request, params, head);
-                }
-                request.send()
-            })
-            .await
-            .map_err(|err| Error::sdk("CreateMultipartUpload", err).to_string())?
-    };
+    let output = ctx
+        .send(&ctx.client, bucket, "CreateMultipartUpload", |client| {
+            let request = client.create_multipart_upload().bucket(bucket).key(key);
+            let mut request = set_object_params!(request, params)
+                .set_checksum_algorithm(params.checksum_algorithm.clone())
+                .set_tagging(tagging.clone());
+            request = set_sse_c!(request, &params.sse_c);
+            if let Some(head) = &source {
+                request = set_source_props!(request, params, head);
+            }
+            request.send()
+        })
+        .await
+        .map_err(|err| Error::sdk("CreateMultipartUpload", err).to_string())?;
     let upload = MultipartUpload {
         bucket: bucket.to_owned(),
         key: key.to_owned(),
@@ -291,20 +286,17 @@ async fn copy_multipart(
             .set_tag_set(Some(tags))
             .build()
             .map_err(|err| err.to_string())?;
-        let result = {
-            let _permit = ctx.permit().await?;
-            ctx.redirector
-                .send(&ctx.client, bucket, "PutObjectTagging", |client| {
-                    client
-                        .put_object_tagging()
-                        .bucket(bucket)
-                        .key(key)
-                        .tagging(tagging.clone())
-                        .set_request_payer(params.request_payer.clone())
-                        .send()
-                })
-                .await
-        };
+        let result = ctx
+            .send(&ctx.client, bucket, "PutObjectTagging", |client| {
+                client
+                    .put_object_tagging()
+                    .bucket(bucket)
+                    .key(key)
+                    .tagging(tagging.clone())
+                    .set_request_payer(params.request_payer.clone())
+                    .send()
+            })
+            .await;
         if let Err(err) = result {
             let _ = delete_object(ctx, &ctx.client, bucket, key).await;
             return Err(Error::sdk("PutObjectTagging", err).to_string());
@@ -331,9 +323,7 @@ async fn upload_part_copy(
     end: u64,
 ) -> Result<CompletedPart, String> {
     let params = &ctx.params;
-    let _permit = ctx.permit().await?;
     let result = ctx
-        .redirector
         .send(&ctx.client, &upload.bucket, "UploadPartCopy", |client| {
             let request = client
                 .upload_part_copy()
@@ -383,24 +373,20 @@ async fn head_source(
     if let Some(head) = head {
         return Ok(head.clone());
     }
-    let _permit = ctx.permit().await?;
-    ctx.redirector
-        .send(&ctx.source_client, bucket, "HeadObject", |client| {
-            let request = client
-                .head_object()
-                .bucket(bucket)
-                .key(key)
-                .set_request_payer(ctx.params.request_payer.clone());
-            set_sse_c!(request, &ctx.params.sse_c_copy_source).send()
-        })
-        .await
-        .map_err(|err| Error::sdk("HeadObject", err).to_string())
+    ctx.send(&ctx.source_client, bucket, "HeadObject", |client| {
+        let request = client
+            .head_object()
+            .bucket(bucket)
+            .key(key)
+            .set_request_payer(ctx.params.request_payer.clone());
+        set_sse_c!(request, &ctx.params.sse_c_copy_source).send()
+    })
+    .await
+    .map_err(|err| Error::sdk("HeadObject", err).to_string())
 }
 
 async fn get_tags(ctx: &Context, bucket: &str, key: &str) -> Result<Vec<Tag>, String> {
-    let _permit = ctx.permit().await?;
     let output = ctx
-        .redirector
         .send(&ctx.source_client, bucket, "GetObjectTagging", |client| {
             client
                 .get_object_tagging()
@@ -448,6 +434,7 @@ async fn get_annotations(
     }
     let mut annotations = Vec::new();
     for name in names {
+        // The permit is held until the payload is read.
         let _permit = ctx.permit().await?;
         let output = ctx
             .redirector
@@ -490,9 +477,7 @@ async fn put_annotations(
     let mut succeeded = Vec::new();
     let mut failed = Vec::new();
     for (name, payload) in annotations {
-        let _permit = ctx.permit().await?;
         let result = ctx
-            .redirector
             .send(&ctx.client, bucket, "PutObjectAnnotation", |client| {
                 client
                     .put_object_annotation()

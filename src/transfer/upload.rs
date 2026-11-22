@@ -352,9 +352,7 @@ async fn put_object(
     let has_content_type = content_type.is_some() || params.content_type.is_some();
     let content_type = content_type.or_else(|| params.content_type.clone());
     params.validate_ascii_metadata()?;
-    let _permit = ctx.permit().await?;
     let result = ctx
-        .redirector
         .send(&ctx.client, bucket, "PutObject", |client| {
             let request = client
                 .put_object()
@@ -446,9 +444,7 @@ impl MultipartUpload {
         let params = &ctx.params;
         let checksum_algorithm = checksum_algorithm(ctx);
         params.validate_ascii_metadata()?;
-        let _permit = ctx.permit().await?;
         let output = ctx
-            .redirector
             .send(&ctx.client, bucket, "CreateMultipartUpload", |client| {
                 let request = client.create_multipart_upload().bucket(bucket).key(key);
                 let request = set_object_params!(request, params)
@@ -482,9 +478,7 @@ impl MultipartUpload {
         let params = &ctx.params;
         let UploadBody { stream, checksum } = body;
         let body = stream.into_inner();
-        let _permit = ctx.permit().await?;
         let output = ctx
-            .redirector
             .send(&ctx.client, &self.bucket, "UploadPart", |client| {
                 let request = client
                     .upload_part()
@@ -565,9 +559,7 @@ impl MultipartUpload {
         let upload = CompletedMultipartUpload::builder()
             .set_parts(Some(completed))
             .build();
-        let permit = ctx.permit().await?;
         let result = ctx
-            .redirector
             .send(
                 &ctx.client,
                 &self.bucket,
@@ -591,7 +583,6 @@ impl MultipartUpload {
                 Ok(Some(output))
             }
             Err(err) => {
-                drop(permit);
                 self.abort(ctx).await;
                 if params.no_overwrite && has_error_code(&err, "PreconditionFailed") {
                     Ok(None)

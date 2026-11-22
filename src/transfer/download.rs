@@ -378,18 +378,16 @@ async fn head_object(
     key: &str,
 ) -> Result<aws_sdk_s3::operation::head_object::HeadObjectOutput, String> {
     let params = &ctx.params;
-    let _permit = ctx.permit().await?;
-    ctx.redirector
-        .send(&ctx.source_client, bucket, "HeadObject", |client| {
-            let request = client
-                .head_object()
-                .bucket(bucket)
-                .key(key)
-                .set_request_payer(params.request_payer.clone());
-            set_sse_c!(request, &params.sse_c).send()
-        })
-        .await
-        .map_err(|err| Error::sdk("HeadObject", err).to_string())
+    ctx.send(&ctx.source_client, bucket, "HeadObject", |client| {
+        let request = client
+            .head_object()
+            .bucket(bucket)
+            .key(key)
+            .set_request_payer(params.request_payer.clone());
+        set_sse_c!(request, &params.sse_c).send()
+    })
+    .await
+    .map_err(|err| Error::sdk("HeadObject", err).to_string())
 }
 
 #[cfg(unix)]

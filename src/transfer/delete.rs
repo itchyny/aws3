@@ -34,19 +34,17 @@ pub(super) async fn delete_object(
     key: &str,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
-    let _permit = ctx.permit().await?;
-    ctx.redirector
-        .send(client, bucket, "DeleteObject", |client| async move {
-            client
-                .delete_object()
-                .bucket(bucket)
-                .key(key)
-                .set_request_payer(ctx.params.request_payer.clone())
-                .send()
-                .await
-        })
-        .await
-        .map_err(|err| Error::sdk("DeleteObject", err).to_string())?;
+    ctx.send(client, bucket, "DeleteObject", |client| async move {
+        client
+            .delete_object()
+            .bucket(bucket)
+            .key(key)
+            .set_request_payer(ctx.params.request_payer.clone())
+            .send()
+            .await
+    })
+    .await
+    .map_err(|err| Error::sdk("DeleteObject", err).to_string())?;
     Ok(Outcome::Done)
 }
 
@@ -76,9 +74,7 @@ pub(super) async fn delete_batch(ctx: Arc<Context>, bucket: String, deletions: V
             .quiet(true)
             .build()
             .map_err(|err| err.to_string())?;
-        let _permit = ctx.permit().await?;
         Ok(ctx
-            .redirector
             .send(&ctx.client, bucket, "DeleteObjects", |client| {
                 let delete = delete.clone();
                 async move {
