@@ -973,6 +973,57 @@ fn cp_ctrl_c_while_aborting() {
 }
 
 #[test]
+fn cp_multipart_failure_waits_for_parts() {
+    use std::sync::{Arc, Mutex};
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.bin", content(12 * 1024 * 1024));
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    // The first part fails while the second part is in progress, which is
+    // waited for before aborting, since S3 may store it after the abort.
+    let events = Arc::new(Mutex::new(Vec::new()));
+    env.intercept({
+        let events = events.clone();
+        move |request| {
+            let query = request.uri.query().unwrap_or_default();
+            let is_part = |number: u32| {
+                query
+                    .split('&')
+                    .any(|param| param == format!("partNumber={number}"))
+            };
+            if is_part(1) {
+                return Some(common::xml_response(
+                    403,
+                    "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
+                ));
+            }
+            if is_part(2) {
+                for _ in 0..50 {
+                    if events.lock().unwrap().contains(&"abort") {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                events.lock().unwrap().push("part 2");
+            } else if request.method == http::Method::DELETE && request.has_query("uploadId") {
+                events.lock().unwrap().push("abort");
+            }
+            None
+        }
+    });
+    let result = env.run_with_env(&["cp", "a.bin", "s3://bucket/a.bin"], &envs);
+    assert_eq!(result.code, 1, "{}", result.stderr);
+    let events = events.lock().unwrap().clone();
+    assert_eq!(events, ["part 2", "abort"]);
+    assert_eq!(env.object_content("bucket", "a.bin"), None);
+    assert_eq!(env.multipart_uploads(), 0);
+}
+
+#[test]
 fn cp_max_bandwidth() {
     let env = Env::new();
     env.bucket("bucket");

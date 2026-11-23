@@ -34,7 +34,7 @@ pub struct Env {
 
 /// Returns the response to the request instead of the server, e.g. to inject
 /// errors, or `None` to pass the request to the server.
-type Interceptor = Box<dyn Fn(&Request) -> Option<http::Response<s3s::Body>> + Send>;
+type Interceptor = Arc<dyn Fn(&Request) -> Option<http::Response<s3s::Body>> + Send + Sync>;
 
 /// The request received by the server, to check the headers and the body.
 #[derive(Debug, Clone)]
@@ -149,11 +149,10 @@ impl Env {
                         body: body.clone(),
                     };
                     requests.lock().unwrap().push(request.clone());
-                    let intercepted = interceptor
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .and_then(|intercept| intercept(&request));
+                    // The interceptor is called without the lock, since it may
+                    // block the request while the others are handled.
+                    let intercept = interceptor.lock().unwrap().clone();
+                    let intercepted = intercept.and_then(|intercept| intercept(&request));
                     if let Some(response) = intercepted {
                         return Ok(response);
                     }
@@ -235,9 +234,9 @@ impl Env {
     /// Responds to the requests with the interceptor instead of the server.
     pub fn intercept(
         &self,
-        intercept: impl Fn(&Request) -> Option<http::Response<s3s::Body>> + Send + 'static,
+        intercept: impl Fn(&Request) -> Option<http::Response<s3s::Body>> + Send + Sync + 'static,
     ) {
-        *self.interceptor.lock().unwrap() = Some(Box::new(intercept));
+        *self.interceptor.lock().unwrap() = Some(Arc::new(intercept));
     }
 
     /// Returns the requests received by the server so far.

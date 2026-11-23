@@ -626,10 +626,11 @@ impl MultipartUpload {
         self.done.store(true, Ordering::Relaxed);
     }
 
-    /// Cancels the remaining parts and aborts the upload, and returns the
-    /// error of the failure.
+    /// Waits for the remaining parts and aborts the upload, and returns the
+    /// error of the failure. The parts are not cancelled, since S3 may store
+    /// a part sent before the abort after it, which consumes the storage.
     async fn fail(&self, ctx: &Context, parts: &mut JoinSet<PartResult>, err: String) -> String {
-        parts.abort_all();
+        while parts.join_next().await.is_some() {}
         self.abort(ctx).await;
         err
     }
