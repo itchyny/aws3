@@ -295,6 +295,44 @@ fn cp_no_overwrite_download() {
 }
 
 #[test]
+fn cp_no_overwrite_download_created() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "remote");
+    // The file created during the download is not replaced.
+    let path = env.path("a.txt");
+    env.intercept(move |request| {
+        if request.method == http::Method::GET && request.uri.path() == "/bucket/a.txt" {
+            std::fs::write(&path, "other").unwrap();
+        }
+        None
+    });
+    let result = env
+        .run(&[
+            "cp",
+            "s3://bucket/a.txt",
+            "a.txt",
+            "--no-overwrite",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(result.stdout, "");
+    assert_eq!(env.read("a.txt"), b"other");
+    let files: Vec<_> = std::fs::read_dir(env.work())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name.to_string_lossy().starts_with("a.txt."))
+        .collect();
+    assert!(files.is_empty(), "{files:?}");
+    // The file is replaced without --no-overwrite.
+    let result = env
+        .run(&["cp", "s3://bucket/a.txt", "a.txt", "--no-progress"])
+        .success();
+    assert_eq!(result.stdout, "download: s3://bucket/a.txt to ./a.txt\n");
+    assert_eq!(env.read("a.txt"), b"remote");
+}
+
+#[test]
 fn cp_content_type_and_metadata() {
     let env = Env::new();
     env.bucket("bucket");

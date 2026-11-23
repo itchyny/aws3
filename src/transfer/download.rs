@@ -105,9 +105,20 @@ pub async fn download_file(
             "warning: Successfully Downloaded {path} but was unable to update the last modified time. {err}"
         ));
     }
-    tokio::fs::rename(&temp_path, path)
-        .await
-        .map_err(|err| err.to_string())?;
+    // The file created during the download, e.g. by another key of the same
+    // path like `a//b`, is not replaced with --no-overwrite.
+    let result = if ctx.options.no_overwrite {
+        rename_no_replace(&temp_path, path)
+    } else {
+        tokio::fs::rename(&temp_path, path).await
+    };
+    match result {
+        Ok(()) => {}
+        Err(err) if ctx.options.no_overwrite && err.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Ok(Outcome::Skipped);
+        }
+        Err(err) => return Err(err.to_string()),
+    }
     temp_file.keep();
     Ok(Outcome::Done)
 }
@@ -418,6 +429,25 @@ fn write_at(file: &File, mut bytes: &[u8], mut offset: u64) -> std::io::Result<(
         offset += written as u64;
     }
     Ok(())
+}
+
+/// Moves the file to the destination unless it exists, by a hard link which
+/// fails on the existing file atomically, or by checking the destination
+/// before renaming on the file systems without hard links.
+fn rename_no_replace(from: &str, to: &str) -> std::io::Result<()> {
+    match std::fs::hard_link(from, to) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(from);
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Err(err),
+        Err(_) => {
+            if std::fs::exists(to)? {
+                return Err(std::io::ErrorKind::AlreadyExists.into());
+            }
+            std::fs::rename(from, to)
+        }
+    }
 }
 
 /// Sets the times of the file in whole seconds, since the AWS CLI drops the
