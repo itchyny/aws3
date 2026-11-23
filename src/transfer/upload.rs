@@ -407,7 +407,6 @@ pub struct MultipartUpload {
     pub key: String,
     pub upload_id: String,
     pub checksum_algorithm: Option<ChecksumAlgorithm>,
-    /// Whether the upload is completed or aborted.
     pub done: Arc<AtomicBool>,
 }
 
@@ -601,8 +600,10 @@ impl MultipartUpload {
         }
     }
 
+    /// Aborts the upload unless it is done. The upload is done after the
+    /// request, so that the guard aborts it again if the request is cancelled.
     async fn abort(&self, ctx: &Context) {
-        if self.done.swap(true, Ordering::Relaxed) {
+        if self.done.load(Ordering::Relaxed) {
             return;
         }
         let _ = ctx
@@ -622,6 +623,7 @@ impl MultipartUpload {
                 },
             )
             .await;
+        self.done.store(true, Ordering::Relaxed);
     }
 
     /// Cancels the remaining parts and aborts the upload, and returns the

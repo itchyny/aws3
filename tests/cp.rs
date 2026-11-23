@@ -908,6 +908,71 @@ fn cp_ctrl_c() {
 }
 
 #[test]
+fn cp_ctrl_c_while_aborting() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.bin", content(12 * 1024 * 1024));
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    // The first part fails, and the abort of the multipart upload is held
+    // until Ctrl-C drops it, so that the response is not received.
+    let aborting = Arc::new(AtomicBool::new(false));
+    let released = Arc::new(AtomicBool::new(false));
+    env.intercept({
+        let (aborting, released) = (aborting.clone(), released.clone());
+        move |request| {
+            let query = request.uri.query().unwrap_or_default();
+            if query.split('&').any(|param| param == "partNumber=1") {
+                return Some(common::xml_response(
+                    403,
+                    "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
+                ));
+            }
+            if request.method == http::Method::DELETE
+                && request.has_query("uploadId")
+                && !aborting.swap(true, Ordering::Relaxed)
+            {
+                while !released.load(Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                return Some(common::xml_response(
+                    500,
+                    "<Error><Code>InternalError</Code><Message>Dropped</Message></Error>",
+                ));
+            }
+            None
+        }
+    });
+    let child = env
+        .command(&["cp", "a.bin", "s3://bucket/a.bin"])
+        .envs(envs.iter().copied())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_until("the abort of the multipart upload", || {
+        aborting.load(Ordering::Relaxed)
+    });
+    let status = std::process::Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    released.store(true, Ordering::Relaxed);
+    let output = wait_child(child);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(env.object_content("bucket", "a.bin"), None);
+    // The multipart upload is aborted again by the cleanup.
+    assert_eq!(env.multipart_uploads(), 0);
+}
+
+#[test]
 fn cp_max_bandwidth() {
     let env = Env::new();
     env.bucket("bucket");
