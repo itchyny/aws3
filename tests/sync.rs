@@ -273,3 +273,39 @@ fn sync_case_conflict() {
         result.stderr
     );
 }
+
+#[test]
+fn sync_case_conflict_in_flight() {
+    let env = Env::new();
+    // The objects whose keys differ only by case are stored only on
+    // case-sensitive file systems, where the conflicts are detected only
+    // with the keys being downloaded.
+    env.write("probe", "");
+    if env.path("PROBE").exists() {
+        return;
+    }
+    env.bucket("bucket");
+    env.object("bucket", "dir/A.txt", "upper");
+    env.object("bucket", "dir/a.txt", "lower");
+    let result = env
+        .run(&[
+            "sync",
+            "s3://bucket/dir",
+            "out",
+            "--case-conflict",
+            "skip",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(
+        result.lines(),
+        ["download: s3://bucket/dir/A.txt to out/A.txt"]
+    );
+    assert!(
+        result
+            .stderr
+            .starts_with("warning: Skipping bucket/dir/a.txt -> "),
+        "{}",
+        result.stderr
+    );
+}

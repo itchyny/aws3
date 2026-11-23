@@ -239,43 +239,42 @@ fn micros(time: Option<SystemTime>) -> i128 {
 
 /// Checks the download whose key may conflict with another file only by
 /// case, and returns whether it is downloaded, or an error message.
+/// The key of the download is added to the keys being downloaded.
 fn check_case_conflict(
     ctx: &Context,
     keys: &CaseConflictKeys,
     task: &Task,
 ) -> Result<bool, String> {
     let key = task.compare_key.to_lowercase();
-    let conflicts = keys
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .contains(&key)
-        || Path::new(&task.dest).exists();
-    if !conflicts {
-        return Ok(true);
-    }
-    let (src, dest) = (&task.src, &task.dest);
-    match ctx.options.case_conflict {
-        CaseConflict::Ignore => Ok(true),
-        CaseConflict::Skip => {
-            ctx.notice(&format!(
-                "warning: Skipping {src} -> {dest} because a file whose name differs only by case \
-                 either exists or is being downloaded."
-            ));
-            Ok(false)
+    let mut keys = keys.lock().unwrap_or_else(PoisonError::into_inner);
+    if keys.contains(&key) || Path::new(&task.dest).exists() {
+        let (src, dest) = (&task.src, &task.dest);
+        match ctx.options.case_conflict {
+            CaseConflict::Ignore => {}
+            CaseConflict::Skip => {
+                ctx.notice(&format!(
+                    "warning: Skipping {src} -> {dest} because a file whose name differs only by case \
+                     either exists or is being downloaded."
+                ));
+                return Ok(false);
+            }
+            CaseConflict::Warn => {
+                ctx.notice(&format!(
+                    "warning: Downloading {src} -> {dest} despite a file whose name differs only by case \
+                     either existing or being downloaded. This behavior is not defined on case-insensitive \
+                     filesystems and may result in overwriting existing files or race conditions between \
+                     concurrent downloads. For more information, see \
+                     https://docs.aws.amazon.com/cli/latest/topic/s3-case-insensitivity.html."
+                ));
+            }
+            CaseConflict::Error => {
+                return Err(format!(
+                    "Failed to download {src} -> {dest} because a file whose name differs only by case \
+                     either exists or is being downloaded."
+                ));
+            }
         }
-        CaseConflict::Warn => {
-            ctx.notice(&format!(
-                "warning: Downloading {src} -> {dest} despite a file whose name differs only by case \
-                 either existing or being downloaded. This behavior is not defined on case-insensitive \
-                 filesystems and may result in overwriting existing files or race conditions between \
-                 concurrent downloads. For more information, see \
-                 https://docs.aws.amazon.com/cli/latest/topic/s3-case-insensitivity.html."
-            ));
-            Ok(true)
-        }
-        CaseConflict::Error => Err(format!(
-            "Failed to download {src} -> {dest} because a file whose name differs only by case \
-             either exists or is being downloaded."
-        )),
     }
+    keys.insert(key);
+    Ok(true)
 }
