@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::Env;
+use common::{Env, content};
 
 #[test]
 fn mv_upload_and_download() {
@@ -37,6 +37,79 @@ fn mv_onto_itself() {
             .stderr
             .contains("Cannot mv a file onto itself: s3://bucket/a.txt - s3://bucket/")
     );
+}
+
+#[test]
+fn mv_onto_itself_multipart() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let data = content(6 * 1024 * 1024);
+    env.object("bucket", "dir/big.bin", &data);
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    // The multipart copy onto itself succeeds on S3 even without changing the
+    // object, which would delete it after the copy. The properties are not
+    // copied, which are not supported by the server of the tests.
+    let result = env.run_with_env(
+        &[
+            "mv",
+            "s3://bucket/dir",
+            "s3://bucket/dir/",
+            "--recursive",
+            "--copy-props",
+            "none",
+            "--no-progress",
+        ],
+        &envs,
+    );
+    assert_eq!(result.code, 1);
+    assert_eq!(result.stdout, "");
+    assert_eq!(
+        result.stderr,
+        "move failed: s3://bucket/dir/big.bin to s3://bucket/dir/big.bin \
+         Cannot mv a file onto itself\n"
+    );
+    assert_eq!(env.object_content("bucket", "dir/big.bin").unwrap(), data);
+    assert!(
+        env.requests()
+            .iter()
+            .all(|request| request.header("x-amz-copy-source").is_empty())
+    );
+}
+
+#[test]
+fn mv_onto_itself_recursive() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "dir/a.txt", "a");
+    env.object("bucket", "dir/b.txt", "b");
+    // The paths differ, but each object is moved onto itself, which would
+    // delete it after the copy changing the storage class.
+    let result = env.run(&[
+        "mv",
+        "s3://bucket/dir",
+        "s3://bucket/dir/",
+        "--recursive",
+        "--storage-class",
+        "STANDARD_IA",
+        "--no-progress",
+    ]);
+    assert_eq!(result.code, 1);
+    assert_eq!(result.stdout, "");
+    let mut errors: Vec<_> = result.stderr.lines().collect();
+    errors.sort_unstable();
+    assert_eq!(
+        errors,
+        ["a.txt", "b.txt"].map(|key| format!(
+            "move failed: s3://bucket/dir/{key} to s3://bucket/dir/{key} \
+             Cannot mv a file onto itself"
+        ))
+    );
+    assert_eq!(env.object_content("bucket", "dir/a.txt").unwrap(), b"a");
+    assert_eq!(env.object_content("bucket", "dir/b.txt").unwrap(), b"b");
 }
 
 #[test]

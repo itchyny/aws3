@@ -311,6 +311,13 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
             }
         }
         Operation::Copy => {
+            // The move of an object onto itself deletes it after the copy,
+            // which succeeds when the object is changed, e.g. by the storage
+            // class, and the same object is not always detected from the
+            // paths, e.g. `mv s3://bucket/dir s3://bucket/dir/ --recursive`.
+            if ctx.is_move() && task.src == task.dest {
+                return Err("Cannot mv a file onto itself".to_owned());
+            }
             let (src_bucket, src_key) = split_bucket_key(&task.src);
             let (bucket, key) = split_bucket_key(&task.dest);
             copy::copy_object(
