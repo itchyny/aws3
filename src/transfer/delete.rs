@@ -14,7 +14,7 @@ use tokio::task::JoinSet;
 use super::context::Context;
 use super::printer::{Printer, TransferId};
 use super::task::Outcome;
-use crate::error::{Error, has_error_code, has_status_code};
+use crate::error::{Error, has_error_code, has_status_code, is_retryable};
 use crate::path::{split_bucket_key, validate_bucket_name};
 
 /// The maximum number of the keys in a request of `DeleteObjects`.
@@ -107,19 +107,29 @@ pub(super) async fn delete_batch(ctx: Arc<Context>, bucket: String, deletions: V
                 .errors()
                 .iter()
                 .filter_map(|err| {
+                    let code = err.code().unwrap_or("Unknown");
                     let message = format!(
-                        "An error occurred ({}) when calling the DeleteObject operation: {}",
-                        err.code().unwrap_or("Unknown"),
+                        "An error occurred ({code}) when calling the DeleteObject operation: {}",
                         err.message().unwrap_or("Unknown"),
                     );
-                    Some((err.key()?, message))
+                    Some((err.key()?, (code, message)))
                 })
                 .collect();
+            // The transient errors of the objects are in the response of
+            // HTTP 200, which the SDK does not retry, so the objects are
+            // deleted one by one with the retries, like the AWS CLI. The
+            // errors have no status codes, where InternalError and
+            // ServiceUnavailable are of 500 and 503.
             keys.iter()
-                .map(|key| {
-                    errors
-                        .get(key)
-                        .map_or(Ok(()), |message| Err(message.clone()))
+                .map(|key| match errors.get(key) {
+                    None => Some(Ok(())),
+                    Some((code, _))
+                        if is_retryable(0, code)
+                            || matches!(*code, "InternalError" | "ServiceUnavailable") =>
+                    {
+                        None
+                    }
+                    Some((_, message)) => Some(Err(message.clone())),
                 })
                 .collect()
         }
@@ -127,12 +137,23 @@ pub(super) async fn delete_batch(ctx: Arc<Context>, bucket: String, deletions: V
             ctx.batch_delete.store(false, Ordering::Relaxed);
             return delete_each(ctx, deletions).await;
         }
-        Ok(Err(err)) => vec![Err(Error::sdk("DeleteObject", err).to_string()); deletions.len()],
-        Err(message) => vec![Err(message); deletions.len()],
+        Ok(Err(err)) => {
+            vec![Some(Err(Error::sdk("DeleteObject", err).to_string())); deletions.len()]
+        }
+        Err(message) => vec![Some(Err(message)); deletions.len()],
     };
-    let mut printer = ctx.printer();
-    for (deletion, result) in deletions.iter().zip(results) {
-        print_result(&mut printer, deletion, result);
+    let mut retries = Vec::new();
+    {
+        let mut printer = ctx.printer();
+        for (deletion, result) in deletions.into_iter().zip(results) {
+            match result {
+                Some(result) => print_result(&mut printer, &deletion, result),
+                None => retries.push(deletion),
+            }
+        }
+    }
+    if !retries.is_empty() {
+        delete_each(ctx, retries).await;
     }
 }
 

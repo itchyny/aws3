@@ -313,7 +313,7 @@ pub fn has_status_code<E>(err: &SdkError<E, HttpResponse>, status: u16) -> bool 
 
 /// Returns whether the error is retried by the standard retry mode, like
 /// `TransientRetryableChecker` and `ThrottledRetryableChecker` of botocore.
-fn is_retryable(status: u16, code: &str) -> bool {
+pub fn is_retryable(status: u16, code: &str) -> bool {
     matches!(status, 500 | 502 | 503 | 504)
         || matches!(
             code,

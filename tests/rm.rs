@@ -175,6 +175,53 @@ fn rm_recursive_batch_errors() {
 }
 
 #[test]
+fn rm_recursive_batch_transient_errors() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for key in ["a.txt", "b.txt", "c.txt", "d.txt"] {
+        env.object("bucket", key, "x");
+    }
+    // The transient errors of the objects are retried one by one, while the
+    // other errors are not.
+    env.intercept(|request| {
+        is_delete_objects(request).then(|| {
+            xml_response(
+                200,
+                "<DeleteResult>\
+                 <Error><Key>b.txt</Key><Code>InternalError</Code>\
+                 <Message>We encountered an internal error. Please try again.</Message></Error>\
+                 <Error><Key>c.txt</Key><Code>SlowDown</Code>\
+                 <Message>Please reduce your request rate.</Message></Error>\
+                 <Error><Key>d.txt</Key><Code>AccessDenied</Code>\
+                 <Message>Access Denied</Message></Error>\
+                 </DeleteResult>",
+            )
+        })
+    });
+    let result = env.run(&["rm", "s3://bucket/", "--recursive"]);
+    assert_eq!(result.code, 1);
+    assert_eq!(
+        result.sorted_lines(),
+        ["a.txt", "b.txt", "c.txt"].map(|key| format!("delete: s3://bucket/{key}"))
+    );
+    assert_eq!(
+        result.stderr,
+        "delete failed: s3://bucket/d.txt An error occurred (AccessDenied) \
+         when calling the DeleteObject operation: Access Denied\n"
+    );
+    assert_eq!(env.object_content("bucket", "b.txt"), None);
+    assert_eq!(env.object_content("bucket", "c.txt"), None);
+    assert!(env.object_content("bucket", "d.txt").is_some());
+    let deletes: Vec<_> = env
+        .requests()
+        .into_iter()
+        .filter(|request| request.method == "DELETE")
+        .map(|request| request.uri.path().to_owned())
+        .collect();
+    assert_eq!(deletes.len(), 2, "{deletes:?}");
+}
+
+#[test]
 fn rm_recursive_batch_not_implemented() {
     let env = Env::new();
     env.bucket("bucket");
