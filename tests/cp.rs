@@ -868,6 +868,45 @@ fn cp_invalid_paths_type() {
 }
 
 #[test]
+fn cp_download_range_ignored() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let data = content(12 * 1024 * 1024);
+    env.object("bucket", "big.bin", &data);
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    // The storage ignoring the range responds the whole object without the
+    // content range, which fails instead of writing it at each offset.
+    env.intercept(move |request| {
+        (request.method == http::Method::GET && !request.header("range").is_empty()).then(|| {
+            http::Response::builder()
+                .status(200)
+                .body(s3s::Body::from(bytes::Bytes::from(data.clone())))
+                .unwrap()
+        })
+    });
+    let result = env.run_with_env(&["cp", "s3://bucket/big.bin", "out.bin"], &envs);
+    assert_eq!(result.code, 1);
+    assert!(
+        result.stderr.starts_with(
+            "download failed: s3://bucket/big.bin to ./out.bin \
+             The response body does not match the requested range: `"
+        ),
+        "{}",
+        result.stderr
+    );
+    let files: Vec<_> = std::fs::read_dir(env.work())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name.to_string_lossy().starts_with("out.bin"))
+        .collect();
+    assert!(files.is_empty(), "{files:?}");
+}
+
+#[test]
 fn cp_ctrl_c() {
     use std::io::Write;
     let env = Env::new();

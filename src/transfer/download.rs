@@ -231,6 +231,7 @@ async fn download_ranges(
             // memory small regardless of the number of the ranges.
             let mut part = checksum.as_ref().map(|checksum| checksum.part(offset));
             let mut position = offset;
+            let mut received = 0;
             let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
             let mut progress = ChunkedProgress::new(id);
             loop {
@@ -240,6 +241,13 @@ async fn download_ranges(
                     .await
                     .map_err(|err| err.to_string())?;
                 if let Some(bytes) = &bytes {
+                    // The body longer than the range, e.g. the whole object
+                    // from a storage ignoring the range without the content
+                    // range, fails before it is written over the next ranges.
+                    received += bytes.len() as u64;
+                    if received > end - offset + 1 {
+                        return Err(range_length_mismatch(offset, end));
+                    }
                     ctx.limit(bytes.len()).await;
                     buffer.extend_from_slice(bytes);
                     progress.add(&ctx, bytes.len());
@@ -258,6 +266,9 @@ async fn download_ranges(
                 if bytes.is_none() {
                     break;
                 }
+            }
+            if received != end - offset + 1 {
+                return Err(range_length_mismatch(offset, end));
             }
             progress.finish(&ctx);
             drop(permit);
@@ -307,6 +318,10 @@ fn validate_content_range(start: u64, end: u64, content_range: Option<&str>) -> 
     Err(format!(
         "Requested range: `{requested}` does not match content range in response: `{range}`"
     ))
+}
+
+fn range_length_mismatch(start: u64, end: u64) -> String {
+    format!("The response body does not match the requested range: `{start}-{end}`")
 }
 
 type RangeResult = Result<(), String>;
