@@ -96,8 +96,9 @@ impl Submitter {
             }
             return;
         }
+        let is_local_delete = task.operation == Operation::LocalDelete;
         let ctx = ctx.clone();
-        self.tasks.spawn(async move {
+        let transfer = async move {
             let result = execute(&ctx, id, &task).await;
             if let Some((keys, key)) = &task.case_conflict {
                 keys.lock()
@@ -110,7 +111,16 @@ impl Submitter {
                 Ok(Outcome::Skipped) => printer.skipped(id),
                 Err(message) => printer.failure(id, transfer_type, &src, dest.as_deref(), &message),
             }
-        });
+        };
+        // The local deletions of sync are done before the next files are
+        // compared like the AWS CLI, so that a file is deleted before the
+        // download of the key which differs only by case, which is the same
+        // file on case-insensitive file systems.
+        if is_local_delete {
+            transfer.await;
+        } else {
+            self.tasks.spawn(transfer);
+        }
     }
 
     /// Prints the warnings of the task, and returns whether it is skipped.
