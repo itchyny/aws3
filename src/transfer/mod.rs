@@ -21,6 +21,7 @@ mod sync;
 mod task;
 mod upload;
 
+use std::collections::VecDeque;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -177,10 +178,31 @@ async fn run_files(ctx: &Arc<Context>, submitter: &mut Submitter) {
     // batches are throttled by S3 when they are sent at once.
     let is_delete = operation == Operation::Delete;
     let mut rx = spawn_generator(ctx, &src, is_delete, options.dryrun || is_delete);
+    // The objects copied under the source in the same bucket would be listed
+    // and transferred again, so the source is listed entirely before the
+    // transfers.
+    let mut listed =
+        (src.is_s3 && dest.is_s3 && options.dir_op && dest.path.starts_with(&src.path))
+            .then(VecDeque::new);
+    if let Some(listed) = &mut listed {
+        loop {
+            let item = tokio::select! {
+                item = rx.recv() => item,
+                () = ctx.cancelled() => return submitter.abort(),
+            };
+            let Some(item) = item else {
+                break;
+            };
+            listed.push_back(item);
+        }
+    }
     loop {
-        let item = tokio::select! {
-            item = rx.recv() => item,
-            () = ctx.cancelled() => return submitter.abort(),
+        let item = match &mut listed {
+            Some(listed) => listed.pop_front(),
+            None => tokio::select! {
+                item = rx.recv() => item,
+                () = ctx.cancelled() => return submitter.abort(),
+            },
         };
         let Some(item) = item else {
             break;

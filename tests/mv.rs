@@ -113,6 +113,68 @@ fn mv_onto_itself_recursive() {
 }
 
 #[test]
+fn mv_into_source() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for key in ["a.txt", "b.txt", "c.txt"] {
+        env.object("bucket", &format!("dir/{key}"), key);
+    }
+    // The objects moved under the source are not listed and moved again.
+    let result = env
+        .run(&[
+            "mv",
+            "s3://bucket/dir/",
+            "s3://bucket/dir/sub/",
+            "--recursive",
+            "--page-size",
+            "1",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(
+        result.sorted_lines(),
+        ["a.txt", "b.txt", "c.txt"]
+            .map(|key| format!("move: s3://bucket/dir/{key} to s3://bucket/dir/sub/{key}"))
+    );
+    for key in ["a.txt", "b.txt", "c.txt"] {
+        assert_eq!(env.object_content("bucket", &format!("dir/{key}")), None);
+        assert_eq!(
+            env.object_content("bucket", &format!("dir/sub/{key}"))
+                .unwrap(),
+            key.as_bytes()
+        );
+        assert_eq!(
+            env.object_content("bucket", &format!("dir/sub/sub/{key}")),
+            None
+        );
+    }
+    // The copies are not copied again either.
+    let result = env
+        .run(&[
+            "cp",
+            "s3://bucket/dir/",
+            "s3://bucket/dir/copy/",
+            "--recursive",
+            "--page-size",
+            "1",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(result.lines().len(), 3, "{}", result.stdout);
+    for key in ["a.txt", "b.txt", "c.txt"] {
+        assert_eq!(
+            env.object_content("bucket", &format!("dir/copy/sub/{key}"))
+                .unwrap(),
+            key.as_bytes()
+        );
+        assert_eq!(
+            env.object_content("bucket", &format!("dir/copy/copy/sub/{key}")),
+            None
+        );
+    }
+}
+
+#[test]
 fn mv_validate_same_s3_paths() {
     let env = Env::new();
     env.bucket("bucket");
