@@ -249,6 +249,41 @@ fn sync_nested_source() {
 }
 
 #[test]
+fn sync_nested_destination() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "dir/a.txt", "a");
+    env.object("bucket", "dir/sub/b.txt", "b");
+    // The copies under the source are not copied again, and the sources under
+    // the destination are not deleted.
+    let result = env
+        .run(&[
+            "sync",
+            "s3://bucket/dir/",
+            "s3://bucket/dir/sub/",
+            "--delete",
+            "--page-size",
+            "1",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(
+        result.sorted_lines(),
+        [
+            "copy: s3://bucket/dir/a.txt to s3://bucket/dir/sub/a.txt",
+            "copy: s3://bucket/dir/sub/b.txt to s3://bucket/dir/sub/sub/b.txt",
+        ]
+    );
+    assert_eq!(env.object_content("bucket", "dir/sub/b.txt").unwrap(), b"b");
+    assert_eq!(
+        env.object_content("bucket", "dir/sub/sub/b.txt").unwrap(),
+        b"b"
+    );
+    assert_eq!(env.object_content("bucket", "dir/sub/sub/a.txt"), None);
+    assert_eq!(env.object_content("bucket", "dir/sub/sub/sub/b.txt"), None);
+}
+
+#[test]
 fn sync_case_conflict() {
     let env = Env::new();
     // Case conflicts are detected only on case-insensitive file systems.

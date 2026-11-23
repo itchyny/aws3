@@ -1,7 +1,7 @@
 //! The comparison of the source and the destination, in the same way as the
 //! `Comparator` and the sync strategies of the AWS CLI.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
@@ -75,9 +75,14 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
         &rev_src,
     );
     // The prefixes of the source and the destination may be nested in a
-    // bucket, where the objects of the destination under the source are not
-    // deleted, which are the sources being copied.
+    // bucket. The source containing the destination is listed entirely first,
+    // so that the copies are not listed and copied again, and the objects of
+    // the destination under the source are not deleted, which are the sources
+    // being copied.
     let is_s3_s3 = src.is_s3 && dest.is_s3;
+    if is_s3_s3 && dest.path.starts_with(&src.path) && src_files.list_all(ctx).await.is_err() {
+        return submitter.abort();
+    }
     // The files with the destination paths and the compare keys, which are
     // merged in the order of the compare keys.
     let mut src_file = None;
@@ -160,6 +165,8 @@ struct Stream<'a> {
     rx: mpsc::Receiver<Item>,
     filters: &'a Filters,
     is_local: bool,
+    /// The items received entirely before the files are returned.
+    listed: Option<VecDeque<Item>>,
 }
 
 impl<'a> Stream<'a> {
@@ -168,15 +175,37 @@ impl<'a> Stream<'a> {
             rx,
             filters,
             is_local: !endpoint.is_s3,
+            listed: None,
         }
+    }
+
+    /// Receives all the items before returning the files, or returns an
+    /// error on the cancellation.
+    async fn list_all(&mut self, ctx: &Context) -> Result<(), ()> {
+        let mut listed = VecDeque::new();
+        loop {
+            let item = tokio::select! {
+                item = self.rx.recv() => item,
+                () = ctx.cancelled() => return Err(()),
+            };
+            let Some(item) = item else {
+                break;
+            };
+            listed.push_back(item);
+        }
+        self.listed = Some(listed);
+        Ok(())
     }
 
     /// Returns the next file, or an error on a fatal error.
     async fn next(&mut self, ctx: &Context) -> Result<Option<FileStat>, ()> {
         loop {
-            let item = tokio::select! {
-                item = self.rx.recv() => item,
-                () = ctx.cancelled() => return Err(()),
+            let item = match &mut self.listed {
+                Some(listed) => listed.pop_front(),
+                None => tokio::select! {
+                    item = self.rx.recv() => item,
+                    () = ctx.cancelled() => return Err(()),
+                },
             };
             let Some(item) = item else {
                 break;
