@@ -210,6 +210,45 @@ fn sync_exact_timestamps() {
 }
 
 #[test]
+fn sync_nested_source() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "dir/old.txt", "old");
+    for key in ["a.txt", "b.txt", "c.txt"] {
+        env.object("bucket", &format!("dir/sub/{key}"), key);
+    }
+    // The sources under the destination are not deleted while copied.
+    let result = env
+        .run(&[
+            "sync",
+            "s3://bucket/dir/sub/",
+            "s3://bucket/dir/",
+            "--delete",
+            "--no-progress",
+        ])
+        .success();
+    let mut expected: Vec<_> = ["a.txt", "b.txt", "c.txt"]
+        .map(|key| format!("copy: s3://bucket/dir/sub/{key} to s3://bucket/dir/{key}"))
+        .into_iter()
+        .chain(["delete: s3://bucket/dir/old.txt".to_owned()])
+        .collect();
+    expected.sort();
+    assert_eq!(result.sorted_lines(), expected);
+    for key in ["a.txt", "b.txt", "c.txt"] {
+        assert_eq!(
+            env.object_content("bucket", &format!("dir/sub/{key}"))
+                .unwrap(),
+            key.as_bytes()
+        );
+        assert_eq!(
+            env.object_content("bucket", &format!("dir/{key}")).unwrap(),
+            key.as_bytes()
+        );
+    }
+    assert_eq!(env.object_content("bucket", "dir/old.txt"), None);
+}
+
+#[test]
 fn sync_case_conflict() {
     let env = Env::new();
     // Case conflicts are detected only on case-insensitive file systems.

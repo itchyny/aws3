@@ -74,6 +74,10 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
         &filters,
         &rev_src,
     );
+    // The prefixes of the source and the destination may be nested in a
+    // bucket, where the objects of the destination under the source are not
+    // deleted, which are the sources being copied.
+    let is_s3_s3 = src.is_s3 && dest.is_s3;
     // The files with the destination paths and the compare keys, which are
     // merged in the order of the compare keys.
     let mut src_file = None;
@@ -136,7 +140,7 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
                 submitter.submit(task).await;
             }
             (None, Some((dest_stat, path, compare_key))) => {
-                if delete {
+                if delete && !(is_s3_s3 && dest_stat.path.starts_with(&src.path)) {
                     let operation = if dest.is_s3 {
                         Operation::Delete
                     } else {
