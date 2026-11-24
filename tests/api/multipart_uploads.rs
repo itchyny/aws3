@@ -1,7 +1,7 @@
 //! The tests of the api operations of multipart uploads.
 
 use super::{get_bucket_configuration, response_output};
-use crate::common::Env;
+use crate::common::{Env, xml_response};
 
 #[test]
 fn list_multipart_uploads() {
@@ -94,6 +94,138 @@ fn list_multipart_uploads() {
     "Prefix": null
 }
 "#
+    );
+}
+
+#[test]
+fn list_multipart_uploads_pages() {
+    let env = Env::new();
+    let upload = |key: &str, id: &str, second: u8| {
+        format!(
+            "<Upload><Key>{key}</Key><UploadId>{id}</UploadId><Initiator><ID>init-id</ID>\
+             <DisplayName>init</DisplayName></Initiator><Owner><ID>owner-id</ID>\
+             <DisplayName>owner</DisplayName></Owner><StorageClass>STANDARD</StorageClass>\
+             <Initiated>2026-01-02T03:04:0{second}.000Z</Initiated></Upload>"
+        )
+    };
+    // The pages continue from both the key marker and the upload ID marker.
+    let first = format!(
+        "<ListMultipartUploadsResult><Bucket>bucket</Bucket><KeyMarker></KeyMarker>\
+         <UploadIdMarker></UploadIdMarker><NextKeyMarker>a.bin</NextKeyMarker>\
+         <NextUploadIdMarker>u1</NextUploadIdMarker><Delimiter>/</Delimiter>\
+         <MaxUploads>1</MaxUploads><IsTruncated>true</IsTruncated>{}\
+         </ListMultipartUploadsResult>",
+        upload("a.bin", "u1", 5)
+    );
+    let second = format!(
+        "<ListMultipartUploadsResult><Bucket>bucket</Bucket><KeyMarker>a.bin</KeyMarker>\
+         <UploadIdMarker>u1</UploadIdMarker><Delimiter>/</Delimiter><MaxUploads>1</MaxUploads>\
+         <IsTruncated>false</IsTruncated>{}<CommonPrefixes><Prefix>dir/</Prefix>\
+         </CommonPrefixes></ListMultipartUploadsResult>",
+        upload("b.bin", "u2", 6)
+    );
+    env.intercept(move |request| {
+        let query = request.uri.query().unwrap_or_default();
+        let body = if query.contains("key-marker=a.bin") && query.contains("upload-id-marker=u1") {
+            &second
+        } else {
+            &first
+        };
+        Some(xml_response(200, body))
+    });
+    let initiated = |id: &str, key: &str, second: u8| {
+        format!(
+            r#"        {{
+            "UploadId": "{id}",
+            "Key": "{key}",
+            "Initiated": "2026-01-02T03:04:0{second}+00:00",
+            "StorageClass": "STANDARD",
+            "Owner": {{
+                "DisplayName": "owner",
+                "ID": "owner-id"
+            }},
+            "Initiator": {{
+                "ID": "init-id",
+                "DisplayName": "init"
+            }}
+        }}"#
+        )
+    };
+    let args = [
+        "api",
+        "list-multipart-uploads",
+        "--bucket",
+        "bucket",
+        "--delimiter",
+        "/",
+    ];
+    let result = env.run(&args).success();
+    assert_eq!(
+        result.stdout,
+        format!(
+            r#"{{
+    "Uploads": [
+{},
+{}
+    ],
+    "CommonPrefixes": [
+        {{
+            "Prefix": "dir/"
+        }}
+    ],
+    "RequestCharged": null,
+    "Prefix": null
+}}
+"#,
+            initiated("u1", "a.bin", 5),
+            initiated("u2", "b.bin", 6)
+        )
+    );
+
+    // The single page of the markers is output as it is with --no-paginate.
+    let args = [
+        &args[..],
+        &[
+            "--no-paginate",
+            "--key-marker",
+            "x",
+            "--upload-id-marker",
+            "y",
+        ],
+    ]
+    .concat();
+    let result = env.run(&args).success();
+    let query = env
+        .requests()
+        .last()
+        .unwrap()
+        .uri
+        .query()
+        .unwrap()
+        .to_owned();
+    assert!(
+        query.contains("key-marker=x") && query.contains("upload-id-marker=y"),
+        "{query}"
+    );
+    assert_eq!(
+        result.stdout,
+        format!(
+            r#"{{
+    "Bucket": "bucket",
+    "KeyMarker": "",
+    "UploadIdMarker": "",
+    "NextKeyMarker": "a.bin",
+    "Delimiter": "/",
+    "NextUploadIdMarker": "u1",
+    "MaxUploads": 1,
+    "IsTruncated": true,
+    "Uploads": [
+{}
+    ]
+}}
+"#,
+            initiated("u1", "a.bin", 5)
+        )
     );
 }
 

@@ -124,6 +124,58 @@ fn get_bucket_lifecycle_configuration() {
 }
 "#
     );
+
+    // The rules of the noncurrent versions and the other filters, without the
+    // header of the minimum object size.
+    let stdout = response_output(
+        &env,
+        &["get-bucket-lifecycle-configuration", "--bucket", "bucket"],
+        200,
+        &[],
+        "<LifecycleConfiguration><Rule><ID>versions</ID><Filter><Tag><Key>k</Key>\
+         <Value>v</Value></Tag></Filter><Status>Enabled</Status>\
+         <NoncurrentVersionTransition><NoncurrentDays>30</NoncurrentDays>\
+         <StorageClass>GLACIER</StorageClass><NewerNoncurrentVersions>2</NewerNoncurrentVersions>\
+         </NoncurrentVersionTransition></Rule><Rule><ID>small</ID><Filter>\
+         <ObjectSizeLessThan>10</ObjectSizeLessThan></Filter><Status>Enabled</Status>\
+         <Expiration><ExpiredObjectDeleteMarker>true</ExpiredObjectDeleteMarker></Expiration>\
+         </Rule></LifecycleConfiguration>",
+    );
+    assert_eq!(
+        stdout,
+        r#"{
+    "Rules": [
+        {
+            "ID": "versions",
+            "Filter": {
+                "Tag": {
+                    "Key": "k",
+                    "Value": "v"
+                }
+            },
+            "Status": "Enabled",
+            "NoncurrentVersionTransitions": [
+                {
+                    "NoncurrentDays": 30,
+                    "StorageClass": "GLACIER",
+                    "NewerNoncurrentVersions": 2
+                }
+            ]
+        },
+        {
+            "Expiration": {
+                "ExpiredObjectDeleteMarker": true
+            },
+            "ID": "small",
+            "Filter": {
+                "ObjectSizeLessThan": 10
+            },
+            "Status": "Enabled"
+        }
+    ]
+}
+"#
+    );
 }
 
 #[test]

@@ -44,6 +44,47 @@ fn get_bucket_encryption() {
 }
 "#
     );
+
+    // The encryption types blocked are output, which are empty if none.
+    let stdout = response_output(
+        &env,
+        &["get-bucket-encryption", "--bucket", "bucket"],
+        200,
+        &[],
+        "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
+         <SSEAlgorithm>aws:kms</SSEAlgorithm></ApplyServerSideEncryptionByDefault>\
+         <BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType>\
+         </BlockedEncryptionTypes></Rule><Rule><ApplyServerSideEncryptionByDefault>\
+         <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault>\
+         <BlockedEncryptionTypes></BlockedEncryptionTypes></Rule>\
+         </ServerSideEncryptionConfiguration>",
+    );
+    assert_eq!(
+        stdout,
+        r#"{
+    "ServerSideEncryptionConfiguration": {
+        "Rules": [
+            {
+                "ApplyServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "aws:kms"
+                },
+                "BlockedEncryptionTypes": {
+                    "EncryptionType": [
+                        "SSE-C"
+                    ]
+                }
+            },
+            {
+                "ApplyServerSideEncryptionByDefault": {
+                    "SSEAlgorithm": "AES256"
+                },
+                "BlockedEncryptionTypes": {}
+            }
+        ]
+    }
+}
+"#
+    );
 }
 
 #[test]

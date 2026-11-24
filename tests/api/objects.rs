@@ -718,6 +718,54 @@ fn delete_objects() {
     let requests = env.requests();
     let request = requests.last().unwrap();
     assert!(request.headers.contains_key("x-amz-checksum-sha256"));
+
+    // The keys failed to be deleted are output as the errors, which succeeds
+    // like the AWS CLI.
+    let stdout = response_output(
+        &env,
+        &[
+            "delete-objects",
+            "--bucket",
+            "bucket",
+            "--delete",
+            "Objects=[{Key=a.txt},{Key=b.txt},{Key=c.txt}]",
+        ],
+        200,
+        &[],
+        "<DeleteResult><Deleted><Key>a.txt</Key><VersionId>v1</VersionId>\
+         <DeleteMarker>true</DeleteMarker><DeleteMarkerVersionId>m1</DeleteMarkerVersionId>\
+         </Deleted><Error><Key>b.txt</Key><VersionId>v2</VersionId><Code>AccessDenied</Code>\
+         <Message>Access Denied</Message></Error><Error><Key>c.txt</Key>\
+         <Code>InternalError</Code><Message>We encountered an internal error. Please try \
+         again.</Message></Error></DeleteResult>",
+    );
+    assert_eq!(
+        stdout,
+        r#"{
+    "Deleted": [
+        {
+            "Key": "a.txt",
+            "VersionId": "v1",
+            "DeleteMarker": true,
+            "DeleteMarkerVersionId": "m1"
+        }
+    ],
+    "Errors": [
+        {
+            "Key": "b.txt",
+            "VersionId": "v2",
+            "Code": "AccessDenied",
+            "Message": "Access Denied"
+        },
+        {
+            "Key": "c.txt",
+            "Code": "InternalError",
+            "Message": "We encountered an internal error. Please try again."
+        }
+    ]
+}
+"#
+    );
 }
 
 #[test]
