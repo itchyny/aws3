@@ -388,6 +388,54 @@ fn sync_case_conflict_delete() {
 }
 
 #[test]
+fn sync_case_conflict_delete_after() {
+    let env = Env::new();
+    // Case conflicts are detected only on case-insensitive file systems.
+    env.write("probe", "");
+    if !env.path("PROBE").exists() {
+        return;
+    }
+    env.bucket("bucket");
+    env.object("bucket", "dir/A.txt", "new");
+    // The local file whose name differs only by case is compared after the
+    // conflicting download, and is not deleted because it is the same file.
+    for (mode, lines, content) in [
+        (
+            "ignore",
+            &["download: s3://bucket/dir/A.txt to out/A.txt"][..],
+            "new",
+        ),
+        ("skip", &[][..], "old"),
+        (
+            "warn",
+            &["download: s3://bucket/dir/A.txt to out/A.txt"][..],
+            "new",
+        ),
+    ] {
+        env.write("out/a.txt", "old");
+        let result = env
+            .run(&[
+                "sync",
+                "s3://bucket/dir",
+                "out",
+                "--delete",
+                "--case-conflict",
+                mode,
+                "--no-progress",
+            ])
+            .success();
+        assert_eq!(result.lines(), lines, "{mode}");
+        assert_eq!(
+            std::fs::read_dir(env.path("out")).unwrap().count(),
+            1,
+            "{mode}"
+        );
+        assert_eq!(env.read("out/a.txt"), content.as_bytes(), "{mode}");
+        std::fs::remove_dir_all(env.path("out")).unwrap();
+    }
+}
+
+#[test]
 fn sync_case_conflict_in_flight() {
     let env = Env::new();
     // The objects whose keys differ only by case are stored only on

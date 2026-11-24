@@ -59,6 +59,13 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
     };
     let case_conflicts: Option<CaseConflictKeys> =
         should_handle_case_conflicts(ctx).then(|| Arc::new(Mutex::new(HashSet::new())));
+    // The lowercased compare keys of the downloads conflicting with existing
+    // local files. The local files with these keys are not deleted with
+    // `--delete`, because they are the same files on case-insensitive file
+    // systems, which are skipped or being overwritten by the downloads. They
+    // are checked also with `--case-conflict ignore`, so that the deletions
+    // do not delete the files downloaded before them.
+    let mut conflicting_files = HashSet::new();
     let delete = is_sync && options.delete;
     let operation = match plan.paths_type {
         PathsType::LocalS3 => Operation::Upload,
@@ -131,8 +138,14 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
             }
             (Some((src_stat, dest_path, compare_key)), None) => {
                 let mut task = task(operation, src_stat, dest_path, compare_key);
+                let exists = operation == Operation::Download
+                    && (delete || case_conflicts.is_some())
+                    && Path::new(&task.dest).exists();
+                if exists {
+                    conflicting_files.insert(task.compare_key.to_lowercase());
+                }
                 if let Some(keys) = &case_conflicts {
-                    match check_case_conflict(ctx, keys, &task) {
+                    match check_case_conflict(ctx, keys, exists, &task) {
                         Ok(true) => {}
                         Ok(false) => continue,
                         Err(message) => {
@@ -145,7 +158,10 @@ pub async fn run(ctx: &Arc<Context>, submitter: &mut Submitter) {
                 submitter.submit(task).await;
             }
             (None, Some((dest_stat, path, compare_key))) => {
-                if delete && !(is_s3_s3 && dest_stat.path.starts_with(&src.path)) {
+                if delete
+                    && !(is_s3_s3 && dest_stat.path.starts_with(&src.path))
+                    && !conflicting_files.contains(&compare_key.to_lowercase())
+                {
                     let operation = if dest.is_s3 {
                         Operation::Delete
                     } else {
@@ -276,11 +292,12 @@ fn micros(time: Option<SystemTime>) -> i128 {
 fn check_case_conflict(
     ctx: &Context,
     keys: &CaseConflictKeys,
+    exists: bool,
     task: &Task,
 ) -> Result<bool, String> {
     let key = task.compare_key.to_lowercase();
     let mut keys = keys.lock().unwrap_or_else(PoisonError::into_inner);
-    if keys.contains(&key) || Path::new(&task.dest).exists() {
+    if exists || keys.contains(&key) {
         let (src, dest) = (&task.src, &task.dest);
         match ctx.options.case_conflict {
             CaseConflict::Ignore => {}
