@@ -262,27 +262,108 @@ fn output_table() {
     );
 
     // The false values of Python are not written.
-    let result = run(&[
-        "get-bucket-location",
-        "--bucket",
-        "bucket",
-        "--query",
+    let query = |query: &str| {
+        run(&[
+            "get-bucket-location",
+            "--bucket",
+            "bucket",
+            "--query",
+            query,
+        ])
+    };
+    for value in [
         "LocationConstraint",
-    ]);
-    assert_eq!(result.success().stdout, "");
+        "`0`",
+        "`-0`",
+        "`0.0`",
+        "`\"\"`",
+        "`false`",
+    ] {
+        assert_eq!(query(value).success().stdout, "", "{value}");
+    }
 
-    let result = run(&[
-        "get-bucket-location",
-        "--bucket",
-        "bucket",
-        "--query",
-        "`[{\"a\": 1}, \"x\"]`",
-    ]);
-    assert_eq!(result.code, 255);
+    // The lists of the scalars are the rows, whose values are formatted like
+    // Python, and the keys of the objects in the lists are the rows.
+    let result = query(r#"`[[1, "a", true], [2.5, "b", null]]`"#).success();
     assert_eq!(
-        result.stderr,
-        "\naws3: [ERROR]: Cannot format a list of objects mixed with other values in table\n"
+        result.stdout,
+        "----------------------\n\
+         |  GetBucketLocation |\n\
+         +-----+-----+--------+\n\
+         |  1  |  a  |  True  |\n\
+         |  2.5|  b  |  None  |\n\
+         +-----+-----+--------+\n"
     );
+    let result = query(r#"`["x", {"a": 1}, [[5]]]`"#).success();
+    assert_eq!(
+        result.stdout,
+        "-------------------\n\
+         |GetBucketLocation|\n\
+         +-----------------+\n\
+         |  x              |\n\
+         |  a              |\n\
+         |  5              |\n\
+         +-----------------+\n"
+    );
+
+    // The objects with the nested values are the sections each.
+    let result = query(r#"`[{"a": 1, "n": {"x": 1}}, {"a": 2, "n": {"x": 2}}]`"#).success();
+    assert_eq!(
+        result.stdout,
+        "-------------------\n\
+         |GetBucketLocation|\n\
+         +-----------------+\n\
+         |        a        |\n\
+         +-----------------+\n\
+         |  1              |\n\
+         +-----------------+\n\
+         ||       n       ||\n\
+         |+------+--------+|\n\
+         ||  x   |  1     ||\n\
+         |+------+--------+|\n\
+         |GetBucketLocation|\n\
+         +-----------------+\n\
+         |        a        |\n\
+         +-----------------+\n\
+         |  2              |\n\
+         +-----------------+\n\
+         ||       n       ||\n\
+         |+------+--------+|\n\
+         ||  x   |  2     ||\n\
+         |+------+--------+|\n"
+    );
+
+    // The row of the headers wider than the terminal is converted to the rows
+    // of the pairs.
+    let result = query(
+        r#"`{"alpha": "aaaaaaaaaaaaaaaaaaaaaaaaaa", "beta": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "gamma": "cccccccccccccccccccccc"}`"#,
+    )
+    .success();
+    assert_eq!(
+        result.stdout,
+        "----------------------------------------------------\n\
+         |                 GetBucketLocation                |\n\
+         +-------+------------------------------------------+\n\
+         |  alpha|  aaaaaaaaaaaaaaaaaaaaaaaaaa              |\n\
+         |  beta |  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb   |\n\
+         |  gamma|  cccccccccccccccccccccc                  |\n\
+         +-------+------------------------------------------+\n"
+    );
+
+    for (value, message) in [
+        (
+            "`[[1, 2], [3]]`",
+            "Row should have 2 elements, instead it has 1",
+        ),
+        (
+            "`[{\"a\": 1}, \"x\"]`",
+            "Cannot format a list of objects mixed with other values in table",
+        ),
+    ] {
+        let result = query(value);
+        assert_eq!(result.code, 255, "{value}");
+        assert_eq!(result.stderr, format!("\naws3: [ERROR]: {message}\n"));
+    }
 }
 
 #[test]
