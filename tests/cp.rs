@@ -580,6 +580,110 @@ fn cp_multipart_copy_and_stream() {
 }
 
 #[test]
+fn cp_multipart_copy_tags() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let data = content(6 * 1024 * 1024);
+    env.object("bucket", "big.bin", &data);
+    let short = Arc::new(AtomicBool::new(true));
+    let fail = Arc::new(AtomicBool::new(false));
+    env.intercept({
+        let (short, fail) = (short.clone(), fail.clone());
+        move |request| {
+            if !request.has_query("tagging") {
+                return None;
+            }
+            if request.method == http::Method::GET {
+                // The nine long tags exceed the 2 KiB limit of the tagging
+                // header.
+                let count = if short.load(Ordering::SeqCst) { 1 } else { 9 };
+                let tags: String = (0..count)
+                    .map(|i| {
+                        format!(
+                            "<Tag><Key>k{i}</Key><Value>{}</Value></Tag>",
+                            "v".repeat(250)
+                        )
+                    })
+                    .collect();
+                let body = format!("<Tagging><TagSet>{tags}</TagSet></Tagging>");
+                return Some(common::xml_response(200, &body));
+            }
+            Some(if fail.load(Ordering::SeqCst) {
+                let body =
+                    "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>";
+                common::xml_response(403, body)
+            } else {
+                common::xml_response(200, "")
+            })
+        }
+    });
+    let copy = |dest: &str| {
+        let args = ["cp", "s3://bucket/big.bin", dest, "--no-progress"];
+        env.run_with_env(&args, &envs)
+    };
+    let requests_to = |key: &str| {
+        env.requests()
+            .into_iter()
+            .filter(|request| request.uri.path() == format!("/bucket/{key}"))
+            .collect::<Vec<_>>()
+    };
+
+    // The short tags are set by the tagging header of CreateMultipartUpload.
+    copy("s3://bucket/short.bin").success();
+    let requests = requests_to("short.bin");
+    let create = requests
+        .iter()
+        .find(|request| request.has_query("uploads"))
+        .unwrap();
+    assert_eq!(
+        create.header("x-amz-tagging"),
+        format!("k0={}", "v".repeat(250))
+    );
+    assert!(!requests.iter().any(|request| request.has_query("tagging")));
+
+    // The long tags are put after completing the upload.
+    short.store(false, Ordering::SeqCst);
+    copy("s3://bucket/long.bin").success();
+    let requests = requests_to("long.bin");
+    let create = requests
+        .iter()
+        .find(|request| request.has_query("uploads"))
+        .unwrap();
+    assert_eq!(create.header("x-amz-tagging"), "");
+    let last = requests.last().unwrap();
+    assert!(
+        last.method == http::Method::PUT && last.has_query("tagging"),
+        "{last:?}"
+    );
+    let body = String::from_utf8_lossy(&last.body);
+    assert_eq!(body.matches("<Tag>").count(), 9, "{body}");
+    assert!(requests[requests.len() - 2].has_query("uploadId"));
+    assert_eq!(env.object_content("bucket", "long.bin").unwrap(), data);
+
+    // The copied object is deleted if the tags cannot be put.
+    fail.store(true, Ordering::SeqCst);
+    let result = copy("s3://bucket/failed.bin");
+    assert_eq!(result.code, 1, "{}", result.stderr);
+    assert_eq!(
+        result.stderr,
+        "copy failed: s3://bucket/big.bin to s3://bucket/failed.bin An error occurred \
+         (AccessDenied) when calling the PutObjectTagging operation: Access Denied\n"
+    );
+    let delete = requests_to("failed.bin").pop().unwrap();
+    assert_eq!(delete.method, http::Method::DELETE);
+    assert_ne!(delete.header("if-match"), "");
+    assert_eq!(env.object_content("bucket", "failed.bin"), None);
+}
+
+#[test]
 fn cp_multipart_etag() {
     let env = Env::new();
     env.bucket("bucket");
@@ -869,6 +973,226 @@ fn cp_warnings() {
         ])
         .success();
     assert_eq!(result.lines(), ["upload: src/a.txt to s3://bucket/x/a.txt"]);
+}
+
+/// Returns the response of ListObjectsV2 of the keys and the storage classes,
+/// whose objects contain a byte.
+fn list_response(keys: &[(&str, &str)]) -> http::Response<s3s::Body> {
+    let contents: String = keys
+        .iter()
+        .map(|(key, storage_class)| {
+            format!(
+                "<Contents><Key>{key}</Key>\
+                 <LastModified>2026-01-01T00:00:00.000Z</LastModified>\
+                 <ETag>\"0cc175b9c0f1b6a831c399e269772661\"</ETag><Size>1</Size>\
+                 <StorageClass>{storage_class}</StorageClass></Contents>"
+            )
+        })
+        .collect();
+    common::xml_response(
+        200,
+        &format!(
+            "<ListBucketResult><Name>bucket</Name><KeyCount>{}</KeyCount>\
+             <IsTruncated>false</IsTruncated>{contents}</ListBucketResult>",
+            keys.len()
+        ),
+    )
+}
+
+#[test]
+fn cp_glacier() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for key in ["a.txt", "d.txt", "g.txt"] {
+        env.object("bucket", &format!("dir/{key}"), "a");
+    }
+    env.intercept(|request| {
+        (request.method == http::Method::GET && request.has_query("list-type")).then(|| {
+            list_response(&[
+                ("dir/a.txt", "STANDARD"),
+                ("dir/d.txt", "DEEP_ARCHIVE"),
+                ("dir/g.txt", "GLACIER"),
+            ])
+        })
+    });
+    let warning = |path: &str, operation: &str| {
+        format!(
+            "warning: Skipping file s3://bucket/dir/{path}. Object is of storage class GLACIER. \
+             Unable to perform {operation} operations on GLACIER objects. You must restore the \
+             object to be able to perform the operation. See aws s3 {operation} help for \
+             additional parameter options to ignore or force these transfers.\n"
+        )
+    };
+
+    // The objects in Glacier are skipped with the warnings.
+    let result = env.run(&[
+        "cp",
+        "s3://bucket/dir/",
+        "out",
+        "--recursive",
+        "--no-progress",
+    ]);
+    assert_eq!(result.code, 2, "{}", result.stderr);
+    assert_eq!(
+        result.lines(),
+        ["download: s3://bucket/dir/a.txt to out/a.txt"]
+    );
+    assert_eq!(
+        result.stderr,
+        warning("d.txt", "download") + &warning("g.txt", "download")
+    );
+    assert!(!env.path("out/g.txt").exists());
+    let args = [
+        "cp",
+        "s3://bucket/dir/",
+        "s3://bucket/copy/",
+        "--recursive",
+        "--no-progress",
+    ];
+    let result = env.run(&args);
+    assert_eq!(result.code, 2, "{}", result.stderr);
+    assert_eq!(
+        result.lines(),
+        ["copy: s3://bucket/dir/a.txt to s3://bucket/copy/a.txt"]
+    );
+    assert_eq!(
+        result.stderr,
+        warning("d.txt", "copy") + &warning("g.txt", "copy")
+    );
+
+    // The warnings are ignored with --ignore-glacier-warnings, and the objects
+    // are transferred with --force-glacier-transfer.
+    let args = [
+        "cp",
+        "s3://bucket/dir/",
+        "ignored",
+        "--recursive",
+        "--no-progress",
+    ];
+    let result = env
+        .run(&[&args[..], &["--ignore-glacier-warnings"]].concat())
+        .success();
+    assert_eq!(
+        result.lines(),
+        ["download: s3://bucket/dir/a.txt to ignored/a.txt"]
+    );
+    assert_eq!(result.stderr, "");
+    let args = [
+        "cp",
+        "s3://bucket/dir/",
+        "forced",
+        "--recursive",
+        "--no-progress",
+    ];
+    let result = env
+        .run(&[&args[..], &["--force-glacier-transfer"]].concat())
+        .success();
+    assert_eq!(result.lines().len(), 3, "{}", result.stdout);
+    assert_eq!(env.read("forced/g.txt"), b"a");
+
+    // The single object is checked by HeadObject, which is not skipped once
+    // restored.
+    env.intercept(|request| {
+        if request.method != http::Method::HEAD {
+            return None;
+        }
+        let mut response = http::Response::builder()
+            .status(200)
+            .header("content-length", "1")
+            .header("etag", "\"0cc175b9c0f1b6a831c399e269772661\"")
+            .header("last-modified", "Thu, 01 Jan 2026 00:00:00 GMT")
+            .header("x-amz-storage-class", "GLACIER");
+        if request.uri.path() == "/bucket/dir/a.txt" {
+            response = response.header(
+                "x-amz-restore",
+                "ongoing-request=\"false\", expiry-date=\"Fri, 01 Jan 2027 00:00:00 GMT\"",
+            );
+        }
+        Some(response.body(s3s::Body::empty()).unwrap())
+    });
+    let result = env.run(&["cp", "s3://bucket/dir/g.txt", "single.txt", "--no-progress"]);
+    assert_eq!(result.code, 2, "{}", result.stderr);
+    assert_eq!(result.stdout, "");
+    assert_eq!(result.stderr, warning("g.txt", "download"));
+    assert!(!env.path("single.txt").exists());
+    let result = env
+        .run(&["cp", "s3://bucket/dir/a.txt", "single.txt", "--no-progress"])
+        .success();
+    assert_eq!(
+        result.lines(),
+        ["download: s3://bucket/dir/a.txt to ./single.txt"]
+    );
+}
+
+#[test]
+fn cp_download_unsafe_paths() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "dir/a.txt", "a");
+    env.object("bucket", "dir/sub/b.txt", "b");
+
+    // The keys referencing the parent directory of the destination are
+    // skipped.
+    env.intercept(|request| {
+        (request.method == http::Method::GET && request.has_query("list-type"))
+            .then(|| list_response(&[("dir/../x.txt", "STANDARD"), ("dir/a.txt", "STANDARD")]))
+    });
+    let result = env.run(&[
+        "cp",
+        "s3://bucket/dir/",
+        "out",
+        "--recursive",
+        "--no-progress",
+    ]);
+    assert_eq!(result.code, 2, "{}", result.stderr);
+    assert_eq!(
+        result.lines(),
+        ["download: s3://bucket/dir/a.txt to out/a.txt"]
+    );
+    assert_eq!(
+        result.stderr,
+        "warning: Skipping file ../x.txt. File references a parent directory.\n"
+    );
+    assert!(!env.path("x.txt").exists());
+    env.intercept(|_| None);
+
+    // The destinations under the symbolic links are skipped with
+    // --no-follow-symlinks, and followed without it.
+    std::fs::create_dir_all(env.path("target")).unwrap();
+    std::fs::create_dir_all(env.path("linked")).unwrap();
+    std::os::unix::fs::symlink("../target", env.path("linked/sub")).unwrap();
+    std::os::unix::fs::symlink("target", env.path("link")).unwrap();
+    let args = [
+        "cp",
+        "s3://bucket/dir/",
+        "linked",
+        "--recursive",
+        "--no-progress",
+    ];
+    let result = env
+        .run(&[&args[..], &["--no-follow-symlinks"]].concat())
+        .success();
+    assert_eq!(
+        result.lines(),
+        ["download: s3://bucket/dir/a.txt to linked/a.txt"]
+    );
+    assert!(!env.path("target/b.txt").exists());
+    let args = [
+        "cp",
+        "s3://bucket/dir/",
+        "link",
+        "--recursive",
+        "--no-progress",
+    ];
+    let result = env
+        .run(&[&args[..], &["--no-follow-symlinks"]].concat())
+        .success();
+    assert_eq!(result.lines(), Vec::<&str>::new());
+    assert!(!env.path("target/a.txt").exists());
+    let result = env.run(&args).success();
+    assert_eq!(result.lines().len(), 2, "{}", result.stdout);
+    assert_eq!(env.read("target/a.txt"), b"a");
+    assert_eq!(env.read("target/sub/b.txt"), b"b");
 }
 
 #[test]
