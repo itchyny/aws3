@@ -188,6 +188,68 @@ fn region_redirect() {
 }
 
 #[test]
+fn region_redirect_without_header() {
+    let env = Env::new();
+    for bucket in ["malformed", "moved"] {
+        env.bucket(bucket);
+        env.object(bucket, "a.txt", "a");
+    }
+    // The region of the bucket is found in the error body, or by HeadBucket
+    // when the redirect does not tell it.
+    env.intercept(|request| {
+        let bucket = request.bucket();
+        if !matches!(bucket, "malformed" | "moved") || request.signed_region() == "ap-northeast-1" {
+            return None;
+        }
+        if bucket == "malformed" {
+            return Some(common::xml_response(
+                400,
+                "<Error><Code>AuthorizationHeaderMalformed</Code><Message>The authorization \
+                 header is malformed; the region 'us-east-1' is wrong; expecting \
+                 'ap-northeast-1'</Message><Region>ap-northeast-1</Region></Error>",
+            ));
+        }
+        if request.method == http::Method::HEAD {
+            return Some(
+                http::Response::builder()
+                    .status(301)
+                    .header("x-amz-bucket-region", "ap-northeast-1")
+                    .body(s3s::Body::empty())
+                    .unwrap(),
+            );
+        }
+        Some(common::xml_response(
+            301,
+            "<Error><Code>PermanentRedirect</Code><Message>The bucket you are attempting to \
+             access must be addressed using the specified endpoint.</Message></Error>",
+        ))
+    });
+    for (bucket, redirected) in [("malformed", 1), ("moved", 2)] {
+        let start = env.requests().len();
+        let result = env.run(&["ls", &format!("s3://{bucket}/")]).success();
+        assert!(result.stdout.ends_with(" a.txt\n"), "{}", result.stdout);
+        let requests = &env.requests()[start..];
+        let methods: Vec<_> = requests
+            .iter()
+            .map(|request| (request.method.as_str(), request.signed_region()))
+            .collect();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.signed_region() != "ap-northeast-1")
+                .count(),
+            redirected,
+            "{methods:?}"
+        );
+        assert_eq!(
+            methods.last(),
+            Some(&("GET", "ap-northeast-1")),
+            "{methods:?}"
+        );
+    }
+}
+
+#[test]
 fn no_credentials() {
     let env = Env::new();
     let mut command = env.command(&["ls"]);
