@@ -214,17 +214,16 @@ fn cp_progress() {
     env.bucket("bucket");
     env.write("a.txt", "hello");
     let result = env.run(&["cp", "a.txt", "s3://bucket/a.txt"]).success();
-    let (progress, success) = result.stdout.split_once('\r').unwrap();
+    // The totals are estimated with `~` until the listing ends, which may end
+    // after the upload.
+    let (progress, rest) = result.stdout.split_once('\r').unwrap();
     assert!(
-        progress.starts_with("Completed 5 Bytes/5 Bytes ("),
+        progress.starts_with("Completed 5 Bytes/") && progress.contains(" file(s) remaining"),
         "{progress}"
     );
-    assert!(
-        progress.ends_with(") with 1 file(s) remaining"),
-        "{progress}"
-    );
+    let success = rest.lines().next().unwrap();
     assert_eq!(success.trim_end(), "upload: ./a.txt to s3://bucket/a.txt");
-    assert_eq!(success.len(), progress.len() + 1);
+    assert!(success.len() >= progress.len(), "{success:?}");
 }
 
 #[test]
