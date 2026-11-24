@@ -493,6 +493,31 @@ fn mv_source_modified() {
     );
     assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"a");
     assert_eq!(env.object_content("bucket", "b.txt").unwrap(), b"a");
+
+    // The source modified before the copy fails the copy pinned by the ETag.
+    env.intercept(|request| {
+        (!request.header("x-amz-copy-source-if-match").is_empty()).then(|| {
+            common::xml_response(
+                412,
+                "<Error><Code>PreconditionFailed</Code>\
+                 <Message>At least one of the pre-conditions you specified did not hold</Message></Error>",
+            )
+        })
+    });
+    let result = env.run(&[
+        "mv",
+        "s3://bucket/a.txt",
+        "s3://bucket/c.txt",
+        "--no-progress",
+    ]);
+    assert_eq!(result.code, 1);
+    assert_eq!(
+        result.stderr,
+        "move failed: s3://bucket/a.txt to s3://bucket/c.txt \
+         Contents of stored object \"a.txt\" in bucket \"bucket\" did not match expected ETag.\n"
+    );
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"a");
+    assert_eq!(env.object_content("bucket", "c.txt"), None);
 }
 
 #[test]

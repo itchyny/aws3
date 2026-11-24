@@ -1030,6 +1030,99 @@ fn cp_no_overwrite_upload() {
 }
 
 #[test]
+fn cp_no_overwrite_copy() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    // The destination created during the copy fails the precondition of
+    // --no-overwrite, which skips the copy.
+    env.intercept(|request| {
+        (request.method == http::Method::PUT
+            && !request.header("x-amz-copy-source").is_empty()
+            && request.header("if-none-match") == "*")
+            .then(|| {
+                common::xml_response(
+                    412,
+                    "<Error><Code>PreconditionFailed</Code><Message>At least one of the \
+                     pre-conditions you specified did not hold</Message></Error>",
+                )
+            })
+    });
+    let result = env
+        .run(&[
+            "cp",
+            "s3://bucket/a.txt",
+            "s3://bucket/b.txt",
+            "--no-overwrite",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!((result.stdout.as_str(), result.stderr.as_str()), ("", ""));
+    assert_eq!(env.object_content("bucket", "b.txt"), None);
+}
+
+#[test]
+fn cp_multipart_copy_source_modified() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "big.bin", content(6 * 1024 * 1024));
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    // The part copies are pinned by the ETag of the source, which fail if the
+    // source is modified during the copy.
+    env.intercept(|request| {
+        (request.has_query("partNumber")
+            && !request.header("x-amz-copy-source-if-match").is_empty())
+        .then(|| {
+            common::xml_response(
+                412,
+                "<Error><Code>PreconditionFailed</Code><Message>At least one of the \
+                 pre-conditions you specified did not hold</Message></Error>",
+            )
+        })
+    });
+    let args = [
+        "cp",
+        "s3://bucket/big.bin",
+        "s3://bucket/copy.bin",
+        "--copy-props",
+        "none",
+        "--no-progress",
+    ];
+    let result = env.run_with_env(&args, &envs);
+    assert_eq!(result.code, 1);
+    assert_eq!(
+        result.stderr,
+        "copy failed: s3://bucket/big.bin to s3://bucket/copy.bin Contents of stored object \
+         \"big.bin\" in bucket \"bucket\" did not match expected ETag.\n"
+    );
+    assert_eq!(env.multipart_uploads(), 0);
+    assert_eq!(env.object_content("bucket", "copy.bin"), None);
+}
+
+#[test]
+fn cp_download_parent_not_directory() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    env.write("out", "file");
+    // The download into a path under a file fails without replacing it.
+    let result = env.run(&["cp", "s3://bucket/a.txt", "out/a.txt", "--no-progress"]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result
+            .stderr
+            .starts_with("download failed: s3://bucket/a.txt to out/a.txt "),
+        "{}",
+        result.stderr
+    );
+    assert_eq!(env.read("out"), b"file");
+}
+
+#[test]
 fn cp_multipart_upload_complete_failure() {
     let env = Env::new();
     env.bucket("bucket");
