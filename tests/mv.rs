@@ -26,6 +26,29 @@ fn mv_upload_and_download() {
 }
 
 #[test]
+fn mv_upload_modified() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("a.txt", "old");
+    // The file modified during the upload is not removed.
+    let path = env.path("a.txt");
+    env.intercept(move |request| {
+        if request.method == http::Method::PUT && request.uri.path() == "/bucket/a.txt" {
+            std::fs::write(&path, "new contents").unwrap();
+        }
+        None
+    });
+    let result = env.run(&["mv", "a.txt", "s3://bucket/a.txt", "--no-progress"]);
+    assert_eq!(result.code, 1);
+    assert_eq!(
+        result.stderr,
+        "move failed: ./a.txt to s3://bucket/a.txt The file was modified during the upload\n"
+    );
+    assert_eq!(env.read("a.txt"), b"new contents");
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"old");
+}
+
+#[test]
 fn mv_onto_itself() {
     let env = Env::new();
     env.bucket("bucket");

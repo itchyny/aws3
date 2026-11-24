@@ -283,6 +283,14 @@ fn has_link_in_dest_path(root: &str, dest: &str) -> bool {
 
 async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outcome, String> {
     let is_stream = ctx.plan.is_stream;
+    // The size and the modification time of the local file of a move, which
+    // is removed only if they are unchanged by the upload.
+    let stamp = |path: &str| {
+        std::fs::metadata(path)
+            .ok()
+            .map(|metadata| (metadata.len(), metadata.modified().ok()))
+    };
+    let uploaded = (ctx.is_move() && task.operation == Operation::Upload).then(|| stamp(&task.src));
     // The ETag of the object transferred, which pins the deletion of the
     // source of a move.
     let (outcome, etag) = match task.operation {
@@ -354,6 +362,11 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
     if ctx.is_move() && outcome == Outcome::Done {
         match task.operation {
             Operation::Upload => {
+                // The file modified during the upload is kept, although it
+                // may still be modified between the check and the removal.
+                if uploaded.is_some_and(|uploaded| uploaded != stamp(&task.src)) {
+                    return Err("The file was modified during the upload".to_owned());
+                }
                 tokio::fs::remove_file(&task.src)
                     .await
                     .map_err(|err| err.to_string())?;
