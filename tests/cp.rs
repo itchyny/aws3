@@ -684,6 +684,147 @@ fn cp_multipart_copy_tags() {
 }
 
 #[test]
+fn cp_multipart_copy_annotations() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let data = content(6 * 1024 * 1024);
+    env.object("bucket", "big.bin", &data);
+    // The fake server does not support the tags and the annotations. The
+    // annotations are listed in two pages, and the annotation `c` cannot be
+    // put to `failed.bin`.
+    env.intercept(|request| {
+        let query = request.uri.query().unwrap_or_default();
+        let name = query
+            .split('&')
+            .find_map(|param| param.strip_prefix("annotationName="));
+        if request.method == http::Method::GET && request.has_query("tagging") {
+            Some(common::xml_response(
+                200,
+                "<Tagging><TagSet></TagSet></Tagging>",
+            ))
+        } else if query.contains("x-id=ListObjectAnnotations") {
+            let (names, next) = if query.contains("continuation-token=page2") {
+                (&["b", "c"][..], "")
+            } else {
+                (
+                    &["a"][..],
+                    "<NextContinuationToken>page2</NextContinuationToken>",
+                )
+            };
+            let entries: String = names
+                .iter()
+                .map(|name| {
+                    format!(
+                        "<AnnotationEntry><AnnotationName>{name}</AnnotationName></AnnotationEntry>"
+                    )
+                })
+                .collect();
+            Some(common::xml_response(
+                200,
+                &format!(
+                    "<ListObjectAnnotationsOutput><Annotations>{entries}</Annotations>{next}\
+                     </ListObjectAnnotationsOutput>"
+                ),
+            ))
+        } else if let Some(name) = name
+            && request.method == http::Method::GET
+        {
+            Some(
+                http::Response::builder()
+                    .status(200)
+                    .body(s3s::Body::from(format!("payload-{name}")))
+                    .unwrap(),
+            )
+        } else {
+            name.map(|name| {
+                if request.uri.path() == "/bucket/failed.bin" && name == "c" {
+                    common::xml_response(
+                        403,
+                        "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
+                    )
+                } else {
+                    common::xml_response(
+                        200,
+                        &format!(
+                            "<PutObjectAnnotationOutput><AnnotationName>{name}</AnnotationName>\
+                             </PutObjectAnnotationOutput>"
+                        ),
+                    )
+                }
+            })
+        }
+    });
+    let copy = |dest: &str| {
+        let args = [
+            "cp",
+            "s3://bucket/big.bin",
+            dest,
+            "--copy-props",
+            "all",
+            "--no-progress",
+        ];
+        env.run_with_env(&args, &envs)
+    };
+    let puts = |key: &str| {
+        env.requests()
+            .into_iter()
+            .filter(|request| {
+                request.method == http::Method::PUT
+                    && request.uri.path() == format!("/bucket/{key}")
+                    && request.has_query("annotation")
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // The annotations of the source are put to the copied object, which is
+    // identified by the ETag.
+    copy("s3://bucket/copy.bin").success();
+    let lists: Vec<_> = env
+        .requests()
+        .into_iter()
+        .map(|request| request.uri.query().unwrap_or_default().to_owned())
+        .filter(|query| query.contains("x-id=ListObjectAnnotations"))
+        .collect();
+    assert_eq!(lists.len(), 2, "{lists:?}");
+    assert!(lists[1].contains("continuation-token=page2"), "{lists:?}");
+    let etag = env.head("bucket", "copy.bin").e_tag().unwrap().to_owned();
+    let requests = puts("copy.bin");
+    assert_eq!(requests.len(), 3);
+    for (request, name) in requests.iter().zip(["a", "b", "c"]) {
+        assert!(
+            request
+                .uri
+                .query()
+                .unwrap()
+                .contains(&format!("annotationName={name}")),
+            "{request:?}"
+        );
+        assert_eq!(request.header("x-amz-object-if-match"), etag);
+        let body = String::from_utf8_lossy(&request.body);
+        assert!(body.contains(&format!("payload-{name}")), "{body}");
+    }
+    assert_eq!(env.object_content("bucket", "copy.bin").unwrap(), data);
+
+    // The copied object is kept if some annotations cannot be put.
+    let result = copy("s3://bucket/failed.bin");
+    assert_eq!(result.code, 1, "{}", result.stderr);
+    assert_eq!(
+        result.stderr,
+        "copy failed: s3://bucket/big.bin to s3://bucket/failed.bin Failed to copy all \
+         annotations to s3://bucket/failed.bin. The object was copied successfully and was not \
+         deleted. Annotations written: a, b. Annotations that failed: c: An error occurred \
+         (AccessDenied) when calling the PutObjectAnnotation operation: Access Denied.\n"
+    );
+    assert_eq!(puts("failed.bin").len(), 3);
+    assert_eq!(env.object_content("bucket", "failed.bin").unwrap(), data);
+}
+
+#[test]
 fn cp_multipart_etag() {
     let env = Env::new();
     env.bucket("bucket");
