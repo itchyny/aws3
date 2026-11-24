@@ -87,6 +87,32 @@ fn put_bucket_logging() {
     );
     assert!(headers.contains(&"x-amz-sdk-checksum-algorithm: CRC64NVME".to_owned()));
 
+    env.run(&[
+        "api",
+        "put-bucket-logging",
+        "--bucket",
+        "bucket",
+        "--bucket-logging-status",
+        "LoggingEnabled={TargetBucket=logs,TargetPrefix=p/,TargetGrants=[\
+         {Grantee={Type=CanonicalUser,ID=abc},Permission=READ},\
+         {Grantee={Type=Group,URI=http://acs.amazonaws.com/groups/global/AllUsers},\
+         Permission=FULL_CONTROL}],TargetObjectKeyFormat={SimplePrefix={}}}",
+    ]);
+    let (body, _) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants>\
+             <Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" \
+             xsi:type=\"CanonicalUser\"><ID>abc</ID></Grantee><Permission>READ</Permission></Grant>\
+             <Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" \
+             xsi:type=\"Group\"><URI>http://acs.amazonaws.com/groups/global/AllUsers</URI></Grantee>\
+             <Permission>FULL_CONTROL</Permission></Grant></TargetGrants>\
+             <TargetPrefix>p/</TargetPrefix><TargetObjectKeyFormat><SimplePrefix></SimplePrefix>\
+             </TargetObjectKeyFormat></LoggingEnabled></BucketLoggingStatus>"
+        ),
+        "{body}"
+    );
+
     let result = env.run(&[
         "api",
         "put-bucket-logging",

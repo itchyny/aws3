@@ -137,6 +137,33 @@ fn put_bucket_notification_configuration() {
     );
     assert!(headers.is_empty(), "{headers:?}");
 
+    env.run(&[
+        "api",
+        "put-bucket-notification-configuration",
+        "--bucket",
+        "bucket",
+        "--notification-configuration",
+        "TopicConfigurations=[{Id=t,TopicArn=arn:aws:sns:us-east-1:123456789012:t,\
+         Events=[s3:ObjectRemoved:*]}],LambdaFunctionConfigurations=[{Id=l,\
+         LambdaFunctionArn=arn:aws:lambda:us-east-1:123456789012:function:f,\
+         Events=[s3:ObjectCreated:Put,s3:ObjectCreated:Copy],\
+         Filter={Key={FilterRules=[{Name=suffix,Value=.jpg}]}}}]",
+    ]);
+    let (body, _) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<NotificationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+             <TopicConfiguration><Id>t</Id><Topic>arn:aws:sns:us-east-1:123456789012:t</Topic>\
+             <Event>s3:ObjectRemoved:*</Event></TopicConfiguration>\
+             <CloudFunctionConfiguration><Id>l</Id>\
+             <CloudFunction>arn:aws:lambda:us-east-1:123456789012:function:f</CloudFunction>\
+             <Event>s3:ObjectCreated:Put</Event><Event>s3:ObjectCreated:Copy</Event>\
+             <Filter><S3Key><FilterRule><Name>suffix</Name><Value>.jpg</Value></FilterRule>\
+             </S3Key></Filter></CloudFunctionConfiguration></NotificationConfiguration>"
+        ),
+        "{body}"
+    );
+
     let result = env.run(&[
         "api",
         "put-bucket-notification-configuration",

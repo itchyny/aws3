@@ -1,5 +1,6 @@
 //! The tests of the api operations of buckets.
 
+use super::last_request_body;
 use crate::common::Env;
 
 #[test]
@@ -175,5 +176,26 @@ fn create_bucket_and_delete_bucket() {
          Unknown parameter in CreateBucketConfiguration: \"Foo\", must be one of: \
          LocationConstraint, Location, Bucket, Tags\n\
          Missing required parameter in CreateBucketConfiguration.Tags[0]: \"Value\"\n"
+    );
+
+    // The location and the type of directory buckets are sent.
+    env.run(&[
+        "api",
+        "create-bucket",
+        "--bucket",
+        "dir-bucket",
+        "--create-bucket-configuration",
+        "Location={Type=AvailabilityZone,Name=usw2-az1},\
+         Bucket={DataRedundancy=SingleAvailabilityZone,Type=Directory}",
+    ]);
+    let (body, _) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<CreateBucketConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+             <Location><Type>AvailabilityZone</Type><Name>usw2-az1</Name></Location>\
+             <Bucket><DataRedundancy>SingleAvailabilityZone</DataRedundancy>\
+             <Type>Directory</Type></Bucket></CreateBucketConfiguration>"
+        ),
+        "{body}"
     );
 }

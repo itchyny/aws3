@@ -171,6 +171,59 @@ fn put_bucket_lifecycle_configuration() {
         "all_storage_classes_128K"
     );
 
+    // The legacy prefix, the rules of the noncurrent versions, and the other
+    // filters are sent.
+    env.write(
+        "lifecycle.json",
+        r#"{"Rules": [{"ID": "legacy", "Prefix": "old/", "Status": "Disabled",
+            "Expiration": {"ExpiredObjectDeleteMarker": true},
+            "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7}},
+            {"ID": "versions", "Filter": {"Tag": {"Key": "k", "Value": "v"}}, "Status": "Enabled",
+            "Transitions": [{"Date": "2030-01-01T00:00:00Z", "StorageClass": "STANDARD_IA"}],
+            "NoncurrentVersionTransitions": [{"NoncurrentDays": 30, "StorageClass": "GLACIER",
+            "NewerNoncurrentVersions": 2}],
+            "NoncurrentVersionExpiration": {"NoncurrentDays": 90, "NewerNoncurrentVersions": 3}},
+            {"ID": "size", "Filter": {"And": {"ObjectSizeGreaterThan": 1,
+            "ObjectSizeLessThan": 1024}}, "Status": "Enabled", "Expiration": {"Days": 1}},
+            {"ID": "less", "Filter": {"ObjectSizeLessThan": 10}, "Status": "Enabled",
+            "Expiration": {"Days": 2}}]}"#,
+    );
+    env.run(&[
+        "api",
+        "put-bucket-lifecycle-configuration",
+        "--bucket",
+        "bucket",
+        "--lifecycle-configuration",
+        "file://lifecycle.json",
+    ]);
+    let (body, _) = last_request_body(&env);
+    assert!(
+        body.ends_with(
+            "<LifecycleConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+             <Rule><Expiration><ExpiredObjectDeleteMarker>true</ExpiredObjectDeleteMarker>\
+             </Expiration><ID>legacy</ID><Prefix>old/</Prefix><Status>Disabled</Status>\
+             <AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation>\
+             </AbortIncompleteMultipartUpload></Rule>\
+             <Rule><ID>versions</ID><Filter><Tag><Key>k</Key><Value>v</Value></Tag></Filter>\
+             <Status>Enabled</Status><Transition><Date>2030-01-01T00:00:00Z</Date>\
+             <StorageClass>STANDARD_IA</StorageClass></Transition>\
+             <NoncurrentVersionTransition><NoncurrentDays>30</NoncurrentDays>\
+             <StorageClass>GLACIER</StorageClass>\
+             <NewerNoncurrentVersions>2</NewerNoncurrentVersions></NoncurrentVersionTransition>\
+             <NoncurrentVersionExpiration><NoncurrentDays>90</NoncurrentDays>\
+             <NewerNoncurrentVersions>3</NewerNoncurrentVersions></NoncurrentVersionExpiration>\
+             </Rule>\
+             <Rule><Expiration><Days>1</Days></Expiration><ID>size</ID><Filter><And>\
+             <ObjectSizeGreaterThan>1</ObjectSizeGreaterThan>\
+             <ObjectSizeLessThan>1024</ObjectSizeLessThan></And></Filter>\
+             <Status>Enabled</Status></Rule>\
+             <Rule><Expiration><Days>2</Days></Expiration><ID>less</ID><Filter>\
+             <ObjectSizeLessThan>10</ObjectSizeLessThan></Filter><Status>Enabled</Status></Rule>\
+             </LifecycleConfiguration>"
+        ),
+        "{body}"
+    );
+
     for (value, code, message) in [
         (
             "Rules=[{Filter={Prefix=x}}]",
