@@ -889,6 +889,70 @@ fn cp_no_overwrite_upload() {
 }
 
 #[test]
+fn cp_multipart_upload_complete_failure() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("big.bin", content(6 * 1024 * 1024));
+    let config = env.multipart_config();
+    let envs: Vec<_> = config
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect();
+    let complete = |request: &common::Request| {
+        request.method == http::Method::POST && request.has_query("uploadId")
+    };
+    let aborted = |requests: &[common::Request]| {
+        requests
+            .iter()
+            .any(|request| request.method == http::Method::DELETE && request.has_query("uploadId"))
+    };
+
+    // The upload is aborted when it cannot be completed.
+    env.intercept(move |request| {
+        complete(request).then(|| {
+            common::xml_response(
+                400,
+                "<Error><Code>InvalidPart</Code><Message>One or more of the specified parts \
+                 could not be found.</Message></Error>",
+            )
+        })
+    });
+    let args = ["cp", "big.bin", "s3://bucket/big.bin", "--no-progress"];
+    let result = env.run_with_env(&args, &envs);
+    assert_eq!(result.code, 1);
+    assert_eq!(
+        result.stderr,
+        "upload failed: ./big.bin to s3://bucket/big.bin An error occurred (InvalidPart) when \
+         calling the CompleteMultipartUpload operation: One or more of the specified parts \
+         could not be found.\n"
+    );
+    assert!(aborted(&env.requests()));
+    assert_eq!(env.multipart_uploads(), 0);
+    assert_eq!(env.object_content("bucket", "big.bin"), None);
+
+    // The object created during the upload with --no-overwrite fails the
+    // completion, which skips the upload.
+    env.intercept(move |request| {
+        complete(request).then(|| {
+            common::xml_response(
+                412,
+                "<Error><Code>PreconditionFailed</Code><Message>At least one of the \
+                 pre-conditions you specified did not hold</Message></Error>",
+            )
+        })
+    });
+    let count = env.requests().len();
+    let args = [&args[..], &["--no-overwrite"]].concat();
+    let result = env.run_with_env(&args, &envs).success();
+    assert_eq!((result.stdout.as_str(), result.stderr.as_str()), ("", ""));
+    let requests = env.requests().split_off(count);
+    let request = requests.iter().find(|request| complete(request)).unwrap();
+    assert_eq!(request.header("if-none-match"), "*");
+    assert!(aborted(&requests));
+    assert_eq!(env.multipart_uploads(), 0);
+}
+
+#[test]
 fn cp_output_modes() {
     let env = Env::new();
     env.bucket("bucket");
@@ -1265,6 +1329,39 @@ fn cp_download_range_ignored() {
         .filter(|name| name.to_string_lossy().starts_with("out.bin"))
         .collect();
     assert!(files.is_empty(), "{files:?}");
+
+    // The second range responded with the content range of another range, or
+    // with a shorter body, fails the download.
+    for (content_range, length, message) in [
+        (
+            "bytes 0-5242879/12582912",
+            5242880,
+            "Requested range: `5242880-10485759` does not match content range in response: \
+             `0-5242879`",
+        ),
+        (
+            "bytes 5242880-10485759/12582912",
+            1024,
+            "The response body does not match the requested range: `5242880-10485759`",
+        ),
+    ] {
+        env.intercept(move |request| {
+            (request.header("range") == "bytes=5242880-10485759").then(|| {
+                http::Response::builder()
+                    .status(206)
+                    .header("content-range", content_range)
+                    .body(s3s::Body::from(vec![0; length]))
+                    .unwrap()
+            })
+        });
+        let result = env.run_with_env(&["cp", "s3://bucket/big.bin", "out.bin"], &envs);
+        assert_eq!(result.code, 1);
+        assert_eq!(
+            result.stderr,
+            format!("download failed: s3://bucket/big.bin to ./out.bin {message}\n")
+        );
+        assert!(!env.path("out.bin").exists());
+    }
 }
 
 #[test]
