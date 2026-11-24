@@ -186,6 +186,52 @@ fn list_objects_v2_errors() {
 }
 
 #[test]
+fn list_same_next_token() {
+    let env = Env::new();
+    env.bucket("bucket");
+    // The pagination stops on the same next token received twice, instead of
+    // requesting the same page forever.
+    env.intercept(|request| {
+        if request.has_query("list-type") {
+            Some(xml_response(
+                200,
+                "<ListBucketResult><Name>bucket</Name><IsTruncated>true</IsTruncated>\
+                 <NextContinuationToken>t</NextContinuationToken><KeyCount>1</KeyCount>\
+                 <Contents><Key>a</Key></Contents></ListBucketResult>",
+            ))
+        } else if request.has_query("versions") {
+            Some(xml_response(
+                200,
+                "<ListVersionsResult><Name>bucket</Name><IsTruncated>true</IsTruncated>\
+                 <NextKeyMarker>a</NextKeyMarker><Version><Key>a</Key><VersionId>v</VersionId>\
+                 </Version></ListVersionsResult>",
+            ))
+        } else {
+            None
+        }
+    });
+    for (operation, tokens) in [
+        ("list-objects-v2", "{'ContinuationToken': 't'}"),
+        (
+            "list-object-versions",
+            "{'KeyMarker': 'a', 'VersionIdMarker': None}",
+        ),
+    ] {
+        let count = env.requests().len();
+        let result = env.run(&["api", operation, "--bucket", "bucket"]);
+        assert_eq!(result.code, 255, "{operation}");
+        assert_eq!(
+            result.stderr,
+            format!(
+                "\naws3: [ERROR]: Error during pagination: The same next token was received \
+                 twice: {tokens}\n"
+            )
+        );
+        assert_eq!(env.requests().len() - count, 2, "{operation}");
+    }
+}
+
+#[test]
 fn list_object_versions() {
     let env = Env::new();
     env.bucket("bucket");
