@@ -302,6 +302,70 @@ login_session = arn:aws:iam::123456789012:user/Admin
              reauthenticate with 'aws login'.\n"
         );
     }
+
+    // The token cache, named by the SHA-256 of the session, missing the
+    // fields or not in JSON is reported like the AWS CLI.
+    let hash = "10cabd19777b6651ac57333b55c7c10a1242b1c2337f40e674926d7324698347";
+    for (content, message) in [
+        (
+            "{}",
+            "Error loading login session token: Failed to load access token from token cache, \
+             missing one or more required fields.",
+        ),
+        ("not json", &format!("'{hash}'")[..]),
+    ] {
+        env.write(&format!("login-cache/{hash}.json"), content);
+        let mut command = env.command(&["ls"]);
+        command
+            .env_remove("AWS_ACCESS_KEY_ID")
+            .env_remove("AWS_SECRET_ACCESS_KEY")
+            .env("AWS_CONFIG_FILE", &config)
+            .env("AWS_LOGIN_CACHE_DIRECTORY", &cache);
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(255));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            format!("\naws3: [ERROR]: {message}\n")
+        );
+    }
+}
+
+#[test]
+fn endpoint_rule_errors() {
+    let env = Env::new();
+    let config = env.config("[default]\ns3 =\n  use_accelerate_endpoint = true\n");
+    // The errors of the endpoint rules are reported before any requests, in
+    // the same messages as the AWS CLI.
+    for (args, envs, message) in [
+        (
+            &[
+                "ls",
+                "s3://arn:aws:s3:-us-east-1:123456789012:accesspoint/my-ap/",
+            ][..],
+            &[][..],
+            "Invalid host label to be bound to the hostname of the endpoint: \"-us-east-1\".",
+        ),
+        (
+            &["ls", "s3://bucket/"],
+            &[
+                ("AWS_CONFIG_FILE", config.to_str().unwrap()),
+                ("AWS_USE_FIPS_ENDPOINT", "true"),
+            ],
+            "Unsupported configuration when using S3: Accelerate cannot be used with FIPS",
+        ),
+    ] {
+        let mut command = env.command(args);
+        command
+            .env_remove("AWS_ENDPOINT_URL")
+            .envs(envs.iter().copied());
+        let output = command.output().unwrap();
+        assert_eq!(output.status.code(), Some(255), "{args:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            format!("\naws3: [ERROR]: {message}\n")
+        );
+        assert!(env.requests().is_empty());
+    }
 }
 
 #[test]

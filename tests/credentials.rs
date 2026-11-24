@@ -349,12 +349,27 @@ fn credentials_sso() {
     env.bucket("bucket");
     env.intercept(|request| {
         (request.uri.path() == "/federation/credentials").then(|| {
-            if request.header("x-amz-sso_bearer_token") == "sso-access-token" {
-                json_response(&format!(
+            let error = |status, code, message| {
+                http::Response::builder()
+                    .status(status)
+                    .header("content-type", "application/json")
+                    .header("x-amzn-errortype", code)
+                    .body(s3s::Body::from(format!(
+                        r#"{{"__type":"{code}","message":"{message}"}}"#
+                    )))
+                    .unwrap()
+            };
+            match request.header("x-amz-sso_bearer_token") {
+                "sso-access-token" => json_response(&format!(
                     r#"{{"roleCredentials":{{"accessKeyId":"{ACCESS_KEY}","secretAccessKey":"{SECRET_KEY}","sessionToken":"sso-token","expiration":4070908800000}}}}"#
-                ))
-            } else {
-                xml_response(401, "")
+                )),
+                "expired-token" => error(
+                    401,
+                    "UnauthorizedException",
+                    "Session token not found or invalid",
+                ),
+                "forbidden-token" => error(403, "ForbiddenException", "No access"),
+                _ => xml_response(401, ""),
             }
         })
     });
@@ -382,6 +397,36 @@ fn credentials_sso() {
         sso.uri.query(),
         Some("role_name=role&account_id=123456789012")
     );
+
+    // The session not valid asks to log in again, and the other errors of
+    // the credentials are reported as the service errors.
+    for (token, code, message) in [
+        (
+            "expired-token",
+            255,
+            "The SSO session associated with this profile has expired or is otherwise \
+             invalid. To refresh this SSO session run aws sso login with the corresponding \
+             profile.",
+        ),
+        (
+            "forbidden-token",
+            254,
+            "An error occurred (ForbiddenException) when calling the GetRoleCredentials \
+             operation: No access",
+        ),
+    ] {
+        env.write(
+            ".aws/sso/cache/0ad374308c5a4e22f723adf10145eafad7c4031c.json",
+            format!(
+                r#"{{"accessToken":"{token}","expiresAt":"2099-01-01T00:00:00Z","region":"us-east-1","startUrl":"https://example.awsapps.com/start"}}"#
+            ),
+        );
+        let mut cmd = command(&env, &["ls", "s3://bucket/"]);
+        cmd.env("AWS_CONFIG_FILE", &config);
+        let result = run(cmd);
+        assert_eq!(result.code, code, "{}", result.stderr);
+        assert_eq!(result.stderr, format!("\naws3: [ERROR]: {message}\n"));
+    }
 }
 
 #[test]
