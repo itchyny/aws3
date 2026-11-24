@@ -241,6 +241,173 @@ fn mv_validate_same_s3_paths() {
 }
 
 #[test]
+fn mv_validate_same_s3_paths_resolved() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    env.intercept(|request| {
+        let path = request.uri.path();
+        let query = request.uri.query().unwrap_or_default();
+        if let Some(name) = path.strip_prefix("/v20180820/accesspoint/") {
+            if name == "denied" {
+                let body = "<ErrorResponse><Error><Code>AccessDenied</Code>\
+                            <Message>Access Denied</Message></Error></ErrorResponse>";
+                return Some(common::xml_response(403, body));
+            }
+            let bucket = if name == "other-ap" {
+                "other"
+            } else {
+                "bucket"
+            };
+            let body =
+                format!("<GetAccessPointResult><Bucket>{bucket}</Bucket></GetAccessPointResult>");
+            return Some(common::xml_response(200, &body));
+        }
+        if path == "/v20180820/mrap/instances" {
+            // The multi-region access point is found on the second page.
+            let body = if query.contains("nextToken=page2") {
+                "<ListMultiRegionAccessPointsResult><AccessPoints><AccessPoint>\
+                 <Alias>mfzwi23gnjvgw.mrap</Alias><Regions>\
+                 <Region><Bucket>other</Bucket></Region>\
+                 <Region><Bucket>bucket</Bucket></Region>\
+                 </Regions></AccessPoint></AccessPoints></ListMultiRegionAccessPointsResult>"
+            } else {
+                "<ListMultiRegionAccessPointsResult><AccessPoints><AccessPoint>\
+                 <Alias>abcdefghijklm.mrap</Alias><Regions>\
+                 <Region><Bucket>other</Bucket></Region>\
+                 </Regions></AccessPoint></AccessPoints>\
+                 <NextToken>page2</NextToken></ListMultiRegionAccessPointsResult>"
+            };
+            return Some(common::xml_response(200, body));
+        }
+        if request.method == http::Method::POST && path == "/" {
+            let body = "<GetCallerIdentityResponse><GetCallerIdentityResult>\
+                        <Account>123456789012</Account>\
+                        </GetCallerIdentityResult></GetCallerIdentityResponse>";
+            return Some(common::xml_response(200, body));
+        }
+        None
+    });
+    // The requests to S3 Control, whose hosts are prefixed by the account ID,
+    // are forwarded to the server by the proxy. The clients of S3 Control and
+    // STS use AWS_ENDPOINT_URL only when --endpoint-url is specified.
+    let proxy = env.proxy();
+    let url = proxy.url(None);
+    let endpoint = env.endpoint().to_owned();
+    let run = |src: &str, dest: &str, args: &[&str], envs: &[(&str, &str)]| {
+        let args = [
+            &["mv", src, dest, "--dryrun", "--endpoint-url", &endpoint],
+            args,
+        ]
+        .concat();
+        let envs = [&[("HTTP_PROXY", url.as_str())], envs].concat();
+        env.run_with_env(&args, &envs)
+    };
+    let validate = ["--validate-same-s3-paths"];
+
+    // The paths resolved to the same object are rejected.
+    for dest in [
+        "s3://arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/a.txt",
+        "s3://arn:aws:s3:us-east-1:123456789012:accesspoint:my-ap/a.txt",
+        "s3://arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-0123/accesspoint/ap1/a.txt",
+        "s3://arn:aws:s3::123456789012:accesspoint/mfzwi23gnjvgw.mrap/a.txt",
+        "s3://my-ap-abcdefghijklmnopqrstuvwxyz0123-s3alias/a.txt",
+    ] {
+        let result = run("s3://bucket/a.txt", dest, &validate, &[]);
+        assert_eq!(result.code, 252, "{dest}: {}", result.stderr);
+        assert!(
+            result.stderr.contains(&format!(
+                "Cannot mv a file onto itself: s3://bucket/a.txt - {dest}"
+            )),
+            "{dest}: {}",
+            result.stderr
+        );
+    }
+    let requests = env.requests();
+    let get_access_point = |name: &str| {
+        requests
+            .iter()
+            .filter(|request| request.uri.path() == format!("/v20180820/accesspoint/{name}"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(get_access_point("my-ap").len(), 2);
+    assert!(
+        get_access_point("my-ap")
+            .iter()
+            .all(|request| request.header("x-amz-account-id") == "123456789012")
+    );
+    let outposts = "arn%3Aaws%3As3-outposts%3Aus-east-1%3A123456789012%3Aoutpost%2Fop-0123%2Faccesspoint%2Fap1";
+    assert_eq!(get_access_point(outposts).len(), 1);
+    let s3alias = get_access_point("my-ap-abcdefghijklmnopqrstuvwxyz0123-s3alias");
+    assert_eq!(s3alias.len(), 1);
+    assert_eq!(s3alias[0].header("x-amz-account-id"), "123456789012");
+    let mrap = requests
+        .iter()
+        .filter(|request| request.uri.path() == "/v20180820/mrap/instances")
+        .count();
+    assert_eq!(mrap, 2);
+
+    // The paths resolved to other buckets are moved.
+    let other = "s3://arn:aws:s3:us-east-1:123456789012:accesspoint/other-ap/a.txt";
+    let result = run("s3://bucket/a.txt", other, &validate, &[]).success();
+    assert_eq!(
+        result.stdout,
+        format!("(dryrun) move: s3://bucket/a.txt to {other}\n")
+    );
+    assert_eq!(result.stderr, "");
+
+    // The validation is enabled by the environment variable, and resolves
+    // the source in the source region.
+    let access_point = "s3://arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/a.txt";
+    let count = env.requests().len();
+    let envs = [("AWS_CLI_S3_MV_VALIDATE_SAME_S3_PATHS", "TRUE")];
+    let args = ["--source-region", "eu-west-1"];
+    let result = run(access_point, "s3://bucket/a.txt", &args, &envs);
+    assert_eq!(result.code, 252, "{}", result.stderr);
+    assert!(
+        result.stderr.contains("Cannot mv a file onto itself"),
+        "{}",
+        result.stderr
+    );
+    let requests = env.requests();
+    assert_eq!(requests.len(), count + 1, "{requests:?}");
+    assert_eq!(requests[count].signed_region(), "eu-west-1");
+    let envs = [("AWS_CLI_S3_MV_VALIDATE_SAME_S3_PATHS", "false")];
+    let result = run("s3://bucket/a.txt", access_point, &[], &envs).success();
+    assert!(
+        result
+            .stderr
+            .starts_with("warning: Provided s3 paths may resolve to same underlying"),
+        "{}",
+        result.stderr
+    );
+
+    // The failures of resolving the access points are reported.
+    let denied = "s3://arn:aws:s3:us-east-1:123456789012:accesspoint/denied/a.txt";
+    let result = run("s3://bucket/a.txt", denied, &validate, &[]);
+    assert_eq!(result.code, 254, "{}", result.stderr);
+    assert!(
+        result
+            .stderr
+            .contains("An error occurred (AccessDenied) when calling the GetAccessPoint operation"),
+        "{}",
+        result.stderr
+    );
+    let missing = "s3://arn:aws:s3::123456789012:accesspoint/missing.mrap/a.txt";
+    let result = run("s3://bucket/a.txt", missing, &validate, &[]);
+    assert_eq!(result.code, 252, "{}", result.stderr);
+    assert!(
+        result.stderr.contains(
+            "Couldn't find multi-region access point with alias missing.mrap \
+             in account 123456789012"
+        ),
+        "{}",
+        result.stderr
+    );
+    assert!(env.object_content("bucket", "a.txt").is_some());
+}
+
+#[test]
 fn mv_conditional_delete() {
     let env = Env::new();
     env.bucket("bucket");

@@ -315,6 +315,17 @@ impl Env {
                             let uri: http::Uri = target.parse().unwrap();
                             uri.authority().unwrap().to_string()
                         };
+                        // The hosts of S3 Control are prefixed by the account
+                        // IDs, which are forwarded to the host without them.
+                        let host = match host.split_once('.') {
+                            Some((label, rest))
+                                if label.len() == 12
+                                    && label.bytes().all(|b| b.is_ascii_digit()) =>
+                            {
+                                rest.to_owned()
+                            }
+                            _ => host,
+                        };
                         let Ok(mut server) = tokio::net::TcpStream::connect(host).await else {
                             return;
                         };
