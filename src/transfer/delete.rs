@@ -12,6 +12,7 @@ use md5::{Digest, Md5};
 use tokio::task::JoinSet;
 
 use super::context::Context;
+use super::download::etag_mismatch;
 use super::printer::{Printer, TransferId};
 use super::task::Outcome;
 use crate::error::{Error, has_error_code, has_status_code, is_retryable};
@@ -27,25 +28,46 @@ pub(super) struct Deletion {
     pub(super) path: String,
 }
 
+/// Deletes the object, only if it has the ETag if specified, so that the
+/// object modified since it was transferred is not deleted. The ETag is not
+/// sent to the endpoints which do not support it.
 pub(super) async fn delete_object(
     ctx: &Context,
     client: &Client,
     bucket: &str,
     key: &str,
+    etag: Option<&str>,
 ) -> Result<Outcome, String> {
     validate_bucket_name(bucket)?;
-    ctx.send(client, bucket, "DeleteObject", |client| async move {
-        client
-            .delete_object()
-            .bucket(bucket)
-            .key(key)
-            .set_request_payer(ctx.params.request_payer.clone())
-            .send()
-            .await
-    })
-    .await
-    .map_err(|err| Error::sdk("DeleteObject", err).to_string())?;
-    Ok(Outcome::Done)
+    let etag = etag.filter(|_| ctx.conditional_delete.load(Ordering::Relaxed));
+    let send = |etag: Option<String>| {
+        ctx.send(client, bucket, "DeleteObject", move |client| {
+            client
+                .delete_object()
+                .bucket(bucket)
+                .key(key)
+                .set_if_match(etag.clone())
+                .set_request_payer(ctx.params.request_payer.clone())
+                .send()
+        })
+    };
+    let result = match send(etag.map(str::to_owned)).await {
+        Err(err)
+            if etag.is_some()
+                && (has_error_code(&err, "NotImplemented") || has_status_code(&err, 501)) =>
+        {
+            ctx.conditional_delete.store(false, Ordering::Relaxed);
+            send(None).await
+        }
+        result => result,
+    };
+    match result {
+        Ok(_) => Ok(Outcome::Done),
+        Err(err) if etag.is_some() && has_error_code(&err, "PreconditionFailed") => {
+            Err(etag_mismatch(bucket, key))
+        }
+        Err(err) => Err(Error::sdk("DeleteObject", err).to_string()),
+    }
 }
 
 /// Deletes the objects of the bucket in a request of `DeleteObjects`, and
@@ -165,7 +187,7 @@ async fn delete_each(ctx: Arc<Context>, deletions: Vec<Deletion>) {
         let ctx = ctx.clone();
         tasks.spawn(async move {
             let (bucket, key) = split_bucket_key(&deletion.path);
-            let result = delete_object(&ctx, &ctx.client, bucket, key).await;
+            let result = delete_object(&ctx, &ctx.client, bucket, key, None).await;
             print_result(&mut ctx.printer(), &deletion, result.map(|_| ()));
         });
     }

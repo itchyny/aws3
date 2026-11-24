@@ -130,6 +130,7 @@ pub async fn run(
         limiter,
         redirector: Redirector::default(),
         batch_delete: AtomicBool::new(true),
+        conditional_delete: AtomicBool::new(true),
     });
     // The first Ctrl-C cancels the transfers, and the second one exits.
     let listener = tokio::spawn({

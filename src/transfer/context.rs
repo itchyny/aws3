@@ -41,6 +41,9 @@ pub(super) struct Context {
     /// Whether the deletions are sent in batches of `DeleteObjects`, which is
     /// disabled when the endpoint does not support it.
     pub(super) batch_delete: AtomicBool,
+    /// Whether the deletions are sent with `If-Match`, which is disabled when
+    /// the endpoint does not support it.
+    pub(super) conditional_delete: AtomicBool,
 }
 
 impl Context {

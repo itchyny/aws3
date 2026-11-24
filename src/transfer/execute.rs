@@ -283,19 +283,24 @@ fn has_link_in_dest_path(root: &str, dest: &str) -> bool {
 
 async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outcome, String> {
     let is_stream = ctx.plan.is_stream;
-    let outcome = match task.operation {
+    // The ETag of the object transferred, which pins the deletion of the
+    // source of a move.
+    let (outcome, etag) = match task.operation {
         Operation::Upload => {
             let (bucket, key) = split_bucket_key(&task.dest);
             if is_stream {
-                upload::upload_stdin(ctx, id, bucket, key).await?
+                (upload::upload_stdin(ctx, id, bucket, key).await?, None)
             } else {
-                upload::upload_file(ctx, id, &task.src, bucket, key).await?
+                (
+                    upload::upload_file(ctx, id, &task.src, bucket, key).await?,
+                    None,
+                )
             }
         }
         Operation::Download => {
             let (bucket, key) = split_bucket_key(&task.src);
             if is_stream {
-                download::download_stdout(ctx, id, bucket, key).await?
+                (download::download_stdout(ctx, id, bucket, key).await?, None)
             } else {
                 download::download_file(
                     ctx,
@@ -334,13 +339,16 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
         }
         Operation::Delete => {
             let (bucket, key) = split_bucket_key(&task.src);
-            delete_object(ctx, &ctx.client, bucket, key).await?
+            (
+                delete_object(ctx, &ctx.client, bucket, key, None).await?,
+                None,
+            )
         }
         Operation::LocalDelete => {
             tokio::fs::remove_file(&task.src)
                 .await
                 .map_err(|err| err.to_string())?;
-            Outcome::Done
+            (Outcome::Done, None)
         }
     };
     if ctx.is_move() && outcome == Outcome::Done {
@@ -351,8 +359,11 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
                     .map_err(|err| err.to_string())?;
             }
             Operation::Download | Operation::Copy => {
+                // The source is deleted only if it is the object transferred,
+                // so that a new object written to the source during the move
+                // is kept.
                 let (bucket, key) = split_bucket_key(&task.src);
-                delete_object(ctx, &ctx.source_client, bucket, key).await?;
+                delete_object(ctx, &ctx.source_client, bucket, key, etag.as_deref()).await?;
             }
             _ => {}
         }

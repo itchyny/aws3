@@ -216,3 +216,162 @@ fn mv_validate_same_s3_paths() {
     );
     assert!(env.object_content("bucket", "a.txt").is_some());
 }
+
+#[test]
+fn mv_conditional_delete() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "dir/a.txt", "a");
+    env.object("bucket", "dir/b.txt", "b");
+    // The sources are copied and deleted only if they have the ETags of the
+    // listing.
+    let result = env
+        .run(&[
+            "mv",
+            "s3://bucket/dir/",
+            "s3://bucket/moved/",
+            "--recursive",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(result.lines().len(), 2, "{}", result.stdout);
+    let requests = env.requests();
+    let copies: Vec<_> = requests
+        .iter()
+        .filter(|request| !request.header("x-amz-copy-source").is_empty())
+        .collect();
+    assert_eq!(copies.len(), 2);
+    assert!(copies.iter().all(|request| {
+        request
+            .header("x-amz-copy-source-if-match")
+            .starts_with('"')
+    }));
+    let deletes: Vec<_> = requests
+        .iter()
+        .filter(|request| request.method == http::Method::DELETE)
+        .collect();
+    assert_eq!(deletes.len(), 2);
+    assert!(
+        deletes
+            .iter()
+            .all(|request| request.header("if-match").starts_with('"'))
+    );
+
+    // The copies of cp are not pinned.
+    let start = env.requests().len();
+    env.run(&[
+        "cp",
+        "s3://bucket/moved/a.txt",
+        "s3://bucket/copied.txt",
+        "--no-progress",
+    ])
+    .success();
+    let requests = env.requests();
+    assert!(
+        requests[start..]
+            .iter()
+            .all(|request| request.header("x-amz-copy-source-if-match").is_empty())
+    );
+}
+
+#[test]
+fn mv_source_modified() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    // The source modified after the copy fails the deletion, and is kept.
+    env.intercept(|request| {
+        (request.method == http::Method::DELETE && !request.header("if-match").is_empty()).then(|| {
+            common::xml_response(
+                412,
+                "<Error><Code>PreconditionFailed</Code>\
+                 <Message>At least one of the pre-conditions you specified did not hold</Message></Error>",
+            )
+        })
+    });
+    let result = env.run(&[
+        "mv",
+        "s3://bucket/a.txt",
+        "s3://bucket/b.txt",
+        "--no-progress",
+    ]);
+    assert_eq!(result.code, 1);
+    assert_eq!(
+        result.stderr,
+        "move failed: s3://bucket/a.txt to s3://bucket/b.txt \
+         Contents of stored object \"a.txt\" in bucket \"bucket\" did not match expected ETag.\n"
+    );
+    assert_eq!(env.object_content("bucket", "a.txt").unwrap(), b"a");
+    assert_eq!(env.object_content("bucket", "b.txt").unwrap(), b"a");
+}
+
+#[test]
+fn mv_conditional_delete_not_implemented() {
+    let env = Env::new();
+    env.bucket("bucket");
+    for key in ["a.txt", "b.txt", "c.txt"] {
+        env.object("bucket", &format!("dir/{key}"), key);
+    }
+    // The storage not supporting the conditional deletions deletes without
+    // the condition, which is not sent anymore.
+    env.intercept(|request| {
+        (request.method == http::Method::DELETE && !request.header("if-match").is_empty()).then(|| {
+            common::xml_response(
+                501,
+                "<Error><Code>NotImplemented</Code>\
+                 <Message>A header you provided implies functionality that is not implemented</Message></Error>",
+            )
+        })
+    });
+    let result = env
+        .run(&[
+            "mv",
+            "s3://bucket/dir/",
+            "s3://bucket/moved/",
+            "--recursive",
+            "--no-progress",
+        ])
+        .success();
+    assert_eq!(result.lines().len(), 3, "{}", result.stdout);
+    for key in ["a.txt", "b.txt", "c.txt"] {
+        assert_eq!(env.object_content("bucket", &format!("dir/{key}")), None);
+        assert_eq!(
+            env.object_content("bucket", &format!("moved/{key}"))
+                .unwrap(),
+            key.as_bytes()
+        );
+    }
+    let conditional = env
+        .requests()
+        .iter()
+        .filter(|request| {
+            request.method == http::Method::DELETE && !request.header("if-match").is_empty()
+        })
+        .count();
+    // The concurrent deletions may send the condition before it is disabled.
+    assert!((1..=3).contains(&conditional), "{conditional}");
+}
+
+#[test]
+fn mv_download_pinned() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "a");
+    env.run(&["mv", "s3://bucket/a.txt", "a.txt", "--no-progress"])
+        .success();
+    assert_eq!(env.read("a.txt"), b"a");
+    let requests = env.requests();
+    let get = requests
+        .iter()
+        .find(|request| {
+            request.method == http::Method::GET && request.uri.path() == "/bucket/a.txt"
+        })
+        .unwrap();
+    assert!(get.header("if-match").starts_with('"'));
+    assert!(
+        requests
+            .iter()
+            .any(|request| request.method == http::Method::DELETE
+                && request.header("if-match") == get.header("if-match"))
+    );
+}

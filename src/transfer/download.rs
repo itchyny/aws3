@@ -55,7 +55,8 @@ impl ChunkedProgress {
 }
 
 /// Downloads the object to the local file, which is written to a temporary
-/// file in the same directory and renamed on completion.
+/// file in the same directory and renamed on completion, and returns the
+/// outcome with the ETag of the object downloaded.
 #[expect(clippy::too_many_arguments, reason = "the properties of the transfer")]
 pub async fn download_file(
     ctx: &Arc<Context>,
@@ -66,7 +67,7 @@ pub async fn download_file(
     size: u64,
     last_modified: Option<SystemTime>,
     object: Option<&ObjectProps>,
-) -> Result<Outcome, String> {
+) -> Result<(Outcome, Option<String>), String> {
     validate_bucket_name(bucket)?;
     let etag = object.and_then(|object| object.etag.as_deref());
     // The full object checksum of a single object is validated on multipart
@@ -94,8 +95,12 @@ pub async fn download_file(
     // The temporary file is removed on failures and cancellation.
     let temp_file = TempFile(Some(temp_path.clone()));
     if size < ctx.config.multipart_threshold {
-        download_whole(ctx, id, bucket, key, &temp_path).await?;
+        // The object of a move is pinned by the ETag, as the source is deleted
+        // only if it has the ETag.
+        let pinned = etag.clone().filter(|_| ctx.is_move());
+        download_whole(ctx, id, bucket, key, &temp_path, pinned).await?;
     } else {
+        let etag = etag.clone();
         download_ranges(ctx, id, bucket, key, &temp_path, size, etag, checksum).await?;
     }
     if let Some(time) = last_modified
@@ -115,12 +120,12 @@ pub async fn download_file(
     match result {
         Ok(()) => {}
         Err(err) if ctx.options.no_overwrite && err.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Ok(Outcome::Skipped);
+            return Ok((Outcome::Skipped, etag));
         }
         Err(err) => return Err(err.to_string()),
     }
     temp_file.keep();
-    Ok(Outcome::Done)
+    Ok((Outcome::Done, etag))
 }
 
 /// Removes the temporary file when dropped, unless it is kept.
@@ -178,8 +183,9 @@ async fn download_whole(
     bucket: &str,
     key: &str,
     path: &str,
+    etag: Option<String>,
 ) -> Result<(), String> {
-    let (mut output, _permit) = get_object(ctx, bucket, key, None, None).await?;
+    let (mut output, _permit) = get_object(ctx, bucket, key, None, etag).await?;
     let mut file = tokio::fs::File::create(path)
         .await
         .map_err(|err| err.to_string())?;

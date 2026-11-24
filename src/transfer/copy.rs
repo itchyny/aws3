@@ -81,7 +81,8 @@ fn parse_http_date(value: Option<&str>) -> Option<aws_sdk_s3::primitives::DateTi
 const MAX_TAGGING_HEADER_SIZE: usize = 2 * 1024;
 
 /// Copies the object to the object, following the copy props option in the
-/// same way as the AWS CLI.
+/// same way as the AWS CLI, and returns the outcome with the ETag of the
+/// object copied.
 #[expect(clippy::too_many_arguments, reason = "the properties of the transfer")]
 pub async fn copy_object(
     ctx: &Arc<Context>,
@@ -92,7 +93,7 @@ pub async fn copy_object(
     key: &str,
     size: u64,
     object: Option<&ObjectProps>,
-) -> Result<Outcome, String> {
+) -> Result<(Outcome, Option<String>), String> {
     validate_bucket_name(bucket)?;
     let mut head = object.and_then(|object| object.head.as_deref());
     let mut size = size;
@@ -107,11 +108,19 @@ pub async fn copy_object(
         head = Some(&fetched);
     }
     if size < ctx.config.multipart_threshold {
-        let outcome = copy_single(ctx, src_bucket, src_key, bucket, key, head).await?;
+        // The object of a move is pinned by the ETag, as the source is deleted
+        // only if it has the ETag.
+        let pinned = etag.clone().filter(|_| ctx.is_move());
+        let outcome = copy_single(ctx, src_bucket, src_key, bucket, key, head, pinned).await?;
         ctx.progress(id, size);
-        Ok(outcome)
+        Ok((outcome, etag))
     } else {
-        copy_multipart(ctx, id, src_bucket, src_key, bucket, key, size, head, etag).await
+        let pinned = etag.clone();
+        copy_multipart(
+            ctx, id, src_bucket, src_key, bucket, key, size, head, pinned,
+        )
+        .await
+        .map(|outcome| (outcome, etag))
     }
 }
 
@@ -130,6 +139,7 @@ async fn copy_single(
     bucket: &str,
     key: &str,
     head: Option<&HeadObjectOutput>,
+    etag: Option<String>,
 ) -> Result<Outcome, String> {
     let params = &ctx.params;
     let mut metadata_directive = params.metadata_directive.clone();
@@ -174,7 +184,8 @@ async fn copy_single(
                 .set_tagging_directive(tagging_directive.clone())
                 .set_annotation_directive(annotation_directive.clone())
                 .set_checksum_algorithm(params.checksum_algorithm.clone())
-                .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()));
+                .set_if_none_match(params.no_overwrite.then(|| "*".to_owned()))
+                .set_copy_source_if_match(etag.clone());
             let request = set_sse_c!(request, &params.sse_c);
             let mut request = set_copy_source_sse_c!(request, &params.sse_c_copy_source);
             if let Some(head) = &inject {
@@ -185,8 +196,13 @@ async fn copy_single(
         .await;
     match result {
         Ok(_) => Ok(Outcome::Done),
+        // The precondition of the existing destination skips the copy, which
+        // is not distinguished from that of the modified source.
         Err(err) if params.no_overwrite && has_error_code(&err, "PreconditionFailed") => {
             Ok(Outcome::Skipped)
+        }
+        Err(err) if etag.is_some() && has_error_code(&err, "PreconditionFailed") => {
+            Err(etag_mismatch(src_bucket, src_key))
         }
         Err(err) => Err(Error::sdk("CopyObject", err).to_string()),
     }
@@ -298,7 +314,9 @@ async fn copy_multipart(
             })
             .await;
         if let Err(err) = result {
-            let _ = delete_object(ctx, &ctx.client, bucket, key).await;
+            // The object completed is deleted, but not an object written to
+            // the destination since.
+            let _ = delete_object(ctx, &ctx.client, bucket, key, output.e_tag()).await;
             return Err(Error::sdk("PutObjectTagging", err).to_string());
         }
     }
