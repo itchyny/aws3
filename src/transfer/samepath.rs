@@ -41,11 +41,12 @@ pub async fn validate(
     source_region: Option<&str>,
     src: &str,
     dest: &str,
+    dir_op: bool,
     enabled: bool,
 ) -> Result<(), Error> {
     let (_, src_key) = split_bucket_key(src);
     let (_, dest_key) = split_bucket_key(dest);
-    if !is_same_path(&format!("/{src_key}"), &format!("/{dest_key}")) {
+    if !is_same_path(&format!("/{src_key}"), &format!("/{dest_key}"), dir_op) {
         return Ok(());
     }
     if !enabled {
@@ -67,7 +68,7 @@ pub async fn validate(
     let dest_paths = Resolver::new(config, global, None).resolve(dest).await?;
     for src_path in &src_paths {
         for dest_path in &dest_paths {
-            if is_same_path(src_path, dest_path) {
+            if is_same_path(src_path, dest_path, dir_op) {
                 return Err(Error::param_validation(format!(
                     "Cannot mv a file onto itself: {src} - {dest}"
                 )));

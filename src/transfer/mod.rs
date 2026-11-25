@@ -54,7 +54,16 @@ pub async fn run(
     if options.command == CommandName::Mv && plan.paths_type == PathsType::S3S3 {
         let region = options.source_region.as_deref();
         let enabled = options.validate_same_s3_paths || samepath::enabled_by_env();
-        samepath::validate(&sdk_config, global, region, &plan.src, &plan.dest, enabled).await?;
+        samepath::validate(
+            &sdk_config,
+            global,
+            region,
+            &plan.src,
+            &plan.dest,
+            options.dir_op,
+            enabled,
+        )
+        .await?;
     }
     // The keys of directory buckets are not listed in order, where the case
     // conflicts cannot be detected like the AWS CLI.

@@ -326,8 +326,8 @@ async fn execute(ctx: &Arc<Context>, id: TransferId, task: &Task) -> Result<Outc
         Operation::Copy => {
             // The move of an object onto itself deletes it after the copy,
             // which succeeds when the object is changed, e.g. by the storage
-            // class, and the same object is not always detected from the
-            // paths, e.g. `mv s3://bucket/dir s3://bucket/dir/ --recursive`.
+            // class. This guards the objects which the validation of the
+            // paths fails to detect.
             if ctx.is_move() && task.src == task.dest {
                 return Err("Cannot mv a file onto itself".to_owned());
             }

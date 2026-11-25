@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{Env, content};
+use common::Env;
 
 #[test]
 fn mv_upload_and_download() {
@@ -63,76 +63,37 @@ fn mv_onto_itself() {
 }
 
 #[test]
-fn mv_onto_itself_multipart() {
-    let env = Env::new();
-    env.bucket("bucket");
-    let data = content(6 * 1024 * 1024);
-    env.object("bucket", "dir/big.bin", &data);
-    let config = env.multipart_config();
-    let envs: Vec<_> = config
-        .iter()
-        .map(|(key, value)| (*key, value.as_str()))
-        .collect();
-    // The multipart copy onto itself succeeds on S3 even without changing the
-    // object, which would delete it after the copy. The properties are not
-    // copied, which are not supported by the server of the tests.
-    let result = env.run_with_env(
-        &[
-            "mv",
-            "s3://bucket/dir",
-            "s3://bucket/dir/",
-            "--recursive",
-            "--copy-props",
-            "none",
-            "--no-progress",
-        ],
-        &envs,
-    );
-    assert_eq!(result.code, 1);
-    assert_eq!(result.stdout, "");
-    assert_eq!(
-        result.stderr,
-        "move failed: s3://bucket/dir/big.bin to s3://bucket/dir/big.bin \
-         Cannot mv a file onto itself\n"
-    );
-    assert_eq!(env.object_content("bucket", "dir/big.bin").unwrap(), data);
-    assert!(
-        env.requests()
-            .iter()
-            .all(|request| request.header("x-amz-copy-source").is_empty())
-    );
-}
-
-#[test]
 fn mv_onto_itself_recursive() {
     let env = Env::new();
     env.bucket("bucket");
     env.object("bucket", "dir/a.txt", "a");
-    env.object("bucket", "dir/b.txt", "b");
-    // The paths differ, but each object is moved onto itself, which would
-    // delete it after the copy changing the storage class.
-    let result = env.run(&[
-        "mv",
-        "s3://bucket/dir",
-        "s3://bucket/dir/",
-        "--recursive",
-        "--storage-class",
-        "STANDARD_IA",
-        "--no-progress",
-    ]);
-    assert_eq!(result.code, 1);
-    assert_eq!(result.stdout, "");
-    let mut errors: Vec<_> = result.stderr.lines().collect();
-    errors.sort_unstable();
-    assert_eq!(
-        errors,
-        ["a.txt", "b.txt"].map(|key| format!(
-            "move failed: s3://bucket/dir/{key} to s3://bucket/dir/{key} \
-             Cannot mv a file onto itself"
-        ))
-    );
+    env.object("bucket", "file", "file");
+    // The recursive paths with and without the trailing slash are the same
+    // prefix, which would delete each object after copying it onto itself.
+    for (src, dest) in [
+        ("s3://bucket/dir", "s3://bucket/dir/"),
+        ("s3://bucket/dir/", "s3://bucket/dir"),
+    ] {
+        let result = env.run(&["mv", src, dest, "--recursive"]);
+        assert_eq!(result.code, 252);
+        assert!(
+            result
+                .stderr
+                .contains(&format!("Cannot mv a file onto itself: {src} - {dest}")),
+            "{}",
+            result.stderr
+        );
+    }
+    assert!(env.requests().is_empty());
     assert_eq!(env.object_content("bucket", "dir/a.txt").unwrap(), b"a");
-    assert_eq!(env.object_content("bucket", "dir/b.txt").unwrap(), b"b");
+    // The non-recursive move puts the object under the prefix.
+    let result = env
+        .run(&["mv", "s3://bucket/file", "s3://bucket/file/", "--dryrun"])
+        .success();
+    assert_eq!(
+        result.stdout,
+        "(dryrun) move: s3://bucket/file to s3://bucket/file/file\n"
+    );
 }
 
 #[test]
@@ -346,6 +307,19 @@ fn mv_validate_same_s3_paths_resolved() {
         .filter(|request| request.uri.path() == "/v20180820/mrap/instances")
         .count();
     assert_eq!(mrap, 2);
+
+    // The recursive paths resolved to the same prefix are rejected.
+    let access_point = "s3://arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/dir/";
+    let args = ["--recursive", "--validate-same-s3-paths"];
+    let result = run("s3://bucket/dir", access_point, &args, &[]);
+    assert_eq!(result.code, 252, "{}", result.stderr);
+    assert!(
+        result.stderr.contains(&format!(
+            "Cannot mv a file onto itself: s3://bucket/dir - {access_point}"
+        )),
+        "{}",
+        result.stderr
+    );
 
     // The paths resolved to other buckets are moved.
     let other = "s3://arn:aws:s3:us-east-1:123456789012:accesspoint/other-ap/a.txt";

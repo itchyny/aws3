@@ -78,7 +78,9 @@ impl Plan {
                 "--no-overwrite parameter is not supported for streaming downloads",
             ));
         }
-        if command == CommandName::Mv && paths_type == PathsType::S3S3 && is_same_path(&src, &dest)
+        if command == CommandName::Mv
+            && paths_type == PathsType::S3S3
+            && is_same_path(&src, &dest, options.dir_op)
         {
             return Err(Error::param_validation(format!(
                 "Cannot mv a file onto itself: {src} - {dest}"
@@ -174,9 +176,11 @@ fn check_paths_type(
     )))
 }
 
-/// Returns whether moving the source to the destination is a no-op.
-pub(super) fn is_same_path(src: &str, dest: &str) -> bool {
+/// Returns whether moving the source to the destination is a no-op. The
+/// recursive paths with and without the trailing slash are the same prefix.
+pub(super) fn is_same_path(src: &str, dest: &str, dir_op: bool) -> bool {
     src == dest
+        || dir_op && src.strip_suffix('/').unwrap_or(src) == dest.strip_suffix('/').unwrap_or(dest)
         || dest.ends_with('/')
             && src == format!("{dest}{}", src.rsplit('/').next().unwrap_or_default())
 }
