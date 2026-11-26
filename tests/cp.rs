@@ -1123,6 +1123,35 @@ fn cp_download_parent_not_directory() {
 }
 
 #[test]
+fn cp_download_failure_keeps_file() {
+    let env = Env::new();
+    env.bucket("bucket");
+    env.object("bucket", "a.txt", "new");
+    env.write("out/a.txt", "old");
+    env.intercept(|request| {
+        (request.method == http::Method::GET && request.uri.path() == "/bucket/a.txt").then(|| {
+            common::xml_response(
+                500,
+                "<Error><Code>InternalError</Code><Message>We encountered an internal error.</Message></Error>",
+            )
+        })
+    });
+    // The failed download leaves neither the partial file nor a temporary file.
+    let args = ["cp", "s3://bucket/a.txt", "out/a.txt", "--no-progress"];
+    let result = env.run_with_env(&args, &[("AWS_MAX_ATTEMPTS", "2")]);
+    assert_eq!(result.code, 1);
+    assert!(
+        result
+            .stderr
+            .starts_with("download failed: s3://bucket/a.txt to out/a.txt "),
+        "{}",
+        result.stderr
+    );
+    assert_eq!(env.read("out/a.txt"), b"old");
+    assert_eq!(std::fs::read_dir(env.path("out")).unwrap().count(), 1);
+}
+
+#[test]
 fn cp_multipart_upload_complete_failure() {
     let env = Env::new();
     env.bucket("bucket");

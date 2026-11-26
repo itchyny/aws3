@@ -176,6 +176,72 @@ fn sync_s3_to_s3() {
 }
 
 #[test]
+fn sync_special_characters() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let names = [
+        "a b.txt",
+        "a\u{a0}b.txt",
+        "a\u{202f}b.txt",
+        "a#b.txt",
+        "a+b.txt",
+    ];
+    for name in names {
+        env.write(&format!("src/{name}"), name);
+    }
+    // The names are synced in every direction, and nothing is synced again.
+    for (src, dest) in [
+        ("src", "s3://bucket/up"),
+        ("s3://bucket/up", "down"),
+        ("s3://bucket/up", "s3://bucket/copy"),
+    ] {
+        let result = env.run(&["sync", src, dest, "--no-progress"]).success();
+        assert_eq!(result.lines().len(), names.len(), "{}", result.stdout);
+        let args = ["sync", src, dest, "--delete", "--no-progress"];
+        let result = env.run(&args).success();
+        assert_eq!(result.stdout, "", "{src} to {dest}");
+    }
+    for name in names {
+        assert_eq!(env.read(&format!("down/{name}")), name.as_bytes());
+        assert_eq!(
+            env.object_content("bucket", &format!("copy/{name}"))
+                .unwrap(),
+            name.as_bytes()
+        );
+    }
+}
+
+// The file systems of macOS reject the names which are not valid UTF-8.
+#[cfg(target_os = "linux")]
+#[test]
+fn sync_invalid_utf8_name() {
+    use std::os::unix::ffi::OsStrExt;
+    let env = Env::new();
+    env.bucket("bucket");
+    env.write("src/a.txt", "a");
+    env.write("src/c.txt", "c");
+    let name = std::ffi::OsStr::from_bytes(b"b\xe9.txt");
+    std::fs::write(env.path("src").join(name), "b").unwrap();
+    // The file is skipped with the warning, and the others are synced.
+    let result = env.run(&["sync", "src", "s3://bucket/dir", "--no-progress"]);
+    assert_eq!(result.code, 2);
+    assert_eq!(
+        result.sorted_lines(),
+        [
+            "upload: src/a.txt to s3://bucket/dir/a.txt",
+            "upload: src/c.txt to s3://bucket/dir/c.txt",
+        ]
+    );
+    assert!(
+        result.stderr.starts_with(
+            "warning: Skipping file \"b\\xE9.txt\". There was an error trying to decode"
+        ),
+        "{}",
+        result.stderr
+    );
+}
+
+#[test]
 fn sync_exact_timestamps() {
     let env = Env::new();
     env.bucket("bucket");

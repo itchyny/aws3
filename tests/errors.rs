@@ -146,6 +146,60 @@ fn retried_errors() {
 }
 
 #[test]
+fn retried_upload_parts() {
+    let env = Env::new();
+    env.bucket("bucket");
+    let data = common::content(12 * 1024 * 1024 + 1);
+    env.write("big.bin", &data);
+    let config = env.config(
+        r"[default]
+s3 =
+  multipart_threshold = 5MB
+  multipart_chunksize = 5MB
+  max_bandwidth = 200MB/s
+",
+    );
+    let envs = [("AWS_CONFIG_FILE", config.to_str().unwrap())];
+    // The first attempt of every part fails, and the retries are signed again
+    // with the bodies read again, whose signatures the server verifies.
+    let attempted = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    env.intercept(move |request| {
+        let query = request.uri.query()?;
+        (request.method == http::Method::PUT
+            && request.has_query("uploadId")
+            && attempted.lock().unwrap().insert(query.to_owned()))
+        .then(|| {
+            common::xml_response(
+                503,
+                "<Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>",
+            )
+        })
+    });
+    let parts = |start: usize| {
+        env.requests()[start..]
+            .iter()
+            .filter(|request| request.method == http::Method::PUT && request.has_query("uploadId"))
+            .count()
+    };
+    let start = env.requests().len();
+    let args = ["cp", "big.bin", "s3://bucket/file.bin", "--no-progress"];
+    env.run_with_env(&args, &envs).success();
+    assert_eq!(parts(start), 6);
+    assert_eq!(env.object_content("bucket", "file.bin").unwrap(), data);
+
+    let start = env.requests().len();
+    let mut command = env.command(&["cp", "-", "s3://bucket/stdin.bin"]);
+    command.envs(envs).stdin(std::process::Stdio::piped());
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), &data).unwrap();
+    common::Result::new(child.wait_with_output().unwrap()).success();
+    assert_eq!(parts(start), 6);
+    assert_eq!(env.object_content("bucket", "stdin.bin").unwrap(), data);
+}
+
+#[test]
 fn region_redirect() {
     let env = Env::new();
     env.bucket("far");
