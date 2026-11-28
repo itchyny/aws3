@@ -135,9 +135,10 @@ COPY --from=ghcr.io/itchyny/aws3 /aws3 /usr/local/bin/aws3
 
 ## Benchmark
 
-The commands were run against S3 in `ap-northeast-1` over HTTPS from a home
-network, on Apple M4 (10 cores, 24 GiB) with macOS 27.2. The tools are AWS CLI
-2.40.3, s5cmd 2.3.0, s7cmd 1.8.7 and aws3 0.4.0, with the default settings of
+The commands were run against S3 in `ap-northeast-1` over HTTPS from an EC2
+instance of c8g.2xlarge (Graviton4, 8 vCPUs, 16 GiB) in the same region, with
+Amazon Linux 2023 and the files on a memory file system. The tools are AWS CLI
+2.42.5, s5cmd 2.3.0, s7cmd 1.9.0 and aws3 0.5.0, with the default settings of
 each tool, and with the same concurrency of 10 and 64. The results are the
 means of five runs, or three runs for the files of 256 MiB, where the tools run
 in turns so that the changes of the network affect every tool evenly.
@@ -152,25 +153,26 @@ section for `aws s3` and aws3, `--numworkers` and `--concurrency` for s5cmd, and
 8 MiB.
 
 The listing of objects does not depend on the concurrency. aws3 lists 10000
-objects about 1.5 times faster than `aws s3`, as fast as the other tools, with
-the least CPU time and memory of all, which are a fifth of `aws s3`.
+objects about 2.7 times faster than `aws s3` and a little faster than the other
+tools, with the least CPU time and memory of all, which are about a tenth of
+`aws s3`.
 
-With the default settings, aws3 transfers many small files four to five times
-faster than `aws s3`, as fast as s5cmd for downloads and a little slower for
-uploads, with about half the memory of `aws s3` and s5cmd. s7cmd is slower with
-its concurrency of 16, and uses about 200 MiB of memory. With the same
+With the default settings, aws3 transfers many small files five to six times
+faster than `aws s3`, a little slower than s5cmd with its 256 files at once,
+with about half the memory of s5cmd and a third of `aws s3`. s7cmd is slower
+with its concurrency of 16, and uses about 175 MiB of memory. With the same
 concurrency of 10, the transfers of many small files take about the same time
-with every tool, where aws3 uses the least CPU time and memory, with a third of
-the CPU time of `aws s3` for uploads. With the concurrency of 64, aws3 and s5cmd
-transfer them four to five times faster than `aws s3`, which does not get
-faster.
+with every tool, where aws3 and s5cmd use the least CPU time, under a third of
+`aws s3`. With the concurrency of 64, aws3 and s5cmd transfer them five to six
+times faster than `aws s3`, which does not get faster.
 
-The transfers of large files are limited by the bandwidth of the network, where
-aws3 uses the least CPU time with the default settings, and a fifth to a third
-of the memory of `aws s3`. aws3, s5cmd and s7cmd transfer large files slower
-with 64 concurrent parts than with 10 and use more memory, so aws3 transfers up
-to 64 files but up to 10 parts by default. s7cmd uses about 500 MiB of memory
-for a file of 256 MiB with the concurrency of 64.
+aws3 downloads a file of 256 MiB in about 0.4 seconds with every setting, two
+and a half to three times faster than the other tools with the default
+settings, while s5cmd is a little faster with the concurrency of 64. aws3
+uploads it about 1.6 times faster than `aws s3` with the default settings, as
+fast as s7cmd, while s5cmd uploads it faster with the same concurrency and less
+CPU time. aws3 uses 19 to 54 MiB of memory for a file of 256 MiB, a tenth to a
+third of `aws s3`, and s7cmd uses 320 to 340 MiB with the concurrency of 64.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wiki/itchyny/aws3/benchmark-dark.svg">
@@ -179,13 +181,13 @@ for a file of 256 MiB with the concurrency of 64.
 
 ## Binary size
 
-aws3 is a single binary of about 11 MiB on Linux, while the installer of the
-AWS CLI bundles the Python runtime and the models of all the AWS services in a
+aws3 is a single binary of about 11 MiB on Linux, while the installer of the AWS
+CLI bundles the Python runtime and the models of all the AWS services in a
 directory of about 250 MiB. The archive of aws3 is about 15 times smaller to
 download than the AWS CLI, and the installed size is 22 to 24 times smaller.
 aws3 is also the smallest of the single binaries, about 65% of s5cmd and 40% of
-s7cmd. The sizes are of the releases for Linux of AWS CLI 2.40.4, s5cmd 2.3.0,
-s7cmd 1.8.7 (glibc) and aws3 0.4.0.
+s7cmd. The sizes are of the releases for Linux of AWS CLI 2.42.5, s5cmd 2.3.0,
+s7cmd 1.9.0 (glibc) and aws3 0.5.0.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wiki/itchyny/aws3/size-dark.svg">
