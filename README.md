@@ -93,6 +93,11 @@ brew install itchyny/tap/aws3
 Download the archive for your platform from the
 [releases page](https://github.com/itchyny/aws3/releases).
 
+On Linux, the `gnu` archives are linked with glibc, and the `musl` archives are
+statically linked to run on any distribution, such as Alpine Linux. Prefer the
+`gnu` archives where glibc is available, since the memory allocator of musl uses
+more CPU time on large transfers.
+
 ### Using cargo-binstall
 
 With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall), the
@@ -123,11 +128,11 @@ The images for `linux/amd64` and `linux/arm64` are published to the
 docker run --rm -v ~/.aws:/root/.aws ghcr.io/itchyny/aws3 ls s3://bucket/
 ```
 
-The image is based on `distroless/static` and runs as `root` in `/aws`, in the
-same way as the image of the AWS CLI. Mount the AWS configuration directory to
-`/root/.aws`, or pass the credentials with the environment variables such as
-`AWS_ACCESS_KEY_ID`, and mount the local files to `/aws`. To add the command to
-another image:
+The image is based on `distroless/static` with the statically linked binary of
+musl, and runs as `root` in `/aws`, in the same way as the image of the AWS CLI.
+Mount the AWS configuration directory to `/root/.aws`, or pass the credentials
+with the environment variables such as `AWS_ACCESS_KEY_ID`, and mount the local
+files to `/aws`. To add the command to another image:
 
 ```dockerfile
 COPY --from=ghcr.io/itchyny/aws3 /aws3 /usr/local/bin/aws3
