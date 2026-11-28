@@ -10,6 +10,7 @@ use tokio::sync::{Semaphore, SemaphorePermit, watch};
 use tokio::task::JoinHandle;
 
 use super::bandwidth;
+use super::delete::DeleteRate;
 use super::options::{CommandName, Options};
 use super::params::RequestParams;
 use super::plan::Plan;
@@ -41,6 +42,10 @@ pub(super) struct Context {
     /// Whether the deletions are sent in batches of `DeleteObjects`, which is
     /// disabled when the endpoint does not support it.
     pub(super) batch_delete: AtomicBool,
+    /// The slots of the batches of `DeleteObjects` sent at once, whose number
+    /// follows the throttling by [`DeleteRate`].
+    pub(super) delete_slots: Semaphore,
+    pub(super) delete_rate: Mutex<DeleteRate>,
     /// Whether the deletions are sent with `If-Match`, which is disabled when
     /// the endpoint does not support it.
     pub(super) conditional_delete: AtomicBool,

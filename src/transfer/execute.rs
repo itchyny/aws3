@@ -7,7 +7,7 @@ use std::sync::{Arc, PoisonError};
 use tokio::task::JoinSet;
 
 use super::context::Context;
-use super::delete::{self, Deletion, MAX_BATCH_SIZE, delete_object};
+use super::delete::{self, Deletion, delete_object};
 use super::generator::{ObjectProps, skip_warning};
 use super::options::CommandName;
 use super::paths::{self, relative_path};
@@ -91,7 +91,7 @@ impl Submitter {
                 self.deletion_bucket = bucket.to_owned();
             }
             self.deletions.push(Deletion { id, path: task.src });
-            if self.deletions.len() >= MAX_BATCH_SIZE {
+            if self.deletions.len() >= delete::MAX_BATCH_SIZE {
                 self.flush_deletions();
             }
             return;

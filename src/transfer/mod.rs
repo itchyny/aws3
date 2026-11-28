@@ -34,6 +34,7 @@ use crate::error::Error;
 use crate::path::{is_s3express_bucket, split_bucket_key};
 use crate::redirect::Redirector;
 use context::Context;
+use delete::DeleteRate;
 use execute::Submitter;
 use generator::Item;
 pub use options::{CommandName, Options};
@@ -124,14 +125,15 @@ pub async fn run(
     let limiter = config
         .max_bandwidth
         .map(|rate| Arc::new(bandwidth::Limiter::new(rate)));
+    let concurrency = config.max_concurrent_requests;
     let ctx = Arc::new(Context {
         client,
         source_client,
         params,
-        requests: Semaphore::new(config.max_concurrent_requests),
-        config,
         options,
         plan,
+        config,
+        requests: Semaphore::new(concurrency),
         printer: Mutex::new(printer),
         next_id: AtomicU64::new(0),
         cancel: watch::Sender::new(false),
@@ -139,6 +141,8 @@ pub async fn run(
         limiter,
         redirector: Redirector::default(),
         batch_delete: AtomicBool::new(true),
+        delete_slots: Semaphore::new(concurrency.min(delete::MAX_BATCHES)),
+        delete_rate: Mutex::new(DeleteRate::new(concurrency.min(delete::MAX_BATCHES))),
         conditional_delete: AtomicBool::new(true),
     });
     // The first Ctrl-C cancels the transfers, and the second one exits.
